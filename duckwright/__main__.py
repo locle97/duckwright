@@ -11,7 +11,7 @@ from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
-from duckwright.taskfile import TaskFile, TaskFileError, expand_task_paths, load_task_file
+from duckwright.taskfile import TaskFile, TaskFileError, load_task_file, task_paths
 
 DIST_NAME = "duckwright"
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -270,12 +270,10 @@ def main(argv=None) -> int:
     # Load every file before anything runs, so one bad file stops the whole batch.
     errors: list[str] = []
     runs: list[tuple[str, argparse.Namespace]] = []
-    try:
-        paths = expand_task_paths(args.file)
-    except TaskFileError as e:
-        errors.append(str(e))
-        paths = []
-    for path in paths:
+    for path in task_paths(args.file):
+        if isinstance(path, TaskFileError):
+            errors.append(str(path))
+            continue
         try:
             runs.append((path, _args_for(argv, load_task_file(path))))
         except TaskFileError as e:

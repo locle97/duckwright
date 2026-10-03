@@ -644,3 +644,26 @@ def test_empty_folder_exits_2(env, monkeypatch, capsys):
     assert m.main(argv[1:] + ["-f", "tasks"]) == 2
     assert capsys.readouterr().err == "tasks: no task files (.md or .txt)\n"
     assert not (tmp / "runs").exists()
+
+
+def test_batch_reports_folder_and_file_errors_in_order(env, monkeypatch, capsys):
+    tmp, argv = env
+    _task_file(tmp, "---\nfoo: 1\n---\nGo\n", "bad.md")
+    _task_file(tmp, "{}", "empty/auth.json")
+    _task_file(tmp, "{}", "none/auth.json")
+    _never(monkeypatch)
+    assert m.main(argv[1:] + ["-f", "bad.md", "empty/", "none"]) == 2
+    assert capsys.readouterr().err == (
+        'bad.md:2: unknown setting "foo"\n'
+        "empty/: no task files (.md or .txt)\n"
+        "none: no task files (.md or .txt)\n"
+    )
+    assert not (tmp / "runs").exists()
+
+
+def test_unstattable_file_is_a_one_line_error(env, monkeypatch, capsys):
+    tmp, argv = env
+    _never(monkeypatch)
+    assert m.main(argv[1:] + ["-f", "a" * 300]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("a" * 300 + ": cannot read: ") and "Traceback" not in err

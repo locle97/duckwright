@@ -71,7 +71,7 @@ The same file reached twice (same resolved path) runs once, at its first positio
 
 ## Components
 
-- **`duckwright/taskfile.py`:** `expand_task_paths(paths: list[str]) -> list[str]` implements **Expanding paths**, raising `TaskFileError` for the two folder errors.
+- **`duckwright/taskfile.py`:** `task_paths(paths: list[str]) -> list[str | TaskFileError]` implements **Expanding paths**, keeping each folder error in its command-line position; `expand_task_paths(paths) -> list[str]` is the same but raises the first folder error.
 - **`duckwright/__main__.py`:** the code from creating the run folder to the final return becomes `_run_one(args, task_file: str | None) -> tuple[int, Path]`. Per-file arguments come from a fresh parser per file, so settings never leak between files. The batch flow lives in `_run_batch`.
 - **README:** synopsis, the `-f` row, a "Batch runs" subsection under "Task files", and batch exit codes.
 

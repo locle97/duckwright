@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from duckwright.taskfile import TaskFileError, expand_task_paths, load_task_file
+from duckwright.taskfile import TaskFileError, expand_task_paths, load_task_file, task_paths
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -237,3 +237,26 @@ def test_expand_unreadable_folder_errors(tmp_path, monkeypatch):
     with pytest.raises(TaskFileError) as e:
         expand_task_paths([str(tmp_path / "tasks")])
     assert str(e.value) == f"{tmp_path / 'tasks'}: cannot read: denied"
+
+
+def test_expand_keeps_dot_slash_as_typed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _w(tmp_path / "tasks", "x", "a.md")
+    assert expand_task_paths(["./tasks/"]) == ["./tasks/a.md"]
+    assert expand_task_paths(["./tasks"]) == ["./tasks/a.md"]
+
+
+def test_expand_unstattable_path_is_left_for_loading(tmp_path):
+    long = str(tmp_path / ("a" * 300))
+    assert expand_task_paths([long]) == [long]
+    assert _err(long).startswith(f"{long}: cannot read: ")
+
+
+def test_task_paths_keeps_every_folder_error_in_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _w(tmp_path / "empty", "{}", "auth.json")
+    _w(tmp_path / "tasks", "x", "a.md")
+    out = task_paths(["empty", "x.md", "nope", "tasks"])
+    assert [str(p) if isinstance(p, TaskFileError) else p for p in out] == [
+        "empty: no task files (.md or .txt)", "x.md", "nope", "tasks/a.md",
+    ]
