@@ -155,7 +155,9 @@ class Brain:
             "--json-schema", json.dumps(DECISION_SCHEMA),
         ]
         for f in self.system_files:
-            argv += ["--append-system-prompt-file", str(f)]
+            # In grep mode claude runs inside snapshot_dir, so a relative path would miss.
+            path = f if self.snapshot_dir is None else Path(f).resolve()
+            argv += ["--append-system-prompt-file", str(path)]
         return argv
 
     def decide(self, prompt: str) -> tuple[Decision, float]:

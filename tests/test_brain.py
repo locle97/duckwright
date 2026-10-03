@@ -197,3 +197,12 @@ def test_explicit_timeout_wins_in_snapshot_mode():
     fake = FakeRunner(env())
     Brain([], runner=fake, timeout=30, snapshot_dir=Path("p")).decide("P")
     assert fake.calls[0][2] == 30
+
+
+def test_snapshot_mode_resolves_system_files(tmp_path, monkeypatch):
+    # claude runs inside snapshot_dir, so relative prompt paths must not be read from there.
+    monkeypatch.chdir(tmp_path)
+    fake = FakeRunner(env())
+    Brain([Path("skill.md")], runner=fake, snapshot_dir=Path("page")).decide("P")
+    argv = fake.calls[0][0]
+    assert argv[argv.index("--append-system-prompt-file") + 1] == str(tmp_path.resolve() / "skill.md")
