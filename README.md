@@ -40,6 +40,7 @@ History: runs/20261003-101500-123456/history.json
 - **Built-in safeguards**: actions after a page-changing command are skipped, a `done success` is refused if an earlier action in the same step failed, repeated actions trigger a "try something different" nudge, and the run stops after repeated brain failures.
 - **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
 - **Replayable as a test**: each action in `history.json` carries the Playwright code `playwright-cli` ran for it, ready to paste into a regression test.
+- **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
 - **No Python dependencies**: the runtime uses only the standard library. `pytest` is needed only for tests.
 
 ## Getting started
@@ -138,7 +139,7 @@ duckwright "Open https://app.example.com/settings and report my plan" --state au
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
 
 - `snapshot.yml`: the latest accessibility snapshot of the page
-- `history.json`: the task, the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated).
+- `history.json`: the task, the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 
 > [!CAUTION]
 > `code` contains whatever the agent typed, passwords included. Treat `history.json` like `auth.json`.
@@ -156,16 +157,19 @@ Each step's history line is printed as it happens, followed by the result, answe
 
 A successful run already contains the steps of a Node.js `@playwright/test` test, so you don't need to drive the agent again:
 
-1. Read `history.json` in step order and collect each action's `code`, skipping `null`. The code uses the semantic locators `playwright-cli` generates:
+1. Read `history.json` in step order and collect each action's `code`, skipping `null`. This gives you both the actions and the assertions the agent checked with `expect`. The code uses the semantic locators `playwright-cli` generates:
    ```js
-   await page.goto('https://example.com/form');
-   await page.getByRole('textbox', { name: 'Name' }).fill('Linh');
-   await page.getByRole('button', { name: 'Submit' }).click();
+   import { test, expect } from '@playwright/test';
+
+   test('greeting', async ({ page }) => {
+     await page.goto('https://example.com/form');
+     await page.getByRole('textbox', { name: 'Name' }).fill('Linh');
+     await page.getByRole('button', { name: 'Submit' }).click();
+     await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");
+   });
    ```
-2. Add assertions for the outcome the run reported in `answer`:
-   ```js
-   await expect(page.getByRole('heading')).toHaveText('Hello, Linh!');
-   ```
+   Expected values in recorded assertions are always written in double quotes; that is intended.
+2. Add any further assertions the agent did not record.
 3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 
 > [!IMPORTANT]
@@ -186,7 +190,7 @@ flowchart LR
 
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
 2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`duckwright/prompts/system.md`](https://github.com/locle97/duckwright/blob/main/duckwright/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
-3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
+3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `expect`, `done`) and their allowed flags, then run through `playwright-cli`. `expect` is handled by the harness: it gets a locator for the ref with `playwright-cli generate-locator`, reads the element's state, and compares it with the expected value. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
 The loop ends when the model sends a `done` action, when max steps is reached, or after 3 consecutive brain failures.
@@ -196,6 +200,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`loop.py`](https://github.com/locle97/duckwright/blob/main/duckwright/loop.py) | The agent loop, repeat detection, and failure handling |
 | [`brain.py`](https://github.com/locle97/duckwright/blob/main/duckwright/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
 | [`actions.py`](https://github.com/locle97/duckwright/blob/main/duckwright/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
+| [`expect.py`](https://github.com/locle97/duckwright/blob/main/duckwright/expect.py) | `expect` checks: verified against the live page and recorded as assertions |
 | [`observe.py`](https://github.com/locle97/duckwright/blob/main/duckwright/observe.py) | Tab list and page snapshot |
 | [`prompt.py`](https://github.com/locle97/duckwright/blob/main/duckwright/prompt.py) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.py`](https://github.com/locle97/duckwright/blob/main/duckwright/pw.py) | `playwright-cli` wrapper |
@@ -207,7 +212,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 **Test generation**
 
 - [ ] **Automatic test export**: `python3 -m duckwright export runs/<id>` writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
-- [ ] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
+- [x] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
 - [ ] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that currently need hand edits.
 
 **Reliability and cost**

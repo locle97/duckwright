@@ -129,9 +129,10 @@ def test_parse_failure_after_cost_carries_cost():
 def test_schema_restricts_cmd_to_allowed():
     from duckwright.actions import ALLOWED
 
-    done, other = DECISION_SCHEMA["properties"]["actions"]["items"]["anyOf"]
+    done, expect, other = DECISION_SCHEMA["properties"]["actions"]["items"]["anyOf"]
     assert done["properties"]["cmd"] == {"const": "done"}
-    cmds = set(other["properties"]["cmd"]["enum"]) | {"done"}
+    assert expect["properties"]["cmd"] == {"const": "expect"}
+    cmds = set(other["properties"]["cmd"]["enum"]) | {"done", "expect"}
     assert cmds == ALLOWED
     assert "playwright-cli" not in cmds
 
@@ -146,3 +147,16 @@ def test_schema_done_requires_status_and_answer():
     assert not ok({"cmd": "done", "args": ["42", "x"]})
     assert ok({"cmd": "click", "args": ["e1"]})
     assert not ok({"cmd": "eval", "args": ["1"]})
+    assert ok({"cmd": "expect", "args": ["visible", "e1"]})
+    assert ok({"cmd": "expect", "args": ["text", "e1", "Hi"]})
+    assert ok({"cmd": "expect", "args": ["e1", "text", "Hi"]})
+    assert not ok({"cmd": "expect", "args": ["e1", "toHaveText", "Hi"]})
+    assert not ok({"cmd": "expect", "args": []})
+    assert not ok({"cmd": "expect", "args": ["text", "e1", "a", "b"]})
+
+
+def test_schema_expect_checks_match_expect_module():
+    from duckwright.expect import CHECKS
+
+    expect = DECISION_SCHEMA["properties"]["actions"]["items"]["anyOf"][1]
+    assert expect["properties"]["args"]["contains"] == {"enum": list(CHECKS)}

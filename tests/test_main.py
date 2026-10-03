@@ -221,3 +221,11 @@ def test_version_unknown_when_not_installed(monkeypatch):
         raise m.PackageNotFoundError(name)
     monkeypatch.setattr(m, "version", missing)
     assert m._version() == "unknown"
+
+
+def test_system_prompt_documents_expect():
+    text = m.SYSTEM_MD.read_text()
+    assert "screenshot, expect, done" in text
+    assert '{"cmd": "expect", "args": ["text", "e15", ' in text
+    for check in ("visible", "value", "checked", "unchecked", "url"):
+        assert f'"{check}"' in text
