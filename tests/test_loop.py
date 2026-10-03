@@ -142,3 +142,31 @@ def test_running_cost_survives_exception(tmp_path):
     with pytest.raises(PlaywrightError):
         agent.run()
     assert agent.cost_usd == 0.5
+
+
+def test_state_loaded_after_open(tmp_path):
+    pw = FakePW()
+    loaded = []
+    pw.state_load = lambda path: (loaded.append(path), pw.calls.append(("state-load", [path])))
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", pw, brain, tmp_path, state=tmp_path / "auth.json").run()
+    assert pw.calls[:2] == [("open", [False]), ("state-load", [tmp_path / "auth.json"])]
+
+
+def test_no_state_skips_state_load(tmp_path):
+    pw = FakePW()
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", pw, brain, tmp_path).run()
+    assert all(c[0] != "state-load" for c in pw.calls)
+
+
+def test_state_load_failure_closes_browser(tmp_path):
+    pw = FakePW()
+
+    def boom(path):
+        raise PlaywrightError("bad state")
+
+    pw.state_load = boom
+    with pytest.raises(PlaywrightError, match="bad state"):
+        Agent("t", pw, FakeBrain([]), tmp_path, state=tmp_path / "a.json").run()
+    assert pw.closed == 1

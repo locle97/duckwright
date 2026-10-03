@@ -73,3 +73,15 @@ def test_snapshot_reads_utf8_and_replaces_bad_bytes(tmp_path: Path, monkeypatch)
 
     out = PlaywrightCLI(runner=FakeRunner(on_call=write)).snapshot(path)
     assert out == "café �"
+
+
+def test_state_load_builds_argv():
+    fake = FakeRunner()
+    PlaywrightCLI(session="t", runner=fake).state_load(Path("/x/auth.json"))
+    assert fake.calls[0][0] == ["playwright-cli", "-s=t", "state-load", "/x/auth.json"]
+
+
+def test_state_load_failure_raises():
+    fake = FakeRunner(result=ProcResult(1, "", "bad state"))
+    with pytest.raises(PlaywrightError, match="bad state"):
+        PlaywrightCLI(runner=fake).state_load(Path("/x/auth.json"))

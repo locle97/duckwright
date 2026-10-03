@@ -25,6 +25,10 @@ def _parse(argv):
     p.add_argument("--skill", default=DEFAULT_SKILL)
     p.add_argument("--session", default="pw-agent")
     p.add_argument(
+        "--state", metavar="FILE",
+        help="storage state JSON (cookies, localStorage) loaded with state-load before the task starts",
+    )
+    p.add_argument(
         "--allow-file-access", action="store_true",
         help=(
             "allow file:// URLs and UNRESTRICTED local file access in the browser. "
@@ -35,11 +39,13 @@ def _parse(argv):
     return p.parse_args(argv)
 
 
-def _preflight(skill: Path) -> str | None:
+def _preflight(skill: Path, state: Path | None) -> str | None:
     if not SYSTEM_MD.is_file():
         return f"system prompt not found: {SYSTEM_MD} (is the checkout complete?)"
     if not skill.is_file():
         return f"playwright-cli skill not found: {skill}"
+    if state and not state.is_file():
+        return f"state file not found: {state}"
     if not shutil.which("claude"):
         return "claude CLI not found on PATH (install Claude Code)"
     if not shutil.which("playwright-cli"):
@@ -71,7 +77,8 @@ def _history_json(task, success, answer, steps, cost, history: list[StepRecord])
 def main(argv=None) -> int:
     args = _parse(argv)
     skill = Path(args.skill)
-    err = _preflight(skill)
+    state = Path(args.state).resolve() if args.state else None
+    err = _preflight(skill, state)
     if err:
         print(err, file=sys.stderr)
         return 2
@@ -90,7 +97,7 @@ def main(argv=None) -> int:
     pw = PlaywrightCLI(session=args.session, allow_file_access=args.allow_file_access)
     agent = Agent(
         args.task, pw, brain, workdir,
-        max_steps=args.max_steps, headed=args.headed, on_step=on_step,
+        max_steps=args.max_steps, headed=args.headed, state=state, on_step=on_step,
     )
     def write_failure(answer: str) -> None:
         data = _history_json(
