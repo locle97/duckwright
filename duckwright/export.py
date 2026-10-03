@@ -30,8 +30,11 @@ def _shape_error(data) -> str | None:
     for rec in history:
         if not isinstance(rec, dict) or not isinstance(rec.get("actions"), list):
             return "each 'history' entry must be an object with an 'actions' list"
-        if not all(isinstance(a, dict) for a in rec["actions"]):
-            return "each action must be an object"
+        for a in rec["actions"]:
+            if not isinstance(a, dict) or not isinstance(a.get("cmd"), str):
+                return "each action must be an object with a string 'cmd'"
+            if a.get("code") is not None and not isinstance(a["code"], str):
+                return "an action's 'code' must be a string or null"
     return None
 
 
@@ -40,10 +43,10 @@ def load_history(path: Path) -> tuple[Path, dict]:
     path = Path(path)
     file = path / "history.json" if path.is_dir() else path
     try:
-        data = json.loads(file.read_text())
+        data = json.loads(file.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise ExportError(f"history not found: {file}", 2) from None
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+    except (OSError, ValueError, RecursionError) as e:  # ValueError covers JSON and UTF-8
         raise ExportError(f"cannot read {file}: {e}", 2) from None
     err = _shape_error(data)
     if err:
@@ -74,7 +77,7 @@ def render_spec(data: dict) -> tuple[str, list[str]]:
                     if cmd not in tabs:
                         tabs.append(cmd)
                 continue
-            if not isinstance(code, str) or not code or cmd == "screenshot":
+            if not isinstance(code, str) or not code.strip() or cmd == "screenshot":
                 continue
             body.extend(f"  {line}" for line in code.splitlines())
             has_code = True
@@ -100,9 +103,11 @@ def export_run(path: Path, out: Path | None = None) -> tuple[Path, list[str]]:
     run_dir, data = load_history(path)
     spec, warnings = render_spec(data)
     target = Path(out) if out is not None else run_dir / SPEC_NAME
+    if target.resolve() == (run_dir / "history.json").resolve():
+        raise ExportError(f"refusing to overwrite the run's history: {target}", 2)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(spec)
+        target.write_text(spec, encoding="utf-8")
     except OSError as e:
         raise ExportError(f"cannot write {target}: {e}", 2) from None
     return target, warnings

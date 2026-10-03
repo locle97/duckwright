@@ -115,7 +115,7 @@ duckwright export RUN [-o FILE]
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)) |
 
 > [!NOTE]
-> A task that is only the word `export` is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally.
+> When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
 
 > [!IMPORTANT]
 > Two runs at the same time must use different `--session` names. Otherwise they drive the same browser.

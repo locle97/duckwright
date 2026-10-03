@@ -148,6 +148,11 @@ def test_load_history_accepts_dir_and_file(tmp_path):
         json.dumps({"task": "t", "success": "true", "history": []}),
         json.dumps({"task": "t", "success": True, "history": [{"actions": {}}]}),
         json.dumps({"task": "t", "success": True, "history": [[]]}),
+        json.dumps({"task": "t", "success": True,
+                    "history": [{"actions": [{"cmd": ["x"], "code": "await a;"}]}]}),
+        json.dumps({"task": "t", "success": True,
+                    "history": [{"actions": [{"cmd": "click", "code": 1}]}]}),
+        '{"task":"t","success":true,"history":' + "[" * 100_000,
     ],
 )
 def test_load_history_rejects_bad_input(tmp_path, content):
@@ -172,3 +177,33 @@ def test_export_run_default_and_custom_output(tmp_path):
     assert export_run(run_dir, out)[0] == out
     assert out.is_file()
     assert export_run(run_dir, out)[0] == out  # overwrite is fine
+
+
+def test_whitespace_only_code_is_not_code():
+    with pytest.raises(ExportError, match="nothing to export"):
+        render_spec(run(step(("click", ["e1"], "  \n "))))
+
+
+@pytest.mark.parametrize("results", [None, "ok", ["ok"]])
+def test_missing_or_short_results_still_render(results):
+    rec = step(("goto", ["u"], GOTO), ("tab-new", ["x"], None))
+    rec["results"] = results
+    if results is None:
+        del rec["results"]
+    spec, _ = render_spec(run(rec))
+    assert GOTO in spec
+    assert "TODO" not in spec  # a tab command with no "ok" result is not marked
+
+
+def test_export_refuses_to_overwrite_history(tmp_path):
+    run_dir = write_run(tmp_path, GREET)
+    with pytest.raises(ExportError) as e:
+        export_run(run_dir, run_dir / "history.json")
+    assert e.value.exit_code == 2
+    assert json.loads((run_dir / "history.json").read_text()) == GREET
+
+
+def test_non_ascii_task_round_trips(tmp_path):
+    run_dir = write_run(tmp_path, {**GREET, "task": "Chào Linh ✓"})
+    path, _ = export_run(run_dir)
+    assert 'test("Chào Linh ✓"' in path.read_text(encoding="utf-8")

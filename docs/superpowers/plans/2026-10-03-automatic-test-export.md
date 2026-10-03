@@ -22,7 +22,7 @@
 - **No recorded assertions** still exports, with a warning.
 - **Exit codes for `export`:** `0` written, `1` refused (run failed, nothing to export), `2` input unusable (path missing, not JSON, wrong shape). Matches the run's existing `1`/`2` meanings.
 - **`--export` never changes the run's exit code.** On success it prints `Test: <path>`; if the export itself fails it prints `export failed: <msg>` to stderr and the run still exits `0`. On a failed run it prints `Test: not exported (run did not succeed)`.
-- A task that is literally the single word `export` can no longer be run; documented in the README.
+- A task that is literally the single word `export` must be run as `duckwright -- export`; documented in the README.
 
 ## Global Constraints
 
