@@ -8,7 +8,7 @@
 
 A [browser-use](https://github.com/browser-use/browser-use) style agent loop built on [`playwright-cli`](https://www.npmjs.com/package/@playwright/cli) and `claude -p`.
 
-[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [Regression tests](#turning-a-run-into-a-regression-test) • [How it works](#how-it-works) • [Development](#development)
+[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [Regression tests](#turning-a-run-into-a-regression-test) • [How it works](#how-it-works) • [Roadmap](#roadmap) • [Development](#development)
 
 </div>
 
@@ -169,6 +169,33 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`observe.py`](pw_agent/observe.py) | Tab list and page snapshot |
 | [`prompt.py`](pw_agent/prompt.py) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.py`](pw_agent/pw.py) | `playwright-cli` wrapper |
+
+## Roadmap
+
+Planned work, in no particular order. Nothing here is scheduled yet.
+
+**Test generation**
+
+- [ ] **Automatic test export**: `python3 -m pw_agent export runs/<id>` writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
+- [ ] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
+- [ ] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that currently need hand edits.
+
+**Reliability and cost**
+
+- [ ] **Replay mode**: re-run the recorded code first and call the agent only when a step breaks, so a changed locator heals itself.
+- [ ] **Cost budget**: a `--max-cost` limit that stops the run once spend exceeds it, alongside `--max-steps`.
+- [ ] **Jev backend (`--jev`)**: a cheaper brain using [TypeSafe's Jev](https://typesafe.ai/) model. Jev returns typed choices with calibrated confidence but no free text. So it would pick the command and the element ref each step, and pass anything that needs text (URLs, form input, the final answer) or has low confidence to Claude.
+
+**Safety**
+
+- [ ] **Secret redaction**: mask passwords and other sensitive input in `history.json`, so it no longer has to be handled like `auth.json`.
+- [ ] **Domain allow-list**: restrict `goto` and navigation to approved hosts.
+
+**Experience**
+
+- [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
+- [ ] **Batch runs**: run many tasks from a file, each in its own session.
+- [ ] **Packaging**: a console-script entry point and a PyPI release, so `pw_agent` runs from any directory.
 
 ## Development
 
