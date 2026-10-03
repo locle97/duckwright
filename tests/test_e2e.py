@@ -32,7 +32,7 @@ def test_e2e_form(tmp_path):
     brain = Brain(
         system_files=[
             ROOT / "prompts" / "system.md",
-            ROOT / ".claude" / "skills" / "playwright-cli" / "SKILL.md",
+            ROOT / "prompts" / "playwright-cli.md",
         ]
     )
     pw = PlaywrightCLI(session="pw-agent-e2e", allow_file_access=True)

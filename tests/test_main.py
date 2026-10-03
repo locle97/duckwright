@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -109,7 +111,12 @@ def test_missing_system_md_exits_2(env, monkeypatch, capsys):
 
 
 def test_default_skill_is_cwd_relative():
-    assert m.DEFAULT_SKILL == ".claude/skills/playwright-cli/SKILL.md"
+    assert m.DEFAULT_SKILL == "prompts/playwright-cli.md"
+
+
+def test_agent_skill_omits_find_and_eval():
+    text = (Path(__file__).parent.parent / m.DEFAULT_SKILL).read_text()
+    assert re.search(r"\b(find|eval)\b", text) is None
 
 
 def test_run_dirs_do_not_collide(env, monkeypatch):

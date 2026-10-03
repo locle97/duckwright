@@ -48,7 +48,7 @@ History: runs/20261003-101500-123456/history.json
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in
 
 > [!NOTE]
-> The playwright-cli skill is already included in `.claude/skills/playwright-cli/`. Run `playwright-cli install --skills` only if you want to update it to a newer version.
+> The agent uses `prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
 
 ### Install
 
@@ -72,7 +72,7 @@ python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window |
-| `--skill` | `.claude/skills/playwright-cli/SKILL.md` | Path to the playwright-cli skill appended to the system prompt |
+| `--skill` | `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `pw-agent` | playwright-cli session name |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 
