@@ -168,6 +168,7 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
      await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");
    });
    ```
+   Expected values in recorded assertions are always written in double quotes; that is intended.
 2. Add any further assertions the agent did not record.
 3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 

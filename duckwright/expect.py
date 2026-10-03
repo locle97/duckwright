@@ -17,7 +17,26 @@ CHECKS: dict[str, tuple[str, ...]] = {
 _CHECK_LIST = ", ".join(CHECKS)
 
 _REF = re.compile(r"^[a-z0-9]+$")
-_LOCATOR = re.compile(r"^(?:getBy[A-Za-z]+|locator)\([^\n]*\)$")
+
+# The locator from generate-locator is spliced into run-code, so it must be a plain
+# locator chain. Literals are blanked out first (a regex literal only where an argument
+# starts, so a division cannot pass as one); what is left may only call these methods,
+# and has no operators, statements or template strings.
+_LITERAL = re.compile(
+    r"'(?:[^'\\\n]|\\.)*'" r'|"(?:[^"\\\n]|\\.)*"'
+    r"|(?:(?<=\()|(?<=, )|(?<=: ))/(?:[^/\\\n]|\\.)+/[a-z]*"
+)
+_LOCATOR_START = re.compile(r"^(?:getBy[A-Za-z]+|locator|frameLocator)\(")
+_LOCATOR_CHARS = re.compile(r"^[A-Za-z0-9_.(){}:, ]*$")
+_CALL = re.compile(r"([A-Za-z_$][\w$]*)\s*\(")
+_LOCATOR_METHODS = frozenset({
+    "getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByAltText",
+    "getByTitle", "getByTestId", "locator", "frameLocator", "contentFrame",
+    "first", "last", "nth", "filter", "and", "or",
+})
+
+# Playwright's toHaveText drops U+200B, then trims and collapses JS whitespace (\s).
+_JS_WS = re.compile("[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+")
 
 _READ: dict[str, str] = {
     "visible": "isVisible()",
@@ -34,7 +53,16 @@ def _q(s: str) -> str:
 
 
 def _norm(s: str | None) -> str:
-    return " ".join((s or "").split())
+    return _JS_WS.sub(" ", (s or "").replace("\u200b", "")).strip(" ")
+
+
+def _is_locator(loc: str) -> bool:
+    if "\n" in loc or not _LOCATOR_START.match(loc):
+        return False
+    rest = _LITERAL.sub("0", loc)
+    return bool(_LOCATOR_CHARS.match(rest)) and all(
+        name in _LOCATOR_METHODS for name in _CALL.findall(rest)
+    )
 
 
 def check_args(args: list[str]) -> str | None:
@@ -66,7 +94,7 @@ def run_expect(pw: PlaywrightCLI, args: list[str]) -> tuple[str, str | None]:
         if res.code != 0:
             return _cli_error(res), None
         loc = res.stdout.strip()
-        if not _LOCATOR.match(loc):
+        if not _is_locator(loc):
             return f"error: expect: unusable locator {_q(loc)}", None
         subject, js = f"page.{loc}", f"async page => await page.{loc}.{_READ[check]}"
     res = pw.run("run-code", [js, "--raw"])

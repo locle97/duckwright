@@ -21,7 +21,8 @@ class StepRecord:
 
     def line(self) -> str:
         d = self.decision
-        results = [_flat(r) for r in self.results]
+        # Results can carry page text (CLI errors, a failed expect's actual value).
+        results = [_neutralise(_flat(r)) for r in self.results]
         if d.actions:
             parts = []
             for i, a in enumerate(d.actions):

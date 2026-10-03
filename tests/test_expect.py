@@ -201,3 +201,50 @@ def test_expected_text_never_reaches_cli():
     assert res == "ok"
     assert not any("It's" in part for call in calls for part in call)
     assert code.endswith("toHaveText(" + json.dumps(page_text, ensure_ascii=False) + ");")
+
+
+@pytest.mark.parametrize(
+    "out",
+    [
+        "getByRole('heading', { name: 'Hello World' })",
+        "getByRole('button', { name: 'Go' }).first()",
+        "getByRole('heading', { name: 'Hi', exact: true, level: 1 })",
+        "getByText(/Total: \\d+/i)",
+        "getByText('it\\'s ); evil()')",
+        "locator('#main').getByText(\"a;b\").nth(2)",
+        "locator('iframe').contentFrame().getByTestId('x')",
+        "getByRole('listitem').filter({ hasText: 'Milk' })",
+    ],
+)
+def test_generated_locator_shapes_accepted(out):
+    pw, calls = make_pw({"generate-locator": ProcResult(0, out + "\n", ""), "run-code": val(True)})
+    assert run_expect(pw, ["visible", "e7"])[0] == "ok"
+    assert calls[1][1] == f"async page => await page.{out}.isVisible()"
+
+
+@pytest.mark.parametrize(
+    "out",
+    [
+        "locator('a').evaluate(() => fetch('//x'))",
+        "getByText('a').fill('x')",
+        "getByText('a'); fetch('x'); getByText('b')",
+        "getByText(`a${fetch('x')}`)",
+        "getByText('a' + fetch('x'))",
+        "getByText('unterminated)",
+        "getByText('a')/fetch('x')/a.first()",
+    ],
+)
+def test_locator_with_other_calls_is_rejected(out):
+    pw, calls = make_pw({"generate-locator": ProcResult(0, out, "")})
+    res, code = run_expect(pw, ["visible", "e7"])
+    assert res.startswith("error: expect: unusable locator ")
+    assert code is None
+    assert [c[0] for c in calls] == ["generate-locator"]
+
+
+def test_text_normalizes_like_playwright():
+    # Playwright drops U+200B and collapses only JS whitespace (\s), not \x1c-\x1f.
+    pw, _ = make_pw({"generate-locator": LOC, "run-code": val("Hello\u200bWorld\u00a0!")})
+    assert run_expect(pw, ["text", "e7", "HelloWorld !"])[0] == "ok"
+    pw, _ = make_pw({"generate-locator": LOC, "run-code": val("a\x1fb")})
+    assert run_expect(pw, ["text", "e7", "a b"])[0].startswith("error: expect text failed")
