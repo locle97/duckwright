@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from pw_agent import __main__ as m
-from pw_agent.brain import Action, Decision
+from pw_agent.brain import Action, Brain, Decision
+from pw_agent.jev import HybridBrain, JevAuthError
 from pw_agent.loop import Agent
 from pw_agent.prompt import StepRecord
 from pw_agent.pw import PlaywrightError
@@ -76,8 +77,13 @@ def test_playwright_error_history_shape(env, monkeypatch):
                     }
                 ],
                 "results": ["ok"],
+                "source": "claude",
+                "cost_usd": 0.0,
+                "jev": None,
             }
         ],
+        "jev_steps": 0,
+        "claude_steps": 1,
     }
 
 
@@ -184,3 +190,154 @@ def test_system_prompt_says_browser_is_open():
     text = (Path(__file__).resolve().parent.parent / "prompts" / "system.md").read_text()
     assert "browser is already open" in text
     assert "no `open` command" in text
+
+
+def _never_run(monkeypatch):
+    def never(self):
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(Agent, "run", never)
+
+
+def test_jev_requires_api_key(env, monkeypatch, capsys):
+    tmp, argv = env
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _never_run(monkeypatch)
+    assert m.main(argv + ["--jev"]) == 2
+    assert "TYPESAFE_API_KEY" in capsys.readouterr().err
+    assert not (tmp / "runs").exists()
+
+
+def test_jev_empty_api_key_exits_2(env, monkeypatch, capsys):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", "")
+    _never_run(monkeypatch)
+    assert m.main(argv + ["--jev"]) == 2
+    assert "TYPESAFE_API_KEY" in capsys.readouterr().err
+    assert not (tmp / "runs").exists()
+
+
+@pytest.mark.parametrize("bad", ["1.5", "-0.1"])
+def test_jev_threshold_out_of_range(env, monkeypatch, capsys, bad):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    _never_run(monkeypatch)
+    assert m.main(argv + ["--jev", "--jev-threshold", bad]) == 2
+    assert "--jev-threshold" in capsys.readouterr().err
+    assert not (tmp / "runs").exists()
+
+
+def test_jev_threshold_validated_without_jev(env, monkeypatch, capsys):
+    tmp, argv = env
+    _never_run(monkeypatch)
+    assert m.main(argv + ["--jev-threshold", "2"]) == 2
+    assert "--jev-threshold" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("ok", ["0", "1"])
+def test_jev_threshold_bounds_allowed(env, monkeypatch, ok):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    monkeypatch.setattr(Agent, "run", lambda self: R())
+    assert m.main(argv + ["--jev", "--jev-threshold", ok]) == 0
+
+
+def test_jev_builds_hybrid_brain(env, monkeypatch):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    seen = {}
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    def run(self):
+        seen["brain"] = self.brain
+        return R()
+
+    monkeypatch.setattr(Agent, "run", run)
+    assert m.main(argv + ["--jev", "--jev-threshold", "0.7"]) == 0
+    brain = seen["brain"]
+    assert isinstance(brain, HybridBrain)
+    assert brain.min_confidence == 0.7
+    assert brain.jev.api_key == "k"
+    assert isinstance(brain.claude, Brain)
+
+
+def test_without_jev_brain_is_claude(env, monkeypatch):
+    tmp, argv = env
+    seen = {}
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    def run(self):
+        seen["brain"] = self.brain
+        return R()
+
+    monkeypatch.setattr(Agent, "run", run)
+    assert m.main(argv) == 0
+    assert isinstance(seen["brain"], Brain)
+    assert not isinstance(seen["brain"], HybridBrain)
+
+
+def test_jev_auth_error_exits_1_and_writes_history(env, monkeypatch, capsys):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    rec = StepRecord(1, Decision("e", "m", "g", [Action("goto", ["u"])]), ["ok"], [None])
+
+    def fail(self):
+        self.on_step(rec)
+        raise JevAuthError("401")
+
+    monkeypatch.setattr(Agent, "run", fail)
+    assert m.main(argv + ["--jev"]) == 1
+    msg = "jev error: invalid TYPESAFE_API_KEY"
+    assert msg in capsys.readouterr().err
+    data = _history(tmp)
+    assert data["answer"] == msg
+    assert data["success"] is False
+    assert len(data["history"]) == 1
+
+
+def _routing_records():
+    jev_rec = StepRecord(
+        2,
+        Decision(
+            "", "m", "g", [Action("click", ["e3"])], source="jev",
+            jev={"action": "click", "action_confidence": .9, "target": "e3",
+                 "target_confidence": .9, "routed": "accepted"},
+        ),
+        ["ok"], [None], cost=1e-6,
+    )
+    cl_rec = StepRecord(1, Decision("e", "m", "g", [Action("goto", ["u"])]), ["ok"], [None], cost=0.5)
+    return cl_rec, jev_rec
+
+
+def test_history_json_routing_fields():
+    cl_rec, jev_rec = _routing_records()
+    data = m._history_json("t", True, "a", 2, 0.500001, [cl_rec, jev_rec])
+    assert (data["jev_steps"], data["claude_steps"]) == (1, 1)
+    s1, s2 = data["history"]
+    assert (s1["source"], s1["cost_usd"], s1["jev"]) == ("claude", 0.5, None)
+    assert (s2["source"], s2["cost_usd"], s2["jev"]["routed"]) == ("jev", 1e-6, "accepted")
+
+
+def test_prints_jev_steps_only_with_jev(env, monkeypatch, capsys):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    cl_rec, jev_rec = _routing_records()
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 2, 0.5, [cl_rec, jev_rec]
+
+    monkeypatch.setattr(Agent, "run", lambda self: R())
+    assert m.main(argv + ["--jev"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    i = next(i for i, l in enumerate(lines) if l.startswith("Steps:"))
+    assert lines[i + 1] == "Jev steps: 1/2"
+    assert m.main(argv) == 0
+    assert "Jev steps" not in capsys.readouterr().out

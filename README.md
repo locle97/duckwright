@@ -68,7 +68,7 @@ Run from the repo root, because the default `--skill` path is relative to the cu
 ```bash
 python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
                              [--skill PATH] [--session NAME] [--state FILE]
-                             [--allow-file-access]
+                             [--allow-file-access] [--jev] [--jev-threshold FLOAT]
 ```
 
 | Option | Default | Description |
@@ -80,12 +80,17 @@ python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
 | `--session` | `pw-agent` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
+| `--jev` | off | Experimental: route steps Jev is confident about to TypeSafe's Jev model instead of Claude. Needs `TYPESAFE_API_KEY` |
+| `--jev-threshold` | `0.8` | Minimum Jev confidence (0 to 1) to accept its choice; lower-confidence steps go to Claude |
 
 > [!IMPORTANT]
 > Two runs at the same time must use different `--session` names. Otherwise they drive the same browser.
 
 > [!WARNING]
 > `--allow-file-access` gives the browser unrestricted access to local files, not just one file. A page that hijacks the agent could `goto file:///home/you/.ssh/...` and leak the contents. Only use it with trusted pages and trusted tasks. The flag only applies when the session's browser is first opened, so close any existing session first.
+
+> [!WARNING]
+> `--jev` sends the task, page snapshots and history to TypeSafe's API, including anything visible on authenticated pages. It needs `TYPESAFE_API_KEY` in the environment. It is experimental until the benchmark (`tests/bench`) passes.
 
 ### Authenticated pages
 
@@ -184,7 +189,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [ ] **Replay mode**: re-run the recorded code first and call the agent only when a step breaks, so a changed locator heals itself.
 - [ ] **Cost budget**: a `--max-cost` limit that stops the run once spend exceeds it, alongside `--max-steps`.
-- [ ] **Jev backend (`--jev`)**: a cheaper brain using [TypeSafe's Jev](https://typesafe.ai/) model. Jev returns typed choices with calibrated confidence but no free text. So it would pick the command and the element ref each step, and pass anything that needs text (URLs, form input, the final answer) or has low confidence to Claude.
+- [x] **Jev backend (`--jev`, experimental until the benchmark passes)**: a cheaper brain using [TypeSafe's Jev](https://typesafe.ai/) model. Jev returns typed choices with calibrated confidence but no free text. So it picks the command and the element ref each step, and passes anything that needs text (URLs, form input, the final answer) or has low confidence to Claude.
 
 **Safety**
 
