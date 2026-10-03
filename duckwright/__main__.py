@@ -11,7 +11,7 @@ from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
-from duckwright.taskfile import TaskFileError, load_task_file
+from duckwright.taskfile import TaskFile, TaskFileError, expand_task_paths, load_task_file
 
 DIST_NAME = "duckwright"
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -38,8 +38,11 @@ def _run_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     p.add_argument("task", nargs="?")
     p.add_argument(
-        "-f", "--file", metavar="FILE",
-        help="read the task, and optional settings, from a .txt or .md file",
+        "-f", "--file", metavar="FILE", nargs="+", action="extend",
+        help=(
+            "read the task, and optional settings, from a .txt or .md file; "
+            "several files, or a folder of them, run one after another"
+        ),
     )
     p.add_argument("--max-steps", type=int, default=25)
     p.add_argument("--model", default="sonnet")
@@ -142,36 +145,29 @@ def _history_json(
     }
 
 
-def main(argv=None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
-    if argv and argv[0] == "export":
-        return _export_main(argv[1:])
+def _args_for(argv: list[str], tf: TaskFile) -> argparse.Namespace:
+    # A fresh parser per file, so one file's settings never become another's defaults.
+    # File settings are defaults, so flags given on the command line still win.
     parser = _run_parser()
+    parser.set_defaults(**tf.settings)
     args = parser.parse_args(argv)
-    if args.task is not None and args.file is not None:
-        parser.error("give a task or --file, not both")
-    if args.task is None and args.file is None:
-        parser.error("give a task or --file")
-    if args.file is not None:
-        try:
-            tf = load_task_file(args.file)
-        except TaskFileError as e:
-            print(e, file=sys.stderr)
-            return 2
-        # File settings become defaults, so flags given on the command line still win.
-        parser.set_defaults(**tf.settings)
-        args = parser.parse_args(argv)
-        args.task = tf.task
+    args.task = tf.task
+    return args
+
+
+def _preflight_args(args: argparse.Namespace) -> str | None:
+    return _preflight(Path(args.skill), Path(args.state).resolve() if args.state else None)
+
+
+def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path]:
+    """Run one task whose preflight has passed; returns the exit code and its history.json."""
     skill = Path(args.skill)
     state = Path(args.state).resolve() if args.state else None
-    err = _preflight(skill, state)
-    if err:
-        print(err, file=sys.stderr)
-        return 2
 
     # Microseconds keep two runs started in the same second apart.
     workdir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     workdir.mkdir(parents=True)
+    history_path = workdir / "history.json"
 
     collected: list[StepRecord] = []
 
@@ -187,35 +183,35 @@ def main(argv=None) -> int:
     )
     def write_failure(answer: str) -> None:
         data = _history_json(
-            args.task, False, answer, len(collected), agent.cost_usd, collected, args.file
+            args.task, False, answer, len(collected), agent.cost_usd, collected, task_file
         )
-        (workdir / "history.json").write_text(json.dumps(data, indent=2))
+        history_path.write_text(json.dumps(data, indent=2))
 
     try:
         result = agent.run()
     except PlaywrightError as e:
         write_failure(f"playwright error: {e}")
         print(f"playwright error: {e}", file=sys.stderr)
-        return 1
+        return 1, history_path
     except KeyboardInterrupt:
         write_failure("interrupted")
         print("interrupted", file=sys.stderr)
-        return 130
+        return 130, history_path
     except Exception as e:
         msg = f"error: {type(e).__name__}: {e}"
         write_failure(msg)
         print(msg, file=sys.stderr)
-        return 1
+        return 1, history_path
 
     data = _history_json(
         args.task, result.success, result.answer, result.steps, result.cost_usd, result.history,
-        args.file,
+        task_file,
     )
-    (workdir / "history.json").write_text(json.dumps(data, indent=2))
+    history_path.write_text(json.dumps(data, indent=2))
     print(f"Result: {'success' if result.success else 'failure'}")
     print(f"Answer: {result.answer}")
     print(f"Steps: {result.steps}  Cost: ${result.cost_usd:.4f}")
-    print(f"History: {workdir / 'history.json'}")
+    print(f"History: {history_path}")
     if args.export:
         if not result.success:
             print("Test: not exported (run did not succeed)")
@@ -225,7 +221,76 @@ def main(argv=None) -> int:
             except ExportError as e:
                 # The run itself succeeded; a failed export does not change that.
                 print(f"export failed: {e}", file=sys.stderr)
-    return 0 if result.success else 1
+    return (0 if result.success else 1), history_path
+
+
+def _run_batch(runs: list[tuple[str, argparse.Namespace]]) -> int:
+    """Preflight every task, then run them in order and print a summary."""
+    errors = [f"{path}: {err}" for path, args in runs if (err := _preflight_args(args))]
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 2
+    rows: list[tuple[str, str, str]] = []
+    interrupted = False
+    for i, (path, args) in enumerate(runs, 1):
+        if interrupted:
+            rows.append(("skip", path, "-"))
+            continue
+        print(f"[{i}/{len(runs)}] {path}", flush=True)
+        code, history = _run_one(args, path)
+        interrupted = code == 130
+        status = "pass" if code == 0 else "stop" if interrupted else "fail"
+        rows.append((status, path, str(history)))
+    count = {s: sum(r[0] == s for r in rows) for s in ("pass", "fail", "skip")}
+    print(f"Batch: {count['pass']} passed, {count['fail']} failed, {count['skip']} not run")
+    for row in rows:
+        print("  ".join(row))
+    if interrupted:
+        return 130
+    return 0 if count["pass"] == len(rows) else 1
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "export":
+        return _export_main(argv[1:])
+    parser = _run_parser()
+    args = parser.parse_args(argv)
+    if args.task is not None and args.file is not None:
+        parser.error("give a task or --file, not both")
+    if args.task is None and args.file is None:
+        parser.error("give a task or --file")
+    if args.file is None:
+        err = _preflight_args(args)
+        if err:
+            print(err, file=sys.stderr)
+            return 2
+        return _run_one(args, None)[0]
+
+    # Load every file before anything runs, so one bad file stops the whole batch.
+    errors: list[str] = []
+    runs: list[tuple[str, argparse.Namespace]] = []
+    try:
+        paths = expand_task_paths(args.file)
+    except TaskFileError as e:
+        errors.append(str(e))
+        paths = []
+    for path in paths:
+        try:
+            runs.append((path, _args_for(argv, load_task_file(path))))
+        except TaskFileError as e:
+            errors.append(str(e))
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 2
+    if len(runs) > 1:
+        return _run_batch(runs)
+    path, args = runs[0]
+    err = _preflight_args(args)
+    if err:
+        print(err, file=sys.stderr)
+        return 2
+    return _run_one(args, path)[0]
 
 
 if __name__ == "__main__":

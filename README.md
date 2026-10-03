@@ -98,7 +98,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
                   [--allow-file-access] [--[no-]export]
-duckwright -f FILE [options]
+duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export RUN [-o FILE]
 ```
 
@@ -106,7 +106,7 @@ duckwright export RUN [-o FILE]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `-f`, `--file` | none | Read the task, and optional settings, from a [task file](#task-files) instead of the command line |
+| `-f`, `--file` | none | Read the task, and optional settings, from a [task file](#task-files) instead of the command line. Takes one or more files or folders; several make a [batch](#batch-runs) |
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window (`--no-headed` overrides a task file) |
@@ -180,6 +180,34 @@ and check the greeting says "Hello, Linh!".
 
 [`examples/task.md`](https://github.com/locle97/duckwright/blob/main/examples/task.md) is a commented template to copy.
 
+#### Batch runs
+
+Give `-f` several files, or a folder, to run them one after another:
+
+```bash
+duckwright -f tasks/login.md tasks/greet.md   # several files
+duckwright -f tasks/*.md                       # shell glob
+duckwright -f tasks/                           # every task file at the folder's root
+duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every task
+```
+
+- A folder runs its `.md` and `.txt` files (any case), sorted by name. Only the top level is read: subfolders, hidden files and other files, such as an `auth.json` next to the tasks, are ignored. A file reached twice runs once.
+- Every file is loaded and preflight-checked before anything runs. If any is invalid, every problem is printed and nothing runs (exit `2`).
+- Each task uses its own file's settings; flags on the command line apply to every task and still win.
+- Tasks run in order, each in its own `runs/<id>/` folder, preceded by a `[1/3] tasks/a.md` line. A failing task does not stop the batch; Ctrl-C does, and the remaining tasks are not run.
+- A summary follows the last task:
+
+  ```
+  Batch: 2 passed, 1 failed, 0 not run
+  pass  tasks/a.md  runs/20261003-101500-123456/history.json
+  fail  tasks/b.md  runs/20261003-101530-654321/history.json
+  pass  tasks/c.md  runs/20261003-101612-000042/history.json
+  ```
+
+  Each line is `pass`, `fail`, `stop` (interrupted) or `skip` (not run).
+- When the paths come down to a single file, the run is an ordinary single run, with no summary.
+- `-f` reads every argument after it as a path, so `duckwright -f a.md "Open the site"` fails with `Open the site: file not found`. A task on the command line and `-f` cannot be combined anyway.
+
 ### Output
 
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
@@ -197,9 +225,9 @@ Each step's history line is printed as it happens, followed by the result, answe
 | Code | Meaning |
 | --- | --- |
 | `0` | The agent finished with `done success` |
-| `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error |
-| `2` | Bad input or a preflight check failed: an unreadable or invalid task file, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
-| `130` | Interrupted with Ctrl-C (`history.json` is still written) |
+| `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error. In a batch, at least one task failed |
+| `2` | Bad input or a preflight check failed: an unreadable or invalid task file, a folder with no task files, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
+| `130` | Interrupted with Ctrl-C (`history.json` is still written; a batch stops at the interrupted task) |
 
 ## Turning a run into a regression test
 
@@ -260,7 +288,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`actions.py`](https://github.com/locle97/duckwright/blob/main/duckwright/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
 | [`export.py`](https://github.com/locle97/duckwright/blob/main/duckwright/export.py) | Renders `history.json` as a `@playwright/test` spec |
 | [`expect.py`](https://github.com/locle97/duckwright/blob/main/duckwright/expect.py) | `expect` checks: verified against the live page and recorded as assertions |
-| [`taskfile.py`](https://github.com/locle97/duckwright/blob/main/duckwright/taskfile.py) | Reads task files: front-matter settings and the task text |
+| [`taskfile.py`](https://github.com/locle97/duckwright/blob/main/duckwright/taskfile.py) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
 | [`observe.py`](https://github.com/locle97/duckwright/blob/main/duckwright/observe.py) | Tab list and page snapshot |
 | [`prompt.py`](https://github.com/locle97/duckwright/blob/main/duckwright/prompt.py) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.py`](https://github.com/locle97/duckwright/blob/main/duckwright/pw.py) | `playwright-cli` wrapper |
@@ -289,7 +317,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 **Experience**
 
 - [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
-- [ ] **Batch runs**: run many tasks from a file, each in its own session.
+- [x] **Batch runs**: `duckwright -f tasks/` (or several files) runs task files one after another and prints a summary.
 - [x] **Packaging**: a console-script entry point, so `duckwright` runs from any directory after a local or GitHub install.
 - [ ] **PyPI release**: publish `duckwright` so `pipx install duckwright` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.
 

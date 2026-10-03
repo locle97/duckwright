@@ -464,3 +464,183 @@ def test_task_named_export_still_runs(env, monkeypatch):
     seen = _record_run(monkeypatch)
     assert m.main(["--skill", argv[2], "--", "export"]) == 0
     assert seen["task"] == "export"
+
+
+def _record_runs(monkeypatch, outcomes):
+    calls = []
+    outcomes = list(outcomes)
+
+    def run(self):
+        calls.append((self.task, self.max_steps, self.headed, self.brain.model))
+        out = outcomes.pop(0)
+        if isinstance(out, BaseException):
+            raise out
+        return RunResult(out, "a", 1, 0.0, [])
+
+    monkeypatch.setattr(Agent, "run", run)
+    return calls
+
+
+def _histories(tmp):
+    return [json.loads(p.read_text()) for p in sorted(tmp.glob("runs/*/history.json"))]
+
+
+def _summary(out: str) -> list[str]:
+    lines = out.splitlines()
+    i = next(i for i, l in enumerate(lines) if l.startswith("Batch: "))
+    return [re.sub(r"runs/[^/]+/", "runs/<id>/", l) for l in lines[i:]]
+
+
+def _never(monkeypatch):
+    def never(self):
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(Agent, "run", never)
+
+
+def test_single_file_output_unchanged(env, monkeypatch, capsys):
+    tmp, argv = env
+    f = _task_file(tmp, "Go\n")
+    _record_runs(monkeypatch, [True])
+    assert m.main(argv[1:] + ["-f", f]) == 0
+    out = capsys.readouterr().out
+    assert "[1/1]" not in out and "Batch:" not in out
+    assert out.splitlines()[0] == "Result: success"
+
+
+def test_single_file_from_folder_is_a_single_run(env, monkeypatch, capsys):
+    tmp, argv = env
+    _task_file(tmp, "Go\n", "tasks/a.md")
+    _record_runs(monkeypatch, [True])
+    assert m.main(argv[1:] + ["-f", "tasks"]) == 0
+    assert "Batch:" not in capsys.readouterr().out
+    assert _history(tmp)["task_file"] == "tasks/a.md"
+
+
+def test_batch_runs_files_in_order_with_own_settings(env, monkeypatch):
+    tmp, argv = env
+    a = _task_file(tmp, "---\nmax-steps: 7\nheaded: true\n---\nA\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+    calls = _record_runs(monkeypatch, [True, True])
+    assert m.main(argv[1:] + ["-f", a, b]) == 0
+    assert calls == [("A", 7, True, "sonnet"), ("B", 25, False, "sonnet")]
+    assert sorted(h["task_file"] for h in _histories(tmp)) == ["tasks/a.md", "tasks/b.md"]
+
+
+def test_batch_cli_flag_applies_to_all(env, monkeypatch):
+    tmp, argv = env
+    a = _task_file(tmp, "---\nmax-steps: 7\n---\nA\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+    calls = _record_runs(monkeypatch, [True, True])
+    assert m.main(argv[1:] + ["-f", a, b, "--max-steps", "3", "--model", "opus"]) == 0
+    assert calls == [("A", 3, False, "opus"), ("B", 3, False, "opus")]
+
+
+def test_batch_from_folder(env, monkeypatch):
+    tmp, argv = env
+    _task_file(tmp, "B\n", "tasks/b.md")
+    _task_file(tmp, "A\n", "tasks/a.md")
+    _task_file(tmp, "{}", "tasks/auth.json")
+    calls = _record_runs(monkeypatch, [True, True])
+    assert m.main(argv[1:] + ["-f", "tasks"]) == 0
+    assert [c[0] for c in calls] == ["A", "B"]
+    assert sorted(h["task_file"] for h in _histories(tmp)) == ["tasks/a.md", "tasks/b.md"]
+
+
+def test_repeated_file_flag_extends(env, monkeypatch):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+    calls = _record_runs(monkeypatch, [True, True])
+    assert m.main(argv[1:] + ["-f", a, "-f", b]) == 0
+    assert [c[0] for c in calls] == ["A", "B"]
+
+
+def test_batch_failure_continues_and_exits_1(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+    calls = _record_runs(monkeypatch, [False, True])
+    assert m.main(argv[1:] + ["-f", a, b]) == 1
+    assert len(calls) == 2
+    out = capsys.readouterr().out
+    assert "[1/2] tasks/a.md" in out.splitlines()
+    assert "[2/2] tasks/b.md" in out.splitlines()
+    assert _summary(out) == [
+        "Batch: 1 passed, 1 failed, 0 not run",
+        "fail  tasks/a.md  runs/<id>/history.json",
+        "pass  tasks/b.md  runs/<id>/history.json",
+    ]
+
+
+def test_batch_crash_counts_as_fail(env, monkeypatch):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+    calls = _record_runs(monkeypatch, [PlaywrightError("x"), True])
+    assert m.main(argv[1:] + ["-f", a, b]) == 1
+    assert len(calls) == 2
+
+
+def test_batch_all_pass_exits_0(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+    _record_runs(monkeypatch, [True, True])
+    assert m.main(argv[1:] + ["-f", a, b]) == 0
+    assert _summary(capsys.readouterr().out)[0] == "Batch: 2 passed, 0 failed, 0 not run"
+
+
+def test_batch_bad_file_runs_nothing(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "---\nmodel:\n---\nGo\n", "tasks/b.md")
+    c = _task_file(tmp, "", "tasks/c.md")
+    _never(monkeypatch)
+    assert m.main(argv[1:] + ["-f", a, b, c]) == 2
+    assert capsys.readouterr().err == 'tasks/b.md:2: "model" has no value\ntasks/c.md: no task text\n'
+    assert not (tmp / "runs").exists()
+
+
+def test_batch_preflight_failure_runs_nothing(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "---\nstate: nope.json\n---\nGo\n", "tasks/b.md")
+    _never(monkeypatch)
+    assert m.main(argv[1:] + ["-f", a, b]) == 2
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1 and err[0].startswith("tasks/b.md: state file not found: ")
+    assert not (tmp / "runs").exists()
+
+
+def test_batch_interrupt_stops_and_summarises(env, monkeypatch, capsys):
+    tmp, argv = env
+    files = [_task_file(tmp, f"{n}\n", f"tasks/{n}.md") for n in "abc"]
+    calls = _record_runs(monkeypatch, [KeyboardInterrupt(), True, True])
+    assert m.main(argv[1:] + ["-f", *files]) == 130
+    assert len(calls) == 1
+    assert _history(tmp)["answer"] == "interrupted"
+    assert _summary(capsys.readouterr().out) == [
+        "Batch: 0 passed, 0 failed, 2 not run",
+        "stop  tasks/a.md  runs/<id>/history.json",
+        "skip  tasks/b.md  -",
+        "skip  tasks/c.md  -",
+    ]
+
+
+def test_task_after_file_is_read_as_file(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    _never(monkeypatch)
+    assert m.main(argv[1:] + ["-f", a, "Open the site"]) == 2
+    assert capsys.readouterr().err == "Open the site: file not found\n"
+    assert not (tmp / "runs").exists()
+
+
+def test_empty_folder_exits_2(env, monkeypatch, capsys):
+    tmp, argv = env
+    _task_file(tmp, "{}", "tasks/auth.json")
+    _never(monkeypatch)
+    assert m.main(argv[1:] + ["-f", "tasks"]) == 2
+    assert capsys.readouterr().err == "tasks: no task files (.md or .txt)\n"
+    assert not (tmp / "runs").exists()
