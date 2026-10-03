@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from duckwright.brain import Brain
+from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
@@ -26,7 +27,9 @@ def _version() -> str:
 
 def _parse(argv):
     p = argparse.ArgumentParser(
-        prog="duckwright", description="Duckwright: browser agent loop on playwright-cli + claude -p"
+        prog="duckwright",
+        description="Duckwright: browser agent loop on playwright-cli + claude -p",
+        epilog="To turn an earlier run into a test: duckwright export runs/<id>",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     p.add_argument("task")
@@ -47,7 +50,39 @@ def _parse(argv):
             "only use with trusted pages and trusted tasks"
         ),
     )
+    p.add_argument(
+        "--export", action="store_true",
+        help=f"after a successful run, write a Playwright test to runs/<id>/{SPEC_NAME}",
+    )
     return p.parse_args(argv)
+
+
+def _parse_export(argv):
+    p = argparse.ArgumentParser(
+        prog="duckwright export",
+        description="Write a @playwright/test spec from a successful run's history.json",
+    )
+    p.add_argument("run", help="run directory or history.json")
+    p.add_argument("-o", "--output", metavar="FILE", help=f"spec path (default: <run>/{SPEC_NAME})")
+    return p.parse_args(argv)
+
+
+def _export(run: Path, out: Path | None = None) -> Path:
+    path, warnings = export_run(run, out)
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    return path
+
+
+def _export_main(argv) -> int:
+    args = _parse_export(argv)
+    try:
+        path = _export(Path(args.run), Path(args.output) if args.output else None)
+    except ExportError as e:
+        print(e, file=sys.stderr)
+        return e.exit_code
+    print(f"Test: {path}")
+    return 0
 
 
 def _preflight(skill: Path, state: Path | None) -> str | None:
@@ -93,6 +128,9 @@ def _history_json(task, success, answer, steps, cost, history: list[StepRecord])
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "export":
+        return _export_main(argv[1:])
     args = _parse(argv)
     skill = Path(args.skill)
     state = Path(args.state).resolve() if args.state else None
@@ -147,6 +185,15 @@ def main(argv=None) -> int:
     print(f"Answer: {result.answer}")
     print(f"Steps: {result.steps}  Cost: ${result.cost_usd:.4f}")
     print(f"History: {workdir / 'history.json'}")
+    if args.export:
+        if not result.success:
+            print("Test: not exported (run did not succeed)")
+        else:
+            try:
+                print(f"Test: {_export(workdir)}")
+            except ExportError as e:
+                # The run itself succeeded; a failed export does not change that.
+                print(f"export failed: {e}", file=sys.stderr)
     return 0 if result.success else 1
 
 
