@@ -2,6 +2,7 @@
 
 # pw_agent
 
+[![PyPI](https://img.shields.io/pypi/v/playwright-agent-loop)](https://pypi.org/project/playwright-agent-loop/)
 [![CI](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
@@ -19,7 +20,7 @@ Every run also records the Playwright code behind each action, so a task the age
 An example run looks like this (illustrative output):
 
 ```console
-$ python3 -m pw_agent "Go to example.com and report the page heading"
+$ pw_agent "Go to example.com and report the page heading"
 step 1 | Starting task | Open example.com | goto https://example.com → ok
 step 2 | Page loaded | Read the heading | done success Example Domain → done
 Result: success
@@ -51,32 +52,32 @@ History: runs/20261003-101500-123456/history.json
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in
 
 > [!NOTE]
-> The agent uses `prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
+> The agent uses `pw_agent/prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `pw_agent/prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
 
 ### Install
 
 ```bash
-git clone https://github.com/locle97/playwright-agent-loop.git
-cd playwright-agent-loop
-pip install -e ".[dev]"   # optional: only needed for running tests
+pipx install playwright-agent-loop   # or: pip install playwright-agent-loop
 ```
+
+The PyPI package is named `playwright-agent-loop`, but the command it installs is `pw_agent`. To work on the code instead, see [Development](#development).
 
 ## Usage
 
-Run from the repo root, because the default `--skill` path is relative to the current directory.
-
 ```bash
-python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
-                             [--skill PATH] [--session NAME] [--state FILE]
-                             [--allow-file-access]
+pw_agent "<task>" [--max-steps N] [--model M] [--headed]
+                  [--skill PATH] [--session NAME] [--state FILE]
+                  [--allow-file-access]
 ```
+
+`python3 -m pw_agent` works the same way. Run `pw_agent --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window |
-| `--skill` | `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
+| `--skill` | bundled `pw_agent/prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `pw-agent` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
@@ -97,7 +98,7 @@ playwright-cli -s=login open https://app.example.com/login --headed
 playwright-cli -s=login state-save auth.json
 playwright-cli -s=login close
 
-python3 -m pw_agent "Open https://app.example.com/settings and report my plan" --state auth.json
+pw_agent "Open https://app.example.com/settings and report my plan" --state auth.json
 ```
 
 > [!CAUTION]
@@ -119,7 +120,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 | --- | --- |
 | `0` | The agent finished with `done success` |
 | `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error |
-| `2` | A preflight check failed: missing `prompts/system.md`, skill, `--state` file, `claude`, or `playwright-cli` |
+| `2` | A preflight check failed: missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written) |
 
 ## Turning a run into a regression test
@@ -155,7 +156,7 @@ flowchart LR
 ```
 
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
-2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`prompts/system.md`](prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
+2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`pw_agent/prompts/system.md`](pw_agent/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
@@ -195,11 +196,14 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [ ] **Batch runs**: run many tasks from a file, each in its own session.
-- [ ] **Packaging**: a console-script entry point and a PyPI release, so `pw_agent` runs from any directory.
+- [x] **Packaging**: a console-script entry point and a PyPI release, so `pw_agent` runs from any directory.
 
 ## Development
 
 ```bash
+git clone https://github.com/locle97/playwright-agent-loop.git
+cd playwright-agent-loop
+pip install -e ".[dev]"
 python3 -m pytest                                          # unit tests
 PW_AGENT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real claude + headless browser
 ```
@@ -207,4 +211,6 @@ PW_AGENT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real clau
 > [!TIP]
 > The e2e test fills in and submits [`tests/fixtures/form.html`](tests/fixtures/form.html) using a real model, so each run costs a small amount.
 
-CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request.
+CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request. A `package` job also builds the wheel and smoke-tests it in a fresh venv.
+
+Releasing: bump `version` in `pyproject.toml`, merge, then push tag `vX.Y.Z`; `release.yml` publishes to PyPI.
