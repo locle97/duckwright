@@ -53,12 +53,12 @@ The same file reached twice (same resolved path) runs once, at its first positio
 5. **Summary**, printed after the last task (or after the interruption):
 
    ```
-   Batch: 2 passed, 1 failed, 0 not run
-   pass  tasks/a.md  runs/20261003-101500-123456/history.json
-   fail  tasks/b.md  runs/20261003-101530-654321/history.json
+   Batch: 2 passed, 1 failed, 0 not run  Cost: $0.3588
+   pass  tasks/a.md  $0.1467  runs/20261003-101500-123456/history.json
+   fail  tasks/b.md  $0.2121  runs/20261003-101530-654321/history.json
    ```
 
-   One line per task in run order, with a status word of `pass`, `fail`, `stop` (interrupted) or `skip` (not run, shown with `-` instead of a history path). Columns are separated by two spaces.
+   One line per task in run order, with a status word of `pass`, `fail`, `stop` (interrupted) or `skip` (not run, shown with `-` instead of a cost and a history path), then the task's cost (`$` and 4 decimals, including money spent before a crash or Ctrl-C) and its history path. Columns are separated by two spaces. The `Batch:` line ends with `  Cost: $<total>`, the sum of every task's cost.
 
 ### Exit codes
 

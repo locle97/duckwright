@@ -35,9 +35,11 @@ class FakeBrain:
     def __init__(self, script):
         self.script = script
         self.prompts = []
+        self.greps = []
 
-    def decide(self, prompt):
+    def decide(self, prompt, grep=True):
         self.prompts.append(prompt)
+        self.greps.append(grep)
         item = self.script[min(len(self.prompts) - 1, len(self.script) - 1)]
         if isinstance(item, Exception):
             raise item
@@ -189,3 +191,54 @@ def test_state_load_failure_closes_browser(tmp_path):
     with pytest.raises(PlaywrightError, match="bad state"):
         Agent("t", pw, FakeBrain([]), tmp_path, state=tmp_path / "a.json").run()
     assert pw.closed == 1
+
+
+def test_library_default_is_full_mode(tmp_path):
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", FakePW(), brain, tmp_path).run()
+    assert "<page_snapshot>\n- page\n</page_snapshot>" in brain.prompts[0]
+
+
+def test_grep_mode_prompt_has_no_page_text(tmp_path):
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", FakePW(), brain, tmp_path, snapshot_mode="grep").run()
+    assert "<page_snapshot_file>" in brain.prompts[0]
+    assert "- page" not in brain.prompts[0]
+    assert brain.greps == [True]
+
+
+def test_full_mode_never_greps(tmp_path):
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", SizedPW(["x" * 50_000]), brain, tmp_path, snapshot_mode="full").run()
+    assert "<page_snapshot>" in brain.prompts[0]
+    assert brain.greps == [False]
+
+
+class SizedPW(FakePW):
+    """Returns the given snapshots one per step (the last one repeats)."""
+
+    def __init__(self, snapshots):
+        super().__init__()
+        self.snapshots = snapshots
+
+    def snapshot(self, path):
+        return self.snapshots.pop(0) if len(self.snapshots) > 1 else self.snapshots[0]
+
+
+@pytest.mark.parametrize("size, greps", [(5_000, False), (5_001, True)])
+def test_hybrid_threshold(tmp_path, size, greps):
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", SizedPW(["x" * size]), brain, tmp_path, snapshot_mode="hybrid").run()
+    assert brain.greps == [greps]
+    assert ("<page_snapshot_file>" in brain.prompts[0]) is greps
+    assert ("<page_snapshot>" in brain.prompts[0]) is not greps
+
+
+def test_hybrid_switches_per_step(tmp_path):
+    brain = FakeBrain([dec(("goto", ["u"])), dec(("goto", ["v"])), dec(("done", ["success", "ok"]))])
+    pw = SizedPW(["small", "y" * 9_000, "small again"])
+    Agent("t", pw, brain, tmp_path, snapshot_mode="hybrid").run()
+    assert brain.greps == [False, True, False]
+    assert "<page_snapshot>\nsmall\n</page_snapshot>" in brain.prompts[0]
+    assert "snapshot.yml: 1 lines, 9000 characters." in brain.prompts[1]
+

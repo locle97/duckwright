@@ -49,3 +49,14 @@ def test_observe_includes_tabs(tmp_path):
 def test_observe_tab_list_failure(tmp_path):
     with pytest.raises(PlaywrightError, match="tab boom"):
         observe(make_pw("abc", tab_code=1), tmp_path)
+
+
+def test_observe_page_dir_holds_only_snapshot(tmp_path):
+    observe(make_pw("a\nb\n"), tmp_path)
+    assert [p.name for p in (tmp_path / "page").iterdir()] == ["snapshot.yml"]
+    assert not (tmp_path / "snapshot.yml").exists()
+
+
+def test_observe_counts_untruncated_size(tmp_path):
+    obs = observe(make_pw("x" * 50 + "\ny"), tmp_path, max_chars=10)
+    assert (obs.lines, obs.chars, obs.truncated) == (2, 52, True)
