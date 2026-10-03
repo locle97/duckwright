@@ -95,9 +95,10 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 ## Usage
 
 ```bash
-duckwright "<task>" [--max-steps N] [--model M] [--headed]
+duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
-                  [--allow-file-access] [--export]
+                  [--allow-file-access] [--[no-]export]
+duckwright -f FILE [options]
 duckwright export RUN [-o FILE]
 ```
 
@@ -105,14 +106,15 @@ duckwright export RUN [-o FILE]
 
 | Option | Default | Description |
 | --- | --- | --- |
+| `-f`, `--file` | none | Read the task, and optional settings, from a [task file](#task-files) instead of the command line |
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
-| `--headed` | off | Show the browser window |
+| `--headed` | off | Show the browser window (`--no-headed` overrides a task file) |
 | `--skill` | bundled `duckwright/prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
-| `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)) |
+| `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 
 > [!NOTE]
 > When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
@@ -139,12 +141,51 @@ duckwright "Open https://app.example.com/settings and report my plan" --state au
 > [!CAUTION]
 > `auth.json` holds live session tokens. Keep it out of git, and remember the agent can act as you on every site in the file.
 
+### Task files
+
+A task can live in a file instead of on the command line, so you can keep it, review it and re-run it without shell quoting:
+
+```bash
+duckwright -f tasks/greet.md
+```
+
+The file is the task text, optionally preceded by front matter with the run's settings. `.txt`, `.md` and any other extension are read the same way:
+
+```md
+---
+model: opus
+max-steps: 15
+state: auth.json
+export: true
+---
+Open https://example.com/form, enter the name Linh, submit,
+and check the greeting says "Hello, Linh!".
+```
+
+| Key | Value |
+| --- | --- |
+| `max-steps` | a whole number of at least 1 |
+| `model` | text |
+| `headed` | `true` or `false` |
+| `skill` | a path |
+| `session` | text |
+| `state` | a path |
+| `export` | `true` or `false` |
+
+- Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
+- Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
+- Relative `skill` and `state` paths are resolved from the file's folder, not the current directory.
+- `allow-file-access` can only be given on the command line, so a shared task file can never turn it on.
+- Give either a task or `-f`, not both. A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
+
+[`examples/task.md`](https://github.com/locle97/duckwright/blob/main/examples/task.md) is a commented template to copy.
+
 ### Output
 
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
 
 - `snapshot.yml`: the latest accessibility snapshot of the page
-- `history.json`: the task, the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
+- `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 
 - `duckwright.spec.ts`: the generated regression test, only with `--export`
 
@@ -157,7 +198,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 | --- | --- |
 | `0` | The agent finished with `done success` |
 | `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error |
-| `2` | A preflight check failed: missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
+| `2` | Bad input or a preflight check failed: an unreadable or invalid task file, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written) |
 
 ## Turning a run into a regression test
@@ -219,6 +260,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`actions.py`](https://github.com/locle97/duckwright/blob/main/duckwright/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
 | [`export.py`](https://github.com/locle97/duckwright/blob/main/duckwright/export.py) | Renders `history.json` as a `@playwright/test` spec |
 | [`expect.py`](https://github.com/locle97/duckwright/blob/main/duckwright/expect.py) | `expect` checks: verified against the live page and recorded as assertions |
+| [`taskfile.py`](https://github.com/locle97/duckwright/blob/main/duckwright/taskfile.py) | Reads task files: front-matter settings and the task text |
 | [`observe.py`](https://github.com/locle97/duckwright/blob/main/duckwright/observe.py) | Tab list and page snapshot |
 | [`prompt.py`](https://github.com/locle97/duckwright/blob/main/duckwright/prompt.py) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.py`](https://github.com/locle97/duckwright/blob/main/duckwright/pw.py) | `playwright-cli` wrapper |

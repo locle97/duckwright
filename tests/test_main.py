@@ -58,6 +58,7 @@ def test_playwright_error_history_shape(env, monkeypatch):
     data = _history(tmp)
     assert data == {
         "task": "task",
+        "task_file": None,
         "success": False,
         "answer": "playwright error: snapshot died",
         "steps": 1,
@@ -333,3 +334,133 @@ def test_run_export_failure_keeps_exit_0(env, monkeypatch, capsys):
     assert m.main(argv + ["--export"]) == 0
     assert len(list(tmp.glob("runs/*/history.json"))) == 1
     assert "export failed: nothing to export" in capsys.readouterr().err
+
+
+def _task_file(tmp, text, name="tasks/t.md"):
+    p = tmp / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    return name
+
+
+def _record_run(monkeypatch, success=True):
+    seen = {}
+
+    def run(self):
+        seen.update(
+            task=self.task, max_steps=self.max_steps, headed=self.headed,
+            state=self.state, model=self.brain.model,
+        )
+        return RunResult(success, "a", 1, 0.0, [])
+
+    monkeypatch.setattr(Agent, "run", run)
+    return seen
+
+
+def test_file_runs_body_with_settings(env, monkeypatch):
+    tmp, argv = env
+    f = _task_file(tmp, "---\nmax-steps: 7\nheaded: true\nmodel: opus\n---\nOpen a\nthen b\n")
+    seen = _record_run(monkeypatch)
+    assert m.main(argv[1:] + ["-f", f]) == 0
+    assert seen == {
+        "task": "Open a\nthen b", "max_steps": 7, "headed": True, "state": None, "model": "opus",
+    }
+    data = _history(tmp)
+    assert data["task"] == "Open a\nthen b"
+    assert data["task_file"] == "tasks/t.md"
+
+
+def test_cli_flag_beats_file(env, monkeypatch):
+    tmp, argv = env
+    f = _task_file(tmp, "---\nmax-steps: 7\nexport: true\n---\nGo\n")
+    _fake_run(monkeypatch)
+    seen = {}
+    orig = Agent.run
+
+    def run(self):
+        seen["max_steps"] = self.max_steps
+        return orig(self)
+
+    monkeypatch.setattr(Agent, "run", run)
+    assert m.main(argv[1:] + ["-f", f, "--max-steps", "3", "--no-export"]) == 0
+    assert seen["max_steps"] == 3
+    assert not list(tmp.glob("runs/*/duckwright.spec.ts"))
+
+
+def test_file_export_setting_writes_spec(env, monkeypatch):
+    tmp, argv = env
+    f = _task_file(tmp, "---\nexport: true\n---\nGo\n")
+    _fake_run(monkeypatch)
+    assert m.main(argv[1:] + ["-f", f]) == 0
+    assert len(list(tmp.glob("runs/*/duckwright.spec.ts"))) == 1
+
+
+def test_cli_state_relative_to_cwd_with_file(env, monkeypatch):
+    tmp, argv = env
+    f = _task_file(tmp, "---\nstate: auth.json\n---\nGo\n")
+    (tmp / "tasks" / "auth.json").write_text("{}")
+    (tmp / "cli.json").write_text("{}")
+    seen = _record_run(monkeypatch)
+    assert m.main(argv[1:] + ["-f", f]) == 0
+    assert seen["state"] == (tmp / "tasks" / "auth.json").resolve()
+    assert m.main(argv[1:] + ["-f", f, "--state", "cli.json"]) == 0
+    assert seen["state"] == (tmp / "cli.json").resolve()
+
+
+def test_task_and_file_exits_2(env, capsys):
+    tmp, argv = env
+    f = _task_file(tmp, "Go\n")
+    with pytest.raises(SystemExit) as e:
+        m.main(argv + ["-f", f])
+    assert e.value.code == 2
+    assert "give a task or --file, not both" in capsys.readouterr().err
+    assert not (tmp / "runs").exists()
+
+
+def test_neither_task_nor_file_exits_2(env, capsys):
+    tmp, argv = env
+    with pytest.raises(SystemExit) as e:
+        m.main(argv[1:])
+    assert e.value.code == 2
+    assert "error: give a task or --file" in capsys.readouterr().err
+
+
+def test_file_error_exits_2_without_runs(env, monkeypatch, capsys):
+    tmp, argv = env
+    f = _task_file(tmp, "---\nmodel:\n---\nGo\n")
+
+    def never(self):
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(Agent, "run", never)
+    assert m.main(argv[1:] + ["-f", f]) == 2
+    assert capsys.readouterr().err == 'tasks/t.md:2: "model" has no value\n'
+    assert not (tmp / "runs").exists()
+
+
+def test_file_task_file_on_failure_path(env, monkeypatch):
+    tmp, argv = env
+    f = _task_file(tmp, "Go\n")
+
+    def fail(self):
+        raise PlaywrightError("snapshot died")
+
+    monkeypatch.setattr(Agent, "run", fail)
+    assert m.main(argv[1:] + ["-f", f]) == 1
+    data = _history(tmp)
+    assert data["task_file"] == "tasks/t.md"
+    assert data["task"] == "Go"
+
+
+def test_plain_task_has_null_task_file(env, monkeypatch):
+    tmp, argv = env
+    _record_run(monkeypatch)
+    assert m.main(argv) == 0
+    assert _history(tmp)["task_file"] is None
+
+
+def test_task_named_export_still_runs(env, monkeypatch):
+    tmp, argv = env
+    seen = _record_run(monkeypatch)
+    assert m.main(["--skill", argv[2], "--", "export"]) == 0
+    assert seen["task"] == "export"
