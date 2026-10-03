@@ -1,0 +1,46 @@
+from pathlib import Path
+
+from pw_agent.proc import ProcResult, Runner, run_process
+
+
+class PlaywrightError(Exception):
+    pass
+
+
+class PlaywrightCLI:
+    def __init__(
+        self,
+        session: str = "pw-agent",
+        runner: Runner = run_process,
+        timeout: float = 30,
+        allow_file_access: bool = False,
+    ):
+        self.allow_file_access = allow_file_access
+        self.session = session
+        self.runner = runner
+        self.timeout = timeout
+
+    def run(self, cmd: str, args: list[str]) -> ProcResult:
+        argv = ["playwright-cli", f"-s={self.session}", cmd, *args]
+        return self.runner(argv, None, self.timeout)
+
+    def open(self, headed: bool) -> ProcResult:
+        args = ["about:blank"] + (["--headed"] if headed else [])
+        argv = ["playwright-cli", f"-s={self.session}", "open", *args]
+        if self.allow_file_access:
+            # playwright-cli blocks file: URLs unless the browser daemon starts with
+            # this env var (no CLI flag exists). Scoped to this one child process.
+            argv = ["env", "PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS=1", *argv]
+        return self.runner(argv, None, self.timeout)
+
+    def close(self) -> None:
+        try:
+            self.run("close", [])
+        except Exception:
+            pass
+
+    def snapshot(self, path: Path) -> str:
+        res = self.run("snapshot", [f"--filename={path}"])
+        if res.code != 0:
+            raise PlaywrightError(res.stderr or res.stdout)
+        return Path(path).read_text(encoding="utf-8", errors="replace")
