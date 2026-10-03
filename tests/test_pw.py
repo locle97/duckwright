@@ -46,3 +46,15 @@ def test_snapshot_failure_raises(tmp_path: Path):
     fake = FakeRunner(result=ProcResult(1, "", "boom"))
     with pytest.raises(PlaywrightError, match="boom"):
         PlaywrightCLI(runner=fake).snapshot(tmp_path / "s.yml")
+
+
+def test_open_allow_file_access_sets_env(monkeypatch):
+    import os
+
+    monkeypatch.delenv("PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS", raising=False)
+    fake = FakeRunner()
+    PlaywrightCLI(session="t", runner=fake).open(headed=False)
+    assert "PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS" not in os.environ
+    PlaywrightCLI(session="t", runner=fake, allow_file_access=True).open(headed=False)
+    assert os.environ["PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS"] == "1"
+    monkeypatch.delenv("PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS")

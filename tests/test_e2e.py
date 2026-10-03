@@ -1,0 +1,48 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from pw_agent.brain import Brain
+from pw_agent.loop import Agent
+from pw_agent.pw import PlaywrightCLI
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_missing_skill_exits():
+    r = subprocess.run(
+        [sys.executable, "-m", "pw_agent", "x", "--skill", "/nope"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 2
+    assert "playwright-cli skill not found" in r.stderr
+
+
+@pytest.mark.skipif(
+    os.environ.get("PW_AGENT_E2E") != "1", reason="set PW_AGENT_E2E=1 to run live e2e"
+)
+def test_e2e_form(tmp_path):
+    form = (ROOT / "tests" / "fixtures" / "form.html").resolve()
+    task = f"Open file://{form}, enter the name Linh, submit, and report the greeting."
+    brain = Brain(
+        system_files=[
+            ROOT / "prompts" / "system.md",
+            ROOT / ".claude" / "skills" / "playwright-cli" / "SKILL.md",
+        ]
+    )
+    pw = PlaywrightCLI(session="pw-agent-e2e", allow_file_access=True)
+    try:
+        result = Agent(
+            task, pw, brain, tmp_path, max_steps=8, on_step=lambda r: print(r.line())
+        ).run()
+    finally:
+        pw.close()
+    print(f"steps={result.steps} cost=${result.cost_usd:.4f} answer={result.answer}")
+    assert result.success
+    assert "Hello, Linh!" in result.answer
+    assert result.steps <= 8
