@@ -332,6 +332,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [ ] **Secret redaction**: mask passwords and other sensitive input in `history.json`, so it no longer has to be handled like `auth.json`.
 - [ ] **Domain allow-list**: restrict `goto` and navigation to approved hosts.
+- [ ] **Confirm risky actions**: `--confirm` pauses before clicks whose label matches words like delete, pay, submit order, or send, and waits for a y/n before running them.
 
 **Authentication**
 
