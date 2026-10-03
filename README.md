@@ -1,58 +1,140 @@
+<div align="center">
+
 # pw_agent
 
-A browser-use style agent loop built on `playwright-cli` and `claude -p`.
+[![CI](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
+![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
-## Install
+A [browser-use](https://github.com/browser-use/browser-use) style agent loop built on [`playwright-cli`](https://www.npmjs.com/package/@playwright/cli) and `claude -p`.
 
-- Python >= 3.11 (standard library only), plus `pytest` for tests
-- Playwright CLI:
-  ```
+[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [How it works](#how-it-works) • [Development](#development)
+
+</div>
+
+Give it a task in plain English and `pw_agent` drives a real browser to finish it, one step at a time. The harness runs the loop, not the model: each step Claude sees the page and replies with a single structured decision. The harness checks that decision and runs it. Claude never gets a shell or any tools.
+
+An example run looks like this (illustrative output):
+
+```console
+$ python3 -m pw_agent "Go to example.com and report the page heading"
+step 1 | Starting task | Open example.com | goto https://example.com → ok
+step 2 | Page loaded | Read the heading | done success Example Domain → done
+Result: success
+Answer: Example Domain
+Steps: 2  Cost: $0.0213
+History: runs/20261003-101500-123456/history.json
+```
+
+## Features
+
+- **The harness owns the loop**: snapshot, decide, validate, execute, record. The steps run in a fixed order and the browser is always closed at the end.
+- **Structured decisions**: every step returns JSON that must match a schema: evaluation of the previous goal, memory, next goal, and 1 to 3 actions.
+- **Commands go through an allow-list**: only navigation and interaction commands are accepted. Unknown commands and flags such as `--session` or `--filename` are rejected before they reach the browser.
+- **Page content is treated as untrusted**: snapshots and tab titles are fenced and escaped, and the system prompt tells the model never to follow instructions found in them.
+- **Built-in safeguards**: actions after a page-changing command are skipped, a `done success` is refused if an earlier action in the same step failed, repeated actions trigger a "try something different" nudge, and the run stops after repeated brain failures.
+- **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
+- **No Python dependencies**: the runtime uses only the standard library. `pytest` is needed only for tests.
+
+## Getting started
+
+### Prerequisites
+
+- [Python](https://www.python.org/downloads/) 3.11 or later
+- [Node.js](https://nodejs.org/) to install the Playwright CLI:
+  ```bash
   npm i -g @playwright/cli@latest
   ```
-  The playwright-cli skill is vendored in `.claude/skills/playwright-cli/`. Run
-  `playwright-cli install --skills` only to refresh it to a newer version.
-- Claude Code CLI (`claude`) on your PATH, logged in
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in
+
+> [!NOTE]
+> The playwright-cli skill is already included in `.claude/skills/playwright-cli/`. Run `playwright-cli install --skills` only if you want to update it to a newer version.
+
+### Install
+
+```bash
+git clone https://github.com/locle97/playwright-agent-loop.git
+cd playwright-agent-loop
+pip install -e ".[dev]"   # optional: only needed for running tests
+```
 
 ## Usage
 
-Run from the repo root: the default `--skill` path is relative to the current directory.
+Run from the repo root, because the default `--skill` path is relative to the current directory.
 
-```
+```bash
 python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
                              [--skill PATH] [--session NAME] [--allow-file-access]
 ```
 
-- `--max-steps` (default 25), `--model` (default `sonnet`)
-- `--headed` shows the browser window
-- `--skill` path to the playwright-cli skill (default `.claude/skills/playwright-cli/SKILL.md`)
-- `--session` playwright-cli session name (default `pw-agent`). Two runs at the same time
-  must use different `--session` names, or they will drive the same browser
-- `--allow-file-access` permit `file://` URLs (blocked by playwright-cli by default). This only takes effect when the session's browser is first opened, so close any existing session first.
-  **Warning:** this grants the browser unrestricted local file access, not just one file.
-  A page that hijacks the agent could `goto file:///home/you/.ssh/...` and leak the
-  contents. Only use it with trusted pages and trusted tasks
+| Option | Default | Description |
+| --- | --- | --- |
+| `--max-steps` | `25` | Maximum number of loop iterations |
+| `--model` | `sonnet` | Model passed to `claude -p --model` |
+| `--headed` | off | Show the browser window |
+| `--skill` | `.claude/skills/playwright-cli/SKILL.md` | Path to the playwright-cli skill appended to the system prompt |
+| `--session` | `pw-agent` | playwright-cli session name |
+| `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 
-Each step's history line is printed live, followed by the result, answer, step count and cost.
-A run directory `runs/<timestamp>-<microseconds>/` holds `snapshot.yml` and `history.json`.
+> [!IMPORTANT]
+> Two runs at the same time must use different `--session` names. Otherwise they drive the same browser.
 
-Exit codes:
-- `0` the agent finished with `done success`
-- `1` failure (`done failure`, max steps, repeated brain failures, or a playwright error)
-- `2` a failed preflight check (missing `prompts/system.md`, skill, `claude` or `playwright-cli`)
-- `130` interrupted with Ctrl-C (history is still written)
+> [!WARNING]
+> `--allow-file-access` gives the browser unrestricted access to local files, not just one file. A page that hijacks the agent could `goto file:///home/you/.ssh/...` and leak the contents. Only use it with trusted pages and trusted tasks. The flag only applies when the session's browser is first opened, so close any existing session first.
 
-## Architecture
+### Output
 
-The harness owns the loop, not the model. Each step it takes a `playwright-cli snapshot`,
-asks `claude -p` (all tools disabled) for one structured decision (evaluation, memory,
-next goal, and a list of commands), validates the commands against an allow-list, executes
-them through `playwright-cli`, and appends a compact line to the history that feeds the next
-prompt. The loop ends on a `done` action, max steps, or repeated failures, and the browser
-is always closed.
+Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
 
-## Tests
+- `snapshot.yml`: the latest accessibility snapshot of the page
+- `history.json`: the task, the outcome, the total cost, and every step's decision and results
 
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The agent finished with `done success` |
+| `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error |
+| `2` | A preflight check failed: missing `prompts/system.md`, skill, `claude`, or `playwright-cli` |
+| `130` | Interrupted with Ctrl-C (`history.json` is still written) |
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[playwright-cli snapshot] --> B[Build prompt<br/>task · memory · tabs · history · page]
+    B --> C["claude -p<br/>(no tools, JSON schema)"]
+    C --> D[Validate against<br/>allow-list]
+    D --> E[Execute via<br/>playwright-cli]
+    E --> F{done?}
+    F -- no --> A
+    F -- yes --> G[Close browser,<br/>write history.json]
 ```
-python3 -m pytest                                   # unit tests
+
+1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
+2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`prompts/system.md`](prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
+3. **Validate and execute**: each action is checked against the allowed commands and flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
+4. **Record**: the step is added to the history as one compact line. The last 15 lines are included in the next prompt.
+
+The loop ends when the model sends a `done` action, when max steps is reached, or after 3 consecutive brain failures.
+
+| Module | Responsibility |
+| --- | --- |
+| [`loop.py`](pw_agent/loop.py) | The agent loop, repeat detection, and failure handling |
+| [`brain.py`](pw_agent/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
+| [`actions.py`](pw_agent/actions.py) | Command and flag allow-lists, action execution |
+| [`observe.py`](pw_agent/observe.py) | Tab list and page snapshot |
+| [`prompt.py`](pw_agent/prompt.py) | Prompt sections, history lines, escaping untrusted content |
+| [`pw.py`](pw_agent/pw.py) | `playwright-cli` wrapper |
+
+## Development
+
+```bash
+python3 -m pytest                                          # unit tests
 PW_AGENT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real claude + headless browser
 ```
+
+> [!TIP]
+> The e2e test fills in and submits [`tests/fixtures/form.html`](tests/fixtures/form.html) using a real model, so each run costs a small amount.
+
+CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request.
