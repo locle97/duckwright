@@ -202,3 +202,18 @@ def test_system_prompt_says_browser_is_open():
     text = m.SYSTEM_MD.read_text()
     assert "browser is already open" in text
     assert "no `open` command" in text
+
+
+def test_version_flag(monkeypatch, capsys):
+    monkeypatch.setattr(m, "version", lambda name: "1.2.3")
+    with pytest.raises(SystemExit) as e:
+        m._parse(["--version"])
+    assert e.value.code == 0
+    assert capsys.readouterr().out.strip() == "pw_agent 1.2.3"
+
+
+def test_version_unknown_when_not_installed(monkeypatch):
+    def missing(name):
+        raise m.PackageNotFoundError(name)
+    monkeypatch.setattr(m, "version", missing)
+    assert m._version() == "unknown"
