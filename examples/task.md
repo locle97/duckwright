@@ -8,6 +8,7 @@ max-steps: 25        # stop after this many steps
 # session: login     # playwright-cli session name
 # headed: true       # show the browser window
 # export: true       # write duckwright.spec.ts after a successful run
+# name: greet        # history folder under runs/ (default: this file's name)
 ---
 Open https://example.com/form.
 Enter the name Linh in the Name field and submit the form.

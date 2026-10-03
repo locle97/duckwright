@@ -260,3 +260,9 @@ def test_task_paths_keeps_every_folder_error_in_order(tmp_path, monkeypatch):
     assert [str(p) if isinstance(p, TaskFileError) else p for p in out] == [
         "empty: no task files (.md or .txt)", "x.md", "nope", "tasks/a.md",
     ]
+
+
+def test_name_key_is_text(tmp_path):
+    p = tmp_path / "t.md"
+    p.write_text("---\nname: Login flow\n---\nx")
+    assert load_task_file(p).settings == {"name": "Login flow"}

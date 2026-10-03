@@ -28,7 +28,7 @@ step 2 | Page loaded | Read the heading | done success Example Domain → done
 Result: success
 Answer: Example Domain
 Steps: 2  Cost: $0.0213
-History: runs/20261003-101500-123456/history.json
+History: runs/go-to-example-com-and-report-the-page/20261003-101500-123456/history.json
 ```
 
 ## Features
@@ -97,7 +97,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 ```bash
 duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
-                  [--allow-file-access] [--[no-]export]
+                  [--allow-file-access] [--[no-]export] [--name NAME]
 duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export RUN [-o FILE]
 ```
@@ -114,7 +114,8 @@ duckwright export RUN [-o FILE]
 | `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
-| `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
+| `--name` | task file name or task text | Name of the folder this run's history is grouped under, `runs/<name>/` (see [Output](#output)) |
+| `--export` | off | After a successful run, write a Playwright test to `runs/<name>/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 
 > [!NOTE]
 > When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
@@ -171,6 +172,7 @@ and check the greeting says "Hello, Linh!".
 | `session` | text |
 | `state` | a path |
 | `export` | `true` or `false` |
+| `name` | text |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
 - Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
@@ -194,14 +196,14 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 - A folder runs its `.md` and `.txt` files (any case), sorted by name. Only the top level is read: subfolders, hidden files and other files, such as an `auth.json` next to the tasks, are ignored. A file reached twice runs once.
 - Every file is loaded and preflight-checked before anything runs. If any is invalid, every problem is printed and nothing runs (exit `2`).
 - Each task uses its own file's settings; flags on the command line apply to every task and still win.
-- Tasks run in order, each in its own `runs/<id>/` folder, preceded by a `[1/3] tasks/a.md` line. A failing task does not stop the batch; Ctrl-C does, and the remaining tasks are not run.
+- Tasks run in order, each in its own `runs/<name>/<id>/` folder, preceded by a `[1/3] tasks/a.md` line. A failing task does not stop the batch; Ctrl-C does, and the remaining tasks are not run.
 - A summary follows the last task:
 
   ```
   Batch: 2 passed, 1 failed, 0 not run
-  pass  tasks/a.md  runs/20261003-101500-123456/history.json
-  fail  tasks/b.md  runs/20261003-101530-654321/history.json
-  pass  tasks/c.md  runs/20261003-101612-000042/history.json
+  pass  tasks/a.md  runs/a/20261003-101500-123456/history.json
+  fail  tasks/b.md  runs/b/20261003-101530-654321/history.json
+  pass  tasks/c.md  runs/c/20261003-101612-000042/history.json
   ```
 
   Each line is `pass`, `fail`, `stop` (interrupted) or `skip` (not run).
@@ -210,7 +212,20 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 
 ### Output
 
-Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
+Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<name>/<timestamp>-<microseconds>/`, so every run of the same task sits in one folder:
+
+```
+runs/
+  greet/                                  # from tasks/greet.md
+    20261003-101500-123456/
+    20261003-114200-000042/
+  go-to-example-com-and-report-the-page/  # from a task typed on the command line
+    20261003-101612-654321/
+```
+
+`<name>` comes from `--name` (or a task file's `name:` key), else the task file's name (`tasks/greet.md` → `greet`), else the task text. It is lowercased, reduced to ASCII letters, digits and `-`, and cut to 40 characters; a name with nothing usable left becomes `task`. Runs made by older versions stay in the flat `runs/<timestamp>-<microseconds>/` layout and still work with `duckwright export`.
+
+Each run directory contains:
 
 - `snapshot.yml`: the latest accessibility snapshot of the page
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
@@ -235,9 +250,9 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
 
 1. Export it, either afterwards or as part of the run:
    ```bash
-   duckwright export runs/<id>                      # writes runs/<id>/duckwright.spec.ts
-   duckwright export runs/<id> -o e2e/greet.spec.ts # or anywhere else
-   duckwright "<task>" --export                     # export right after a successful run
+   duckwright export runs/<name>/<id>                      # writes runs/<name>/<id>/duckwright.spec.ts
+   duckwright export runs/<name>/<id> -o e2e/greet.spec.ts # or anywhere else
+   duckwright "<task>" --export                            # export right after a successful run
    ```
    The test contains each action's recorded `code` in step order, including the assertions the agent checked with `expect`, using the semantic locators `playwright-cli` generates:
    ```ts
@@ -299,7 +314,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Test generation**
 
-- [x] **Automatic test export**: `duckwright export runs/<id>`, or `--export` on a run, writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
+- [x] **Automatic test export**: `duckwright export runs/<name>/<id>`, or `--export` on a run, writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
 - [x] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
 - [ ] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that currently need hand edits.
 

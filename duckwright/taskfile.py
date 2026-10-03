@@ -13,6 +13,7 @@ KEYS = {
     "session": ("session", "str"),
     "state": ("state", "path"),
     "export": ("export", "bool"),
+    "name": ("name", "str"),
 }
 FENCE = "---"
 COMMENT = re.compile(r"\s#")

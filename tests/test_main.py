@@ -21,7 +21,7 @@ def env(tmp_path, monkeypatch):
 
 
 def _history(tmp_path):
-    files = list(tmp_path.glob("runs/*/history.json"))
+    files = list(tmp_path.glob("runs/*/*/history.json"))
     assert len(files) == 1
     return json.loads(files[0].read_text())
 
@@ -160,7 +160,7 @@ def test_run_dirs_do_not_collide(env, monkeypatch):
     monkeypatch.setattr(Agent, "run", lambda self: R())
     assert m.main(argv) == 0
     assert m.main(argv) == 0
-    assert len(list(tmp.glob("runs/*/history.json"))) == 2
+    assert len(list(tmp.glob("runs/*/*/history.json"))) == 2
 
 
 def test_allow_file_access_help_warns(capsys):
@@ -304,7 +304,7 @@ def test_run_with_export_writes_spec(env, monkeypatch, capsys):
     tmp, argv = env
     _fake_run(monkeypatch)
     assert m.main(argv + ["--export"]) == 0
-    (run_dir,) = tmp.glob("runs/*")
+    (run_dir,) = tmp.glob("runs/*/*")
     assert (run_dir / "history.json").is_file()
     spec = run_dir / "duckwright.spec.ts"
     assert spec.is_file()
@@ -317,14 +317,14 @@ def test_run_without_export_writes_no_spec(env, monkeypatch):
     tmp, argv = env
     _fake_run(monkeypatch)
     assert m.main(argv) == 0
-    assert not list(tmp.glob("runs/*/duckwright.spec.ts"))
+    assert not list(tmp.glob("runs/*/*/duckwright.spec.ts"))
 
 
 def test_run_export_on_failed_run(env, monkeypatch, capsys):
     tmp, argv = env
     _fake_run(monkeypatch, success=False)
     assert m.main(argv + ["--export"]) == 1
-    assert not list(tmp.glob("runs/*/duckwright.spec.ts"))
+    assert not list(tmp.glob("runs/*/*/duckwright.spec.ts"))
     assert "Test: not exported (run did not succeed)" in capsys.readouterr().out
 
 
@@ -332,7 +332,7 @@ def test_run_export_failure_keeps_exit_0(env, monkeypatch, capsys):
     tmp, argv = env
     _fake_run(monkeypatch, actions=[Action("done", ["success", "a"])], codes=[None])
     assert m.main(argv + ["--export"]) == 0
-    assert len(list(tmp.glob("runs/*/history.json"))) == 1
+    assert len(list(tmp.glob("runs/*/*/history.json"))) == 1
     assert "export failed: nothing to export" in capsys.readouterr().err
 
 
@@ -384,7 +384,7 @@ def test_cli_flag_beats_file(env, monkeypatch):
     monkeypatch.setattr(Agent, "run", run)
     assert m.main(argv[1:] + ["-f", f, "--max-steps", "3", "--no-export"]) == 0
     assert seen["max_steps"] == 3
-    assert not list(tmp.glob("runs/*/duckwright.spec.ts"))
+    assert not list(tmp.glob("runs/*/*/duckwright.spec.ts"))
 
 
 def test_file_export_setting_writes_spec(env, monkeypatch):
@@ -392,7 +392,7 @@ def test_file_export_setting_writes_spec(env, monkeypatch):
     f = _task_file(tmp, "---\nexport: true\n---\nGo\n")
     _fake_run(monkeypatch)
     assert m.main(argv[1:] + ["-f", f]) == 0
-    assert len(list(tmp.glob("runs/*/duckwright.spec.ts"))) == 1
+    assert len(list(tmp.glob("runs/*/*/duckwright.spec.ts"))) == 1
 
 
 def test_cli_state_relative_to_cwd_with_file(env, monkeypatch):
@@ -482,13 +482,13 @@ def _record_runs(monkeypatch, outcomes):
 
 
 def _histories(tmp):
-    return [json.loads(p.read_text()) for p in sorted(tmp.glob("runs/*/history.json"))]
+    return [json.loads(p.read_text()) for p in sorted(tmp.glob("runs/*/*/history.json"))]
 
 
 def _summary(out: str) -> list[str]:
     lines = out.splitlines()
     i = next(i for i, l in enumerate(lines) if l.startswith("Batch: "))
-    return [re.sub(r"runs/[^/]+/", "runs/<id>/", l) for l in lines[i:]]
+    return [re.sub(r"runs/\S+/history.json", "runs/<id>/history.json", l) for l in lines[i:]]
 
 
 def _never(monkeypatch):
@@ -667,3 +667,46 @@ def test_unstattable_file_is_a_one_line_error(env, monkeypatch, capsys):
     assert m.main(argv[1:] + ["-f", "a" * 300]) == 2
     err = capsys.readouterr().err
     assert err.startswith("a" * 300 + ": cannot read: ") and "Traceback" not in err
+
+
+def test_inline_task_grouped_by_task_text(env, monkeypatch):
+    tmp, argv = env
+    _record_runs(monkeypatch, [True])
+    assert m.main(["Open the site", *argv[1:]]) == 0
+    (d,) = tmp.glob("runs/*/*/history.json")
+    assert d.parent.parent.name == "open-the-site"
+    assert re.fullmatch(r"\d{8}-\d{6}-\d{6}", d.parent.name)
+
+
+def test_name_flag_sets_group(env, monkeypatch):
+    tmp, argv = env
+    _record_runs(monkeypatch, [True])
+    assert m.main([*argv, "--name", "Smoke Test"]) == 0
+    assert len(list(tmp.glob("runs/smoke-test/*/history.json"))) == 1
+
+
+def test_task_file_grouped_by_stem(env, monkeypatch):
+    tmp, argv = env
+    _task_file(tmp, "Do it", name="tasks/Login Flow.md")
+    _record_runs(monkeypatch, [True])
+    assert m.main(["-f", "tasks/Login Flow.md", *argv[1:]]) == 0
+    assert len(list(tmp.glob("runs/login-flow/*/history.json"))) == 1
+
+
+def test_task_file_name_key_beats_stem(env, monkeypatch):
+    tmp, argv = env
+    _task_file(tmp, "---\nname: checkout\n---\nDo it")
+    _record_runs(monkeypatch, [True])
+    assert m.main(["-f", "tasks/t.md", *argv[1:]]) == 0
+    assert len(list(tmp.glob("runs/checkout/*/history.json"))) == 1
+
+
+def test_batch_same_stem_shares_group(env, monkeypatch, capsys):
+    tmp, argv = env
+    _task_file(tmp, "A", name="a/login.md")
+    _task_file(tmp, "B", name="b/login.md")
+    _record_runs(monkeypatch, [True, True])
+    assert m.main(["-f", "a/login.md", "b/login.md", *argv[1:]]) == 0
+    assert len(list(tmp.glob("runs/login/*/history.json"))) == 2
+    rows = [l for l in capsys.readouterr().out.splitlines() if l.startswith("pass  ")]
+    assert len({r.split("  ")[2] for r in rows}) == 2

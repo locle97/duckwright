@@ -2,7 +2,6 @@ import argparse
 import json
 import shutil
 import sys
-from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
+from duckwright.runs import new_run_dir
 from duckwright.taskfile import TaskFile, TaskFileError, load_task_file, task_paths
 
 DIST_NAME = "duckwright"
@@ -32,7 +32,7 @@ def _run_parser() -> argparse.ArgumentParser:
         description="Duckwright: browser agent loop on playwright-cli + claude -p",
         epilog=(
             "Run a task file: duckwright -f tasks/login.md. "
-            "To turn an earlier run into a test: duckwright export runs/<id>"
+            "To turn an earlier run into a test: duckwright export runs/<name>/<id>"
         ),
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
@@ -63,7 +63,11 @@ def _run_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--export", action=argparse.BooleanOptionalAction, default=False,
-        help=f"after a successful run, write a Playwright test to runs/<id>/{SPEC_NAME}",
+        help=f"after a successful run, write a Playwright test to runs/<name>/<id>/{SPEC_NAME}",
+    )
+    p.add_argument(
+        "--name", metavar="NAME",
+        help="group this run's history under runs/<NAME>/ (default: task file name or task text)",
     )
     return p
 
@@ -159,14 +163,21 @@ def _preflight_args(args: argparse.Namespace) -> str | None:
     return _preflight(Path(args.skill), Path(args.state).resolve() if args.state else None)
 
 
+def _run_label(args: argparse.Namespace, task_file: str | None) -> str:
+    """What the run's folder is named after: --name, else the task file's name, else the task."""
+    if args.name:
+        return args.name
+    if task_file is not None:
+        return Path(task_file).stem
+    return args.task
+
+
 def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path]:
     """Run one task whose preflight has passed; returns the exit code and its history.json."""
     skill = Path(args.skill)
     state = Path(args.state).resolve() if args.state else None
 
-    # Microseconds keep two runs started in the same second apart.
-    workdir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    workdir.mkdir(parents=True)
+    workdir = new_run_dir(_run_label(args, task_file))
     history_path = workdir / "history.json"
 
     collected: list[StepRecord] = []
