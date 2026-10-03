@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,3 +120,64 @@ def load_task_file(path: str | Path) -> TaskFile:
     if not task:
         raise TaskFileError(f"{where}: no task text")
     return TaskFile(task, settings, base_dir)
+
+
+TASK_SUFFIXES = (".md", ".txt")
+
+
+def _is(check, p: Path) -> bool:
+    try:
+        return check(p)
+    except OSError:  # too long a name, no permission: leave it for load_task_file to report
+        return False
+
+
+def _task_files_in(arg: str) -> list[str]:
+    """The root-level, non-hidden .md/.txt files of folder `arg`, sorted, named under `arg` as typed."""
+    try:
+        entries = sorted(Path(arg).iterdir(), key=lambda p: p.name)
+    except OSError as e:
+        raise TaskFileError(f"{arg}: cannot read: {e}") from None
+    names = [
+        p.name for p in entries
+        if _is(Path.is_file, p) and not p.name.startswith(".")
+        and p.suffix.lower() in TASK_SUFFIXES
+    ]
+    if not names:
+        raise TaskFileError(f"{arg}: no task files (.md or .txt)")
+    prefix = arg if arg.endswith(("/", os.sep)) else arg + os.sep
+    return [prefix + n for n in names]
+
+
+def task_paths(paths: list[str]) -> list[str | TaskFileError]:
+    """Each folder in `paths` replaced by its task files, or by its error, in command-line order.
+
+    A file reached twice is kept once. Other paths, missing ones included, are kept as typed
+    for load_task_file to report.
+    """
+    out: list[str | TaskFileError] = []
+    seen: set[object] = set()
+    for arg in paths:
+        try:
+            found = _task_files_in(arg) if _is(Path.is_dir, Path(arg)) else [arg]
+        except TaskFileError as e:
+            out.append(e)
+            continue
+        for p in found:
+            try:
+                key: object = Path(p).resolve()
+            except (OSError, RuntimeError, ValueError):
+                key = p
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+    return out
+
+
+def expand_task_paths(paths: list[str]) -> list[str]:
+    """Like task_paths, but raises the first folder error."""
+    out = task_paths(paths)
+    for p in out:
+        if isinstance(p, TaskFileError):
+            raise p
+    return out  # type: ignore[return-value]

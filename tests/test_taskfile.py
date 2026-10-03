@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from duckwright.taskfile import TaskFileError, load_task_file
+from duckwright.taskfile import TaskFileError, expand_task_paths, load_task_file, task_paths
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -189,3 +189,74 @@ def test_example_template_parses():
     tf = load_task_file(ROOT / "examples" / "task.md")
     assert tf.settings == {"model": "sonnet", "max_steps": 25}
     assert tf.task.startswith("Open https://example.com/form.")
+
+
+def test_expand_files_pass_through_in_order(tmp_path):
+    a, b = _w(tmp_path, "A", "a.md"), _w(tmp_path, "B", "b.txt")
+    assert expand_task_paths([str(b), str(a), "missing.md"]) == [str(b), str(a), "missing.md"]
+
+
+def test_expand_folder_filters_and_sorts(tmp_path):
+    for name in ("b.md", "a.TXT", "c.Md", ".hidden.md", "auth.json", "notes", "sub/d.md"):
+        _w(tmp_path / "tasks", "x", name)
+    assert expand_task_paths([str(tmp_path / "tasks")]) == [
+        str(tmp_path / "tasks" / n) for n in ("a.TXT", "b.md", "c.Md")
+    ]
+
+
+def test_expand_folder_keeps_path_as_typed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _w(tmp_path / "tasks", "x", "a.md")
+    assert expand_task_paths(["tasks/"]) == ["tasks/a.md"]
+    assert expand_task_paths(["tasks"]) == ["tasks/a.md"]
+
+
+def test_expand_dedupes_by_resolved_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _w(tmp_path / "tasks", "x", "a.md")
+    _w(tmp_path / "tasks", "x", "b.md")
+    assert expand_task_paths(["tasks/a.md", "tasks", "./tasks/b.md"]) == [
+        "tasks/a.md", "tasks/b.md",
+    ]
+
+
+def test_expand_empty_folder_errors(tmp_path):
+    _w(tmp_path / "tasks", "{}", "auth.json")
+    with pytest.raises(TaskFileError) as e:
+        expand_task_paths([str(tmp_path / "tasks")])
+    assert str(e.value) == f"{tmp_path / 'tasks'}: no task files (.md or .txt)"
+
+
+def test_expand_unreadable_folder_errors(tmp_path, monkeypatch):
+    (tmp_path / "tasks").mkdir()
+
+    def deny(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "iterdir", deny)
+    with pytest.raises(TaskFileError) as e:
+        expand_task_paths([str(tmp_path / "tasks")])
+    assert str(e.value) == f"{tmp_path / 'tasks'}: cannot read: denied"
+
+
+def test_expand_keeps_dot_slash_as_typed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _w(tmp_path / "tasks", "x", "a.md")
+    assert expand_task_paths(["./tasks/"]) == ["./tasks/a.md"]
+    assert expand_task_paths(["./tasks"]) == ["./tasks/a.md"]
+
+
+def test_expand_unstattable_path_is_left_for_loading(tmp_path):
+    long = str(tmp_path / ("a" * 300))
+    assert expand_task_paths([long]) == [long]
+    assert _err(long).startswith(f"{long}: cannot read: ")
+
+
+def test_task_paths_keeps_every_folder_error_in_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _w(tmp_path / "empty", "{}", "auth.json")
+    _w(tmp_path / "tasks", "x", "a.md")
+    out = task_paths(["empty", "x.md", "nope", "tasks"])
+    assert [str(p) if isinstance(p, TaskFileError) else p for p in out] == [
+        "empty: no task files (.md or .txt)", "x.md", "nope", "tasks/a.md",
+    ]
