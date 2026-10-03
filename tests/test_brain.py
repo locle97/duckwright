@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import jsonschema
 import pytest
 
 from pw_agent.brain import DECISION_SCHEMA, Action, Brain, BrainError, Decision
@@ -128,6 +129,20 @@ def test_parse_failure_after_cost_carries_cost():
 def test_schema_restricts_cmd_to_allowed():
     from pw_agent.actions import ALLOWED
 
-    cmd = DECISION_SCHEMA["properties"]["actions"]["items"]["properties"]["cmd"]
-    assert set(cmd["enum"]) == ALLOWED
-    assert "playwright-cli" not in cmd["enum"]
+    done, other = DECISION_SCHEMA["properties"]["actions"]["items"]["anyOf"]
+    assert done["properties"]["cmd"] == {"const": "done"}
+    cmds = set(other["properties"]["cmd"]["enum"]) | {"done"}
+    assert cmds == ALLOWED
+    assert "playwright-cli" not in cmds
+
+
+def test_schema_done_requires_status_and_answer():
+    item = DECISION_SCHEMA["properties"]["actions"]["items"]
+    ok = lambda a: jsonschema.Draft7Validator(item).is_valid(a)  # noqa: E731
+    assert ok({"cmd": "done", "args": ["success", "42"]})
+    assert ok({"cmd": "done", "args": ["failure", "gave up"]})
+    assert not ok({"cmd": "done", "args": []})
+    assert not ok({"cmd": "done", "args": ["success"]})
+    assert not ok({"cmd": "done", "args": ["42", "x"]})
+    assert ok({"cmd": "click", "args": ["e1"]})
+    assert not ok({"cmd": "eval", "args": ["1"]})

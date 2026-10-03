@@ -22,12 +22,36 @@ DECISION_SCHEMA: dict = {
             "minItems": 1,
             "maxItems": 3,
             "items": {
-                "type": "object",
-                "required": ["cmd", "args"],
-                "properties": {
-                    "cmd": {"type": "string", "enum": list(ALLOWED_COMMANDS)},
-                    "args": {"type": "array", "items": {"type": "string"}},
-                },
+                "anyOf": [
+                    # done must carry a status and an answer. Positional typing
+                    # (prefixItems / tuple items) is rejected by the CLI or the API,
+                    # so `contains` stands in; actions.py still checks args[0].
+                    {
+                        "type": "object",
+                        "required": ["cmd", "args"],
+                        "properties": {
+                            "cmd": {"const": "done"},
+                            "args": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "contains": {"enum": ["success", "failure"]},
+                                "minItems": 2,
+                                "maxItems": 2,
+                            },
+                        },
+                    },
+                    {
+                        "type": "object",
+                        "required": ["cmd", "args"],
+                        "properties": {
+                            "cmd": {
+                                "type": "string",
+                                "enum": [c for c in ALLOWED_COMMANDS if c != "done"],
+                            },
+                            "args": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                ],
             },
         },
     },
