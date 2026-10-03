@@ -165,3 +165,9 @@ def test_state_passed_to_agent_as_absolute_path(env, monkeypatch):
     assert m.main(argv + ["--state", "auth.json"]) == 0
     assert seen["state"] == tmp / "auth.json"
     assert seen["state"].is_absolute()
+
+
+def test_system_prompt_says_browser_is_open():
+    text = (Path(__file__).resolve().parent.parent / "prompts" / "system.md").read_text()
+    assert "browser is already open" in text
+    assert "no `open` command" in text

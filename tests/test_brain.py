@@ -123,3 +123,11 @@ def test_parse_failure_after_cost_carries_cost():
     with pytest.raises(BrainError) as ei:
         Brain([], runner=FakeRunner(env(structured_output=None, total_cost_usd=0.02))).decide("x")
     assert ei.value.cost == 0.02
+
+
+def test_schema_restricts_cmd_to_allowed():
+    from pw_agent.actions import ALLOWED
+
+    cmd = DECISION_SCHEMA["properties"]["actions"]["items"]["properties"]["cmd"]
+    assert set(cmd["enum"]) == ALLOWED
+    assert "playwright-cli" not in cmd["enum"]

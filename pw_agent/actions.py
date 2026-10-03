@@ -1,16 +1,11 @@
 import json
 import re
 
-from pw_agent.brain import Action
+from pw_agent.brain import ALLOWED_COMMANDS, Action
 from pw_agent.pw import PlaywrightCLI
 
-_ALLOWED_ORDER = (
-    "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
-    "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
-    "screenshot", "done",
-)
-ALLOWED: frozenset[str] = frozenset(_ALLOWED_ORDER)
-ALLOWED_LIST = ", ".join(_ALLOWED_ORDER)
+ALLOWED: frozenset[str] = frozenset(ALLOWED_COMMANDS)
+ALLOWED_LIST = ", ".join(ALLOWED_COMMANDS)
 PAGE_CHANGING: frozenset[str] = frozenset(
     {"goto", "click", "press", "tab-new", "tab-select", "tab-close", "go-back"}
 )

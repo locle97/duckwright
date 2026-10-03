@@ -4,6 +4,12 @@ from pathlib import Path
 
 from pw_agent.proc import Runner, run_process
 
+ALLOWED_COMMANDS: tuple[str, ...] = (
+    "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
+    "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
+    "screenshot", "done",
+)
+
 DECISION_SCHEMA: dict = {
     "type": "object",
     "required": ["evaluation_previous_goal", "memory", "next_goal", "actions"],
@@ -19,7 +25,7 @@ DECISION_SCHEMA: dict = {
                 "type": "object",
                 "required": ["cmd", "args"],
                 "properties": {
-                    "cmd": {"type": "string"},
+                    "cmd": {"type": "string", "enum": list(ALLOWED_COMMANDS)},
                     "args": {"type": "array", "items": {"type": "string"}},
                 },
             },
