@@ -105,7 +105,7 @@ python3 -m pw_agent "Open https://app.example.com/settings and report my plan" -
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
 
 - `snapshot.yml`: the latest accessibility snapshot of the page
-- `history.json`: the task, the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, or was `done`).
+- `history.json`: the task, the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated).
 
 > [!CAUTION]
 > `code` contains whatever the agent typed, passwords included. Treat `history.json` like `auth.json`.
@@ -124,14 +124,15 @@ Each step's history line is printed as it happens, followed by the result, answe
 `history.json` holds the code for a Node.js `@playwright/test` regression test, so you don't have to drive the agent again:
 
 1. Read `history.json` in step order and collect every action's `code`, skipping `null`.
-2. Put the code together in that order. It already uses semantic locators, for example:
+2. Put the code together in that order. If the run used `--state FILE`, the test must load the same storage state, for example `test.use({ storageState: 'auth.json' })`, because loading it leaves no `code`. It already uses semantic locators, for example:
    ```js
    await page.goto('https://example.com/form');
    await page.getByRole('textbox', { name: 'Name' }).fill('Linh');
    await page.getByRole('button', { name: 'Submit' }).click();
    ```
-3. Add assertions for the outcome the run reported in `answer`, for example `await expect(page.getByRole('heading')).toHaveText('Hello, Linh!')`.
-4. Run the test with `npx playwright test` and fix any locator that fails. [`.claude/skills/playwright-cli/references/test-generation.md`](.claude/skills/playwright-cli/references/test-generation.md) covers that workflow.
+3. If the run used `tab-new`, `tab-select` or `tab-close`, edit the code by hand: it assumes a single `page`.
+4. Add assertions for the outcome the run reported in `answer`, for example `await expect(page.getByRole('heading')).toHaveText('Hello, Linh!')`.
+5. Run the test with `npx playwright test` and fix any locator that fails. [`.claude/skills/playwright-cli/references/test-generation.md`](.claude/skills/playwright-cli/references/test-generation.md) covers that workflow.
 
 ## How it works
 

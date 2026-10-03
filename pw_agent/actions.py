@@ -22,7 +22,8 @@ _FLAG = re.compile(r"^-{1,2}[A-Za-z]")
 
 # playwright-cli prints the code it ran as "### Ran Playwright code" + a fenced block.
 _RAN_CODE = re.compile(
-    r"^### Ran Playwright code\n```\w*\n(.*?)\n```", re.MULTILINE | re.DOTALL
+    r"^### Ran Playwright code\n```\w*\n((?:(?!```)[^\n]*\n)*?(?!```)[^\n]+)\n```",
+    re.MULTILINE,
 )
 
 MAX_ERROR_CHARS = 300

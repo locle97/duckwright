@@ -266,3 +266,11 @@ def test_codes_none_when_stdout_has_no_code():
     codes = []
     execute(pw, [Action("hover", ["e1"])], codes=codes)
     assert codes == [None]
+
+
+def test_extract_code_empty_block_is_none():
+    out = (
+        "### Ran Playwright code\n```js\n```\n"
+        "### Snapshot\n```yaml\n- button\n```\n"
+    )
+    assert extract_code(out) is None
