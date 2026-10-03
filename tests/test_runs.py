@@ -93,3 +93,15 @@ def test_format_run():
 def test_format_run_unparsed_timestamp_and_short_task():
     r = RunInfo(Path("runs/weird"), None, "weird", True, 3, 0.0, "Hi", None)
     assert format_run(r) == "weird  pass   3 steps  $0.0000  runs/weird  Hi"
+
+
+def test_slugify_keeps_word_ending_at_cut():
+    assert slugify("a" * 35 + "-bbbb-cc") == "a" * 35 + "-bbbb"
+
+
+def test_find_runs_unstamped_folders_sort_last(tmp_path):
+    root = tmp_path / "runs"
+    _hist(root / "greet" / "backup", "copy")
+    _hist(root / "greet" / "20261003-101500-123456", "real")
+    runs, _ = find_runs(root)
+    assert [r.task for r in runs] == ["real", "copy"]

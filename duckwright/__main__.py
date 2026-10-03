@@ -210,7 +210,7 @@ def _preflight_args(args: argparse.Namespace) -> str | None:
 
 def _run_label(args: argparse.Namespace, task_file: str | None) -> str:
     """What the run's folder is named after: --name, else the task file's name, else the task."""
-    if args.name:
+    if args.name is not None:
         return args.name
     if task_file is not None:
         return Path(task_file).stem

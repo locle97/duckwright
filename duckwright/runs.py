@@ -22,10 +22,11 @@ def slugify(text: str, max_len: int = 40) -> str:
     ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
     if len(slug) > max_len:
-        slug = slug[:max_len]
-        if "-" in slug:
-            slug = slug[: slug.rindex("-")]
-        slug = slug.strip("-")
+        cut = slug[:max_len]
+        # Back up to the last whole word, unless the cut already ends one.
+        if slug[max_len] != "-" and "-" in cut:
+            cut = cut[: cut.rindex("-")]
+        slug = cut.strip("-")
     if not slug:
         return "task"
     return slug + "-task" if slug in RESERVED else slug
@@ -76,8 +77,17 @@ def find_runs(root: Path = RUNS_DIR) -> tuple[list[RunInfo], list[str]]:
             task=data["task"],
             task_file=task_file if isinstance(task_file, str) else None,
         ))
-    runs.sort(key=lambda r: (r.started, str(r.path)), reverse=True)
+    # Folders not named by a timestamp (hand-made copies) sort after every real run.
+    runs.sort(key=lambda r: (_stamped(r.started), r.started, str(r.path)), reverse=True)
     return runs, warnings
+
+
+def _stamped(name: str) -> bool:
+    try:
+        datetime.strptime(name, TIMESTAMP_FORMAT)
+    except ValueError:
+        return False
+    return True
 
 
 def _number(v) -> float:

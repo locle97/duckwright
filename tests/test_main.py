@@ -783,3 +783,26 @@ def test_task_named_runs_still_runs(env, monkeypatch):
     seen = _record_run(monkeypatch)
     assert m.main(["--skill", argv[2], "--", "runs"]) == 0
     assert seen["task"] == "runs"
+
+
+def test_empty_name_flag_groups_under_task(env, monkeypatch):
+    tmp, argv = env
+    _record_runs(monkeypatch, [True])
+    assert m.main([*argv, "--name", ""]) == 0
+    assert len(list(tmp.glob("runs/task/*/history.json"))) == 1
+
+
+def test_name_flag_cannot_escape_runs(env, monkeypatch):
+    tmp, argv = env
+    _record_runs(monkeypatch, [True])
+    assert m.main([*argv, "--name", "../../outside"]) == 0
+    assert len(list(tmp.glob("runs/outside/*/history.json"))) == 1
+
+
+def test_runs_command_lists_legacy_runs(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _hist(tmp_path / "runs" / "20261001-090000-000001", "old")
+    assert m.main(["runs"]) == 0
+    assert _lines(capsys) == [
+        "2026-10-01 09:00  pass   1 steps  $0.0000  runs/20261001-090000-000001  old"
+    ]
