@@ -119,3 +119,40 @@ def load_task_file(path: str | Path) -> TaskFile:
     if not task:
         raise TaskFileError(f"{where}: no task text")
     return TaskFile(task, settings, base_dir)
+
+
+TASK_SUFFIXES = (".md", ".txt")
+
+
+def _task_files_in(arg: str) -> list[str]:
+    """The root-level, non-hidden .md/.txt files of folder `arg`, sorted, named under `arg` as typed."""
+    try:
+        entries = sorted(Path(arg).iterdir(), key=lambda p: p.name)
+    except OSError as e:
+        raise TaskFileError(f"{arg}: cannot read: {e}") from None
+    names = [
+        p.name for p in entries
+        if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in TASK_SUFFIXES
+    ]
+    if not names:
+        raise TaskFileError(f"{arg}: no task files (.md or .txt)")
+    return [str(Path(arg) / n) for n in names]
+
+
+def expand_task_paths(paths: list[str]) -> list[str]:
+    """Replace each folder in `paths` with its task files; a file reached twice is kept once.
+
+    Other paths, missing ones included, are kept as typed for load_task_file to report.
+    """
+    out: list[str] = []
+    seen: set[object] = set()
+    for arg in paths:
+        for p in _task_files_in(arg) if Path(arg).is_dir() else [arg]:
+            try:
+                key: object = Path(p).resolve()
+            except (OSError, RuntimeError, ValueError):
+                key = p
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+    return out
