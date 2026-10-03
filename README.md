@@ -8,11 +8,13 @@
 
 A [browser-use](https://github.com/browser-use/browser-use) style agent loop built on [`playwright-cli`](https://www.npmjs.com/package/@playwright/cli) and `claude -p`.
 
-[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [How it works](#how-it-works) • [Development](#development)
+[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [Regression tests](#turning-a-run-into-a-regression-test) • [How it works](#how-it-works) • [Development](#development)
 
 </div>
 
 Give it a task in plain English and `pw_agent` drives a real browser to finish it, one step at a time. The harness runs the loop, not the model: each step Claude sees the page and replies with a single structured decision. The harness checks that decision and runs it. Claude never gets a shell or any tools.
+
+Every run also records the Playwright code behind each action, so a task the agent solved once can become a repeatable `@playwright/test` regression test.
 
 An example run looks like this (illustrative output):
 
@@ -34,6 +36,7 @@ History: runs/20261003-101500-123456/history.json
 - **Page content is treated as untrusted**: snapshots and tab titles are fenced and escaped, and the system prompt tells the model never to follow instructions found in them.
 - **Built-in safeguards**: actions after a page-changing command are skipped, a `done success` is refused if an earlier action in the same step failed, repeated actions trigger a "try something different" nudge, and the run stops after repeated brain failures.
 - **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
+- **Replayable as a test**: each action in `history.json` carries the Playwright code `playwright-cli` ran for it, ready to paste into a regression test.
 - **No Python dependencies**: the runtime uses only the standard library. `pytest` is needed only for tests.
 
 ## Getting started
@@ -119,20 +122,24 @@ Each step's history line is printed as it happens, followed by the result, answe
 | `2` | A preflight check failed: missing `prompts/system.md`, skill, `--state` file, `claude`, or `playwright-cli` |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written) |
 
-### Turning a run into a Playwright test
+## Turning a run into a regression test
 
-`history.json` holds the code for a Node.js `@playwright/test` regression test, so you don't have to drive the agent again:
+A successful run already contains the steps of a Node.js `@playwright/test` test, so you don't need to drive the agent again:
 
-1. Read `history.json` in step order and collect every action's `code`, skipping `null`.
-2. Put the code together in that order. If the run used `--state FILE`, the test must load the same storage state, for example `test.use({ storageState: 'auth.json' })`, because loading it leaves no `code`. It already uses semantic locators, for example:
+1. Read `history.json` in step order and collect each action's `code`, skipping `null`. The code uses the semantic locators `playwright-cli` generates:
    ```js
    await page.goto('https://example.com/form');
    await page.getByRole('textbox', { name: 'Name' }).fill('Linh');
    await page.getByRole('button', { name: 'Submit' }).click();
    ```
-3. If the run used `tab-new`, `tab-select` or `tab-close`, edit the code by hand: it assumes a single `page`.
-4. Add assertions for the outcome the run reported in `answer`, for example `await expect(page.getByRole('heading')).toHaveText('Hello, Linh!')`.
-5. Run the test with `npx playwright test` and fix any locator that fails. [`.claude/skills/playwright-cli/references/test-generation.md`](.claude/skills/playwright-cli/references/test-generation.md) covers that workflow.
+2. Add assertions for the outcome the run reported in `answer`:
+   ```js
+   await expect(page.getByRole('heading')).toHaveText('Hello, Linh!');
+   ```
+3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
+
+> [!IMPORTANT]
+> Some setup leaves no `code` behind. If the run used `--state FILE`, load the same state in the test with `test.use({ storageState: 'auth.json' })`. If it used `tab-new`, `tab-select` or `tab-close`, edit the code by hand, because it assumes a single `page`.
 
 ## How it works
 
@@ -150,7 +157,7 @@ flowchart LR
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
 2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`prompts/system.md`](prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
-4. **Record**: the step is added to the history as one compact line. The last 15 lines are included in the next prompt.
+4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
 The loop ends when the model sends a `done` action, when max steps is reached, or after 3 consecutive brain failures.
 
@@ -158,7 +165,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | --- | --- |
 | [`loop.py`](pw_agent/loop.py) | The agent loop, repeat detection, and failure handling |
 | [`brain.py`](pw_agent/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
-| [`actions.py`](pw_agent/actions.py) | Command and flag allow-lists, action execution |
+| [`actions.py`](pw_agent/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
 | [`observe.py`](pw_agent/observe.py) | Tab list and page snapshot |
 | [`prompt.py`](pw_agent/prompt.py) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.py`](pw_agent/pw.py) | `playwright-cli` wrapper |
