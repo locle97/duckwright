@@ -22,7 +22,7 @@
 
 1. **A Markdown body that uses `#` headings or `#` inside text.** Expected: the body is kept verbatim; comment stripping applies only inside front matter. Pinned by Task 1 `test_body_hash_lines_are_kept`.
 2. **A value containing `:` or a `#` with no space before it** (`session: team:a#1`). Expected: the key splits on the first `:` only, and only ` #` starts a comment, so the value is `team:a#1`. Pinned by Task 1 `test_value_keeps_colon_and_unspaced_hash`.
-3. **An `.md` file that starts with a `---` horizontal rule, with no front matter intended.** Expected: the first line that isn't `key: value` gives a located error (`:3: expected "key: value"` for `---`, a blank line, then text), never a crash. Pinned by Task 1 `test_leading_rule_is_a_located_error`.
+3. **An `.md` file that starts with a `---` horizontal rule, with no front matter intended.** Expected: with a later `---` divider, the first line between them that isn't `key: value` gives a located error (`:3: expected "key: value"` for `---`, a blank line, text, `---`); with no later divider, `front matter is not closed with ---`. Never a crash. Pinned by Task 1 `test_leading_rule_is_a_located_error`.
 4. **A capitalised key** (`Model: opus`). Expected: `:N: unknown setting "Model"`, because keys are case-sensitive. Pinned by Task 1 `test_key_is_case_sensitive`.
 5. **A relative `--state` on the command line together with `-f` from another folder.** Expected: the command-line path stays relative to the current directory, and only the file's own paths resolve from the file's folder. Pinned by Task 2 `test_cli_state_relative_to_cwd_with_file`.
 
@@ -67,7 +67,7 @@ def test_body_rule_is_kept():           # "---\nmodel: x\n---\nA\n---\nB" -> tas
 def test_body_hash_lines_are_kept():    # "# Login\n\nOpen a  # not a comment" -> task kept verbatim (stripped ends only)
 def test_value_keeps_colon_and_unspaced_hash():  # session: team:a#1 -> "team:a#1"
 def test_key_is_case_sensitive():       # Model: opus at line 2 -> ':2: unknown setting "Model"'
-def test_leading_rule_is_a_located_error():  # "---\n\nSome text\n" -> ':3: expected "key: value"'
+def test_leading_rule_is_a_located_error():  # "---\n\nSome text\n---\nMore" -> ':3: expected "key: value"'
 
 @pytest.mark.parametrize("text,line,message", [
     ("---\nmodel: x\nGo", None, "front matter is not closed with ---"),
