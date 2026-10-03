@@ -2,14 +2,14 @@
 
 # pw_agent
 
-[![PyPI](https://img.shields.io/pypi/v/playwright-agent-loop)](https://pypi.org/project/playwright-agent-loop/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/playwright-agent-loop/blob/main/LICENSE)
 [![CI](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
 A [browser-use](https://github.com/browser-use/browser-use) style agent loop built on [`playwright-cli`](https://www.npmjs.com/package/@playwright/cli) and `claude -p`.
 
-[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [Regression tests](#turning-a-run-into-a-regression-test) • [How it works](#how-it-works) • [Roadmap](#roadmap) • [Development](#development)
+[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [Regression tests](#turning-a-run-into-a-regression-test) • [How it works](#how-it-works) • [Roadmap](#roadmap) • [Development](#development) • [License](#license)
 
 </div>
 
@@ -56,11 +56,32 @@ History: runs/20261003-101500-123456/history.json
 
 ### Install
 
+`pw_agent` is not on PyPI yet, so install it from GitHub or from a local build. Each option puts a `pw_agent` command on your `PATH` that works from any directory. [pipx](https://pipx.pypa.io/) keeps it in its own environment; plain `pip install` works too.
+
+**From GitHub**, without cloning:
+
 ```bash
-pipx install playwright-agent-loop   # or: pip install playwright-agent-loop
+pipx install "git+https://github.com/locle97/playwright-agent-loop.git"
 ```
 
-The PyPI package is named `playwright-agent-loop`, but the command it installs is `pw_agent`. To work on the code instead, see [Development](#development).
+**From a clone**:
+
+```bash
+git clone https://github.com/locle97/playwright-agent-loop.git
+cd playwright-agent-loop
+pipx install .
+```
+
+**From a wheel you build yourself**, for example to copy to another machine:
+
+```bash
+pip install build
+python -m build                          # writes dist/*.whl and dist/*.tar.gz
+bash scripts/smoke_install.sh dist       # optional: install check in a fresh venv, prints "smoke ok"
+pipx install dist/playwright_agent_loop-0.1.0-py3-none-any.whl
+```
+
+Check the install with `pw_agent --version`. To pick up a newer version, re-run the same install command with `--force`. The package is named `playwright-agent-loop`, but the command it installs is `pw_agent`. To work on the code instead, see [Development](#development).
 
 ## Usage
 
@@ -196,7 +217,8 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [ ] **Batch runs**: run many tasks from a file, each in its own session.
-- [x] **Packaging**: a console-script entry point and a PyPI release, so `pw_agent` runs from any directory.
+- [x] **Packaging**: a console-script entry point, so `pw_agent` runs from any directory after a local or GitHub install.
+- [ ] **PyPI release**: publish `playwright-agent-loop` so `pipx install playwright-agent-loop` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.
 
 ## Development
 
@@ -213,4 +235,10 @@ PW_AGENT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real clau
 
 CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request. A `package` job also builds the wheel and smoke-tests it in a fresh venv.
 
-Releasing: bump `version` in `pyproject.toml`, merge, then push tag `vX.Y.Z`; `release.yml` publishes to PyPI.
+Releasing to PyPI (not set up yet): add a trusted publisher on PyPI for `release.yml` with environment `pypi`, bump `version` in `pyproject.toml`, merge, then push tag `vX.Y.Z`. `release.yml` runs the tests and the install check, then publishes.
+
+## License
+
+[MIT](https://github.com/locle97/playwright-agent-loop/blob/main/LICENSE).
+
+`pw_agent/prompts/playwright-cli.md` and `.claude/skills/playwright-cli/` are adapted from the skill shipped with Microsoft's [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli), which is licensed under Apache-2.0.

@@ -70,3 +70,9 @@ def test_wheel_has_no_runtime_deps(wheel):
     meta = _read(wheel, "METADATA")
     assert "Requires-Python: >=3.11" in meta
     assert all("extra ==" in l for l in meta.splitlines() if l.startswith("Requires-Dist:"))
+
+
+def test_wheel_declares_mit_license(wheel):
+    meta = _read(wheel, "METADATA")
+    assert "License-Expression: MIT" in meta
+    assert any(n.endswith(".dist-info/licenses/LICENSE") for n in wheel.namelist())
