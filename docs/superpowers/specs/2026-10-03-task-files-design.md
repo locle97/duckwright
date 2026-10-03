@@ -166,6 +166,7 @@ Every case prints one line to stderr, `<file>[:<line>]: <message>`, and exits `2
 | Repeated key | `"<key>" is set twice` |
 | Empty value | `"<key>" has no value` |
 | Wrong type | `<key> must be a whole number of at least 1, got "<v>"` / `<key> must be true or false, got "<v>"` |
+| `skill`/`state` that cannot be resolved (unknown `~user`, a symlink loop, a NUL byte) | `<key> is not a usable path: <reason>` |
 | Empty body | `no task text` |
 
 Missing-file, unreadable and empty-body errors have no line number.

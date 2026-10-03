@@ -154,7 +154,7 @@ def main(argv=None) -> int:
         parser.error("give a task or --file")
     if args.file is not None:
         try:
-            tf = load_task_file(Path(args.file))
+            tf = load_task_file(args.file)
         except TaskFileError as e:
             print(e, file=sys.stderr)
             return 2

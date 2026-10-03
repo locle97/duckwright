@@ -14,7 +14,7 @@ KEYS = {
     "export": ("export", "bool"),
 }
 FENCE = "---"
-COMMENT = re.compile(r"(^|\s)#")
+COMMENT = re.compile(r"\s#")
 
 
 class TaskFileError(Exception):
@@ -33,28 +33,36 @@ class _Line(Exception):
 
 
 def _value(raw: str) -> str:
-    raw = raw.strip()
-    if raw[:1] in ("'", '"'):
-        end = raw.find(raw[0], 1)
-        rest = raw[end + 1:].strip() if end != -1 else ""
+    """`raw` is the text after the colon, unstripped: only whitespace then `#` starts a comment."""
+    v = raw.strip()
+    if v[:1] in ("'", '"'):
+        end = v.find(v[0], 1)
+        rest = v[end + 1:].strip() if end != -1 else ""
         if end == -1 or (rest and not rest.startswith("#")):
             raise _Line("bad quoted value")
-        return raw[1:end]
+        return v[1:end]
     m = COMMENT.search(raw)
     return (raw[: m.start()] if m else raw).strip()
 
 
 def _convert(key: str, kind: str, v: str, base_dir: Path) -> object:
     if kind == "int":
-        if not (v.isascii() and v.isdigit()) or int(v) < 1:
+        try:
+            n = int(v) if v.isascii() and v.isdigit() else 0
+        except ValueError:  # more digits than int() will convert
+            n = 0
+        if n < 1:
             raise _Line(f'{key} must be a whole number of at least 1, got "{v}"')
-        return int(v)
+        return n
     if kind == "bool":
         if v not in ("true", "false"):
             raise _Line(f'{key} must be true or false, got "{v}"')
         return v == "true"
     if kind == "path":
-        return str((base_dir / Path(v).expanduser()).resolve())
+        try:
+            return str((base_dir / Path(v).expanduser()).resolve())
+        except (RuntimeError, ValueError, OSError) as e:  # unknown ~user, symlink loop, NUL
+            raise _Line(f"{key} is not a usable path: {e}") from None
     return v
 
 
@@ -85,8 +93,11 @@ def _settings(lines: list[str], base_dir: Path, where) -> dict[str, object]:
     return settings
 
 
-def load_task_file(path: Path) -> TaskFile:
-    """Read a task file: optional `---` front matter of flat settings, then the task text."""
+def load_task_file(path: str | Path) -> TaskFile:
+    """Read a task file: optional `---` front matter of flat settings, then the task text.
+
+    Errors name `path` as given, so pass the user's string to keep it as typed.
+    """
     where = str(path)
     try:
         text = Path(path).read_text(encoding="utf-8-sig")

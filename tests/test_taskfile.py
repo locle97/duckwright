@@ -91,6 +91,40 @@ def test_value_keeps_colon_and_unspaced_hash(tmp_path):
     assert load_task_file(p).settings == {"session": "team:a#1"}
 
 
+def test_hash_without_space_is_kept(tmp_path):
+    p = _w(tmp_path, "---\nmodel:#x\nsession: #gone\n---\nGo")
+    with pytest.raises(TaskFileError, match='"session" has no value'):
+        load_task_file(p)
+    p = _w(tmp_path, "---\nmodel:#x\n---\nGo")
+    assert load_task_file(p).settings == {"model": "#x"}
+
+
+def test_huge_max_steps_is_a_located_error(tmp_path):
+    p = _w(tmp_path, "---\nmax-steps: " + "9" * 5000 + "\n---\nGo")
+    assert _err(p).startswith(f"{p}:2: max-steps must be a whole number of at least 1")
+
+
+@pytest.mark.parametrize("value", ["~nosuchuser-duckwright/x.json", "a\x00b"])
+def test_unusable_path_is_a_located_error(tmp_path, value):
+    p = _w(tmp_path, f"---\nstate: {value}\n---\nGo")
+    assert _err(p).startswith(f"{p}:2: state is not a usable path: ")
+
+
+def test_symlink_loop_is_not_a_crash(tmp_path):
+    (tmp_path / "loop1").symlink_to(tmp_path / "loop2")
+    (tmp_path / "loop2").symlink_to(tmp_path / "loop1")
+    p = _w(tmp_path, "---\nstate: loop1/x.json\n---\nGo")
+    try:
+        load_task_file(p)  # Python 3.13 resolves loops without raising
+    except TaskFileError as e:
+        assert str(e).startswith(f"{p}:2: state is not a usable path: ")
+
+
+def test_error_names_path_as_typed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert _err("./tasks//missing.md") == "./tasks//missing.md: file not found"
+
+
 def test_key_is_case_sensitive(tmp_path):
     p = _w(tmp_path, "---\nModel: opus\n---\nGo")
     assert _err(p) == f'{p}:2: unknown setting "Model"'

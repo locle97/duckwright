@@ -176,7 +176,7 @@ and check the greeting says "Hello, Linh!".
 - Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
 - Relative `skill` and `state` paths are resolved from the file's folder, not the current directory.
 - `allow-file-access` can only be given on the command line, so a shared task file can never turn it on.
-- Give either a task or `-f`, not both. A missing or invalid file prints the file, the line and the problem, and exits with `2` before anything runs.
+- Give either a task or `-f`, not both. A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
 
 [`examples/task.md`](https://github.com/locle97/duckwright/blob/main/examples/task.md) is a commented template to copy.
 
