@@ -30,7 +30,7 @@ History: runs/20261003-101500-123456/history.json
 
 - **The harness owns the loop**: snapshot, decide, validate, execute, record. The steps run in a fixed order and the browser is always closed at the end.
 - **Structured decisions**: every step returns JSON that must match a schema: evaluation of the previous goal, memory, next goal, and 1 to 3 actions.
-- **Commands go through an allow-list**: only navigation and interaction commands are accepted. Unknown commands and flags such as `--session` or `--filename` are rejected before they reach the browser.
+- **Commands go through an allow-list**: the decision schema restricts `cmd` to navigation and interaction commands, and the harness checks again before running anything. Unknown commands and flags such as `--session` or `--filename` are rejected before they reach the browser.
 - **Page content is treated as untrusted**: snapshots and tab titles are fenced and escaped, and the system prompt tells the model never to follow instructions found in them.
 - **Built-in safeguards**: actions after a page-changing command are skipped, a `done success` is refused if an earlier action in the same step failed, repeated actions trigger a "try something different" nudge, and the run stops after repeated brain failures.
 - **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
@@ -131,7 +131,7 @@ flowchart LR
 
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
 2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`prompts/system.md`](prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
-3. **Validate and execute**: each action is checked against the allowed commands and flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
+3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line. The last 15 lines are included in the next prompt.
 
 The loop ends when the model sends a `done` action, when max steps is reached, or after 3 consecutive brain failures.
