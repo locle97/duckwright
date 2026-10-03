@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass, field
 
 from duckwright.brain import Decision
-from duckwright.observe import Observation
+from duckwright.observe import SNAPSHOT_FILE, Observation
 
 HISTORY_WINDOW = 15
 
@@ -56,6 +56,7 @@ def build_prompt(
     obs: Observation,
     window: int = HISTORY_WINDOW,
     nudge: str | None = None,
+    paste: bool = True,
 ) -> str:
     shown = history[-window:] if window > 0 else []
     omitted = len(history) - len(shown)
@@ -71,5 +72,13 @@ def build_prompt(
     ]
     if nudge:
         parts.append(nudge)
-    parts.append(_section("page_snapshot", _neutralise(obs.snapshot)))
+    if paste:
+        parts.append(_section("page_snapshot", _neutralise(obs.snapshot)))
+    else:
+        # Every value here comes from the harness, so there is nothing to escape.
+        parts.append(_section(
+            "page_snapshot_file",
+            f"{SNAPSHOT_FILE}: {obs.lines} lines, {obs.chars} characters. "
+            "Not shown here: search it with Grep and Read.",
+        ))
     return "\n\n".join(parts) + "\n"

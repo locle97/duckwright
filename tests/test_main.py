@@ -475,7 +475,7 @@ def _record_runs(monkeypatch, outcomes):
         out = outcomes.pop(0)
         if isinstance(out, BaseException):
             raise out
-        return RunResult(out, "a", 1, 0.0, [])
+        return RunResult(out, "a", 1, 0.25, [])
 
     monkeypatch.setattr(Agent, "run", run)
     return calls
@@ -567,9 +567,29 @@ def test_batch_failure_continues_and_exits_1(env, monkeypatch, capsys):
     assert "[1/2] tasks/a.md" in out.splitlines()
     assert "[2/2] tasks/b.md" in out.splitlines()
     assert _summary(out) == [
-        "Batch: 1 passed, 1 failed, 0 not run",
-        "fail  tasks/a.md  runs/<id>/history.json",
-        "pass  tasks/b.md  runs/<id>/history.json",
+        "Batch: 1 passed, 1 failed, 0 not run  Cost: $0.5000",
+        "fail  tasks/a.md  $0.2500  runs/<id>/history.json",
+        "pass  tasks/b.md  $0.2500  runs/<id>/history.json",
+    ]
+
+
+def test_batch_total_includes_cost_spent_before_a_crash(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+
+    def run(self):
+        if self.task == "A":
+            self.cost_usd = 0.125  # spent before the crash
+            raise PlaywrightError("x")
+        return RunResult(True, "a", 1, 0.25, [])
+
+    monkeypatch.setattr(Agent, "run", run)
+    assert m.main(argv[1:] + ["-f", a, b]) == 1
+    assert _summary(capsys.readouterr().out) == [
+        "Batch: 1 passed, 1 failed, 0 not run  Cost: $0.3750",
+        "fail  tasks/a.md  $0.1250  runs/<id>/history.json",
+        "pass  tasks/b.md  $0.2500  runs/<id>/history.json",
     ]
 
 
@@ -588,7 +608,7 @@ def test_batch_all_pass_exits_0(env, monkeypatch, capsys):
     b = _task_file(tmp, "B\n", "tasks/b.md")
     _record_runs(monkeypatch, [True, True])
     assert m.main(argv[1:] + ["-f", a, b]) == 0
-    assert _summary(capsys.readouterr().out)[0] == "Batch: 2 passed, 0 failed, 0 not run"
+    assert _summary(capsys.readouterr().out)[0] == "Batch: 2 passed, 0 failed, 0 not run  Cost: $0.5000"
 
 
 def test_batch_bad_file_runs_nothing(env, monkeypatch, capsys):
@@ -621,10 +641,10 @@ def test_batch_interrupt_stops_and_summarises(env, monkeypatch, capsys):
     assert len(calls) == 1
     assert _history(tmp)["answer"] == "interrupted"
     assert _summary(capsys.readouterr().out) == [
-        "Batch: 0 passed, 0 failed, 2 not run",
-        "stop  tasks/a.md  runs/<id>/history.json",
-        "skip  tasks/b.md  -",
-        "skip  tasks/c.md  -",
+        "Batch: 0 passed, 0 failed, 2 not run  Cost: $0.0000",
+        "stop  tasks/a.md  $0.0000  runs/<id>/history.json",
+        "skip  tasks/b.md  -  -",
+        "skip  tasks/c.md  -  -",
     ]
 
 
@@ -667,3 +687,83 @@ def test_unstattable_file_is_a_one_line_error(env, monkeypatch, capsys):
     assert m.main(argv[1:] + ["-f", "a" * 300]) == 2
     err = capsys.readouterr().err
     assert err.startswith("a" * 300 + ": cannot read: ") and "Traceback" not in err
+
+
+def test_snapshot_mode_prompts():
+    full, grep = m.SNAPSHOT_FULL_MD.read_text(), m.SNAPSHOT_GREP_MD.read_text()
+    hybrid = m.SNAPSHOT_HYBRID_MD.read_text()
+    system = m.SYSTEM_MD.read_text()
+    assert "## Reading the page" in full and "## Reading the page" in grep
+    assert "## Reading the page" in hybrid
+    assert "<page_snapshot>" in hybrid and "<page_snapshot_file>" in hybrid
+    assert "Grep" in hybrid and "5,000 characters" in hybrid
+    assert "## Reading the page" not in system
+    assert "Grep" in grep and "snapshot.yml" in grep
+    assert "Grep" not in full
+    assert "snapshot.yml" in system  # untrusted section covers tool output
+
+
+def _capture(monkeypatch):
+    seen = {}
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    def run(self):
+        seen.update(mode=self.snapshot_mode, dir=self.brain.snapshot_dir,
+                    files=list(self.brain.system_files), workdir=self.workdir)
+        return R()
+
+    monkeypatch.setattr(Agent, "run", run)
+    return seen
+
+
+def test_hybrid_is_default(env, monkeypatch):
+    tmp, argv = env
+    seen = _capture(monkeypatch)
+    assert m.main(argv) == 0
+    assert seen["mode"] == "hybrid"
+    assert seen["dir"] == seen["workdir"] / "page"
+    assert seen["files"][:2] == [m.SYSTEM_MD, m.SNAPSHOT_HYBRID_MD]
+
+
+@pytest.mark.parametrize("flag, mode, has_dir, md", [
+    ("--snapshot-full", "full", False, "SNAPSHOT_FULL_MD"),
+    ("--snapshot-grep", "grep", True, "SNAPSHOT_GREP_MD"),
+    ("--snapshot-hybrid", "hybrid", True, "SNAPSHOT_HYBRID_MD"),
+])
+def test_snapshot_flags(env, monkeypatch, flag, mode, has_dir, md):
+    tmp, argv = env
+    seen = _capture(monkeypatch)
+    assert m.main(argv + [flag]) == 0
+    assert seen["mode"] == mode
+    assert seen["dir"] == (seen["workdir"] / "page" if has_dir else None)
+    assert seen["files"][:2] == [m.SYSTEM_MD, getattr(m, md)]
+
+
+def test_two_snapshot_flags_are_an_error(env, monkeypatch, capsys):
+    tmp, argv = env
+    _capture(monkeypatch)
+    with pytest.raises(SystemExit) as e:
+        m.main(argv + ["--snapshot-full", "--snapshot-grep"])
+    assert e.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_snapshot_file_setting_and_cli_override(env, monkeypatch):
+    tmp, argv = env
+    (tmp / "t.md").write_text("---\nsnapshot: full\n---\nDo it\n")
+    seen = _capture(monkeypatch)
+    skill = argv[2]
+    assert m.main(["-f", "t.md", "--skill", skill]) == 0
+    assert seen["mode"] == "full"
+    assert m.main(["-f", "t.md", "--skill", skill, "--snapshot-grep"]) == 0
+    assert seen["mode"] == "grep"
+
+
+@pytest.mark.parametrize("md", ["SNAPSHOT_FULL_MD", "SNAPSHOT_GREP_MD", "SNAPSHOT_HYBRID_MD"])
+def test_missing_mode_prompt_exits_2(env, monkeypatch, capsys, md):
+    tmp, argv = env
+    monkeypatch.setattr(m, md, tmp / "nope.md")
+    assert m.main(argv) == 2
+    assert "system prompt not found" in capsys.readouterr().err
