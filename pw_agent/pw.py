@@ -33,6 +33,11 @@ class PlaywrightCLI:
             argv = ["env", "PLAYWRIGHT_MCP_ALLOW_UNRESTRICTED_FILE_ACCESS=1", *argv]
         return self.runner(argv, None, self.timeout)
 
+    def state_load(self, path: Path) -> None:
+        res = self.run("state-load", [str(path)])
+        if res.code != 0:
+            raise PlaywrightError(res.stderr or res.stdout)
+
     def close(self) -> None:
         try:
             self.run("close", [])

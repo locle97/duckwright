@@ -43,6 +43,7 @@ class Agent:
         max_steps: int = 25,
         max_failures: int = 3,
         headed: bool = False,
+        state: Path | None = None,
         on_step: Callable[[StepRecord], None] | None = None,
     ):
         self.task = task
@@ -52,6 +53,7 @@ class Agent:
         self.max_steps = max_steps
         self.max_failures = max_failures
         self.headed = headed
+        self.state = state
         self.on_step = on_step
         self.cost_usd = 0.0
 
@@ -65,6 +67,8 @@ class Agent:
             res = self.pw.open(self.headed)
             if res.code != 0:
                 raise PlaywrightError(res.stderr or res.stdout)
+            if self.state:
+                self.pw.state_load(self.state)
             return self._loop()
         finally:
             self.pw.close()

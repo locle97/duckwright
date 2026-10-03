@@ -136,3 +136,32 @@ def test_allow_file_access_help_warns(capsys):
         m._parse(["--help"])
     out = " ".join(capsys.readouterr().out.split())
     assert "trusted" in out
+
+
+def test_missing_state_file_exits_2(env, monkeypatch, capsys):
+    tmp, argv = env
+
+    def never(self):
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(Agent, "run", never)
+    assert m.main(argv + ["--state", "nope.json"]) == 2
+    assert "state file not found" in capsys.readouterr().err
+
+
+def test_state_passed_to_agent_as_absolute_path(env, monkeypatch):
+    tmp, argv = env
+    (tmp / "auth.json").write_text("{}")
+    seen = {}
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    def run(self):
+        seen["state"] = self.state
+        return R()
+
+    monkeypatch.setattr(Agent, "run", run)
+    assert m.main(argv + ["--state", "auth.json"]) == 0
+    assert seen["state"] == tmp / "auth.json"
+    assert seen["state"].is_absolute()

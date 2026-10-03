@@ -64,7 +64,8 @@ Run from the repo root, because the default `--skill` path is relative to the cu
 
 ```bash
 python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
-                             [--skill PATH] [--session NAME] [--allow-file-access]
+                             [--skill PATH] [--session NAME] [--state FILE]
+                             [--allow-file-access]
 ```
 
 | Option | Default | Description |
@@ -74,6 +75,7 @@ python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
 | `--headed` | off | Show the browser window |
 | `--skill` | `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `pw-agent` | playwright-cli session name |
+| `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 
 > [!IMPORTANT]
@@ -81,6 +83,22 @@ python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
 
 > [!WARNING]
 > `--allow-file-access` gives the browser unrestricted access to local files, not just one file. A page that hijacks the agent could `goto file:///home/you/.ssh/...` and leak the contents. Only use it with trusted pages and trusted tasks. The flag only applies when the session's browser is first opened, so close any existing session first.
+
+### Authenticated pages
+
+Log in once in a headed session and save the storage state (cookies and localStorage), then pass it with `--state`:
+
+```bash
+playwright-cli -s=login open https://app.example.com/login --headed
+# log in by hand in the browser window, then:
+playwright-cli -s=login state-save auth.json
+playwright-cli -s=login close
+
+python3 -m pw_agent "Open https://app.example.com/settings and report my plan" --state auth.json
+```
+
+> [!CAUTION]
+> `auth.json` holds live session tokens. Keep it out of git, and remember the agent can act as you on every site in the file.
 
 ### Output
 
@@ -95,7 +113,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 | --- | --- |
 | `0` | The agent finished with `done success` |
 | `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error |
-| `2` | A preflight check failed: missing `prompts/system.md`, skill, `claude`, or `playwright-cli` |
+| `2` | A preflight check failed: missing `prompts/system.md`, skill, `--state` file, `claude`, or `playwright-cli` |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written) |
 
 ## How it works
