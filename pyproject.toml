@@ -1,18 +1,39 @@
 [project]
-name = "pw_agent"
+name = "playwright-agent-loop"
 version = "0.1.0"
+description = "Browser agent loop: playwright-cli + claude -p"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Environment :: Console",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/locle97/playwright-agent-loop"
+Issues = "https://github.com/locle97/playwright-agent-loop/issues"
+
+[project.scripts]
+pw_agent = "pw_agent.__main__:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "jsonschema"]
+dev = ["pytest", "jsonschema", "build"]
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["pw_agent"]
+packages = ["pw_agent", "pw_agent.prompts"]
+
+[tool.setuptools.package-data]
+"pw_agent.prompts" = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

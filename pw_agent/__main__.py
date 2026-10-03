@@ -3,6 +3,7 @@ import json
 import shutil
 import sys
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from pw_agent.brain import Brain
@@ -10,19 +11,29 @@ from pw_agent.loop import Agent
 from pw_agent.prompt import StepRecord
 from pw_agent.pw import PlaywrightCLI, PlaywrightError
 
-DEFAULT_SKILL = "prompts/playwright-cli.md"
-SYSTEM_MD = Path(__file__).resolve().parent.parent / "prompts" / "system.md"
+DIST_NAME = "playwright-agent-loop"
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+SYSTEM_MD = PROMPTS_DIR / "system.md"
+DEFAULT_SKILL = PROMPTS_DIR / "playwright-cli.md"
+
+
+def _version() -> str:
+    try:
+        return version(DIST_NAME)
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _parse(argv):
     p = argparse.ArgumentParser(
         prog="pw_agent", description="Browser agent loop: playwright-cli + claude -p"
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     p.add_argument("task")
     p.add_argument("--max-steps", type=int, default=25)
     p.add_argument("--model", default="sonnet")
     p.add_argument("--headed", action="store_true")
-    p.add_argument("--skill", default=DEFAULT_SKILL)
+    p.add_argument("--skill", default=str(DEFAULT_SKILL))
     p.add_argument("--session", default="pw-agent")
     p.add_argument(
         "--state", metavar="FILE",
@@ -41,7 +52,7 @@ def _parse(argv):
 
 def _preflight(skill: Path, state: Path | None) -> str | None:
     if not SYSTEM_MD.is_file():
-        return f"system prompt not found: {SYSTEM_MD} (is the checkout complete?)"
+        return f"system prompt not found: {SYSTEM_MD} (is the installation complete?)"
     if not skill.is_file():
         return f"playwright-cli skill not found: {skill}"
     if state and not state.is_file():

@@ -6,3 +6,5 @@ runs/
 *.egg-info/
 .playwright-cli/
 auth.json
+build/
+dist/
