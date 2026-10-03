@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pw_agent.brain import Decision
 from pw_agent.observe import Observation
@@ -16,6 +16,8 @@ class StepRecord:
     step: int
     decision: Decision
     results: list[str]
+    # Playwright code playwright-cli ran per action (None where nothing ran), for replay.
+    codes: list[str | None] = field(default_factory=list)
 
     def line(self) -> str:
         d = self.decision

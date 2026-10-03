@@ -7,15 +7,16 @@ from pw_agent.pw import PlaywrightCLI, PlaywrightError
 
 
 class FakePW(PlaywrightCLI):
-    def __init__(self, open_code=0, snap_error=False):
+    def __init__(self, open_code=0, snap_error=False, run_stdout="tabs"):
         self.calls = []
         self.closed = 0
         self.open_code = open_code
         self.snap_error = snap_error
+        self.run_stdout = run_stdout
 
     def run(self, cmd, args):
         self.calls.append((cmd, list(args)))
-        return ProcResult(0, "tabs", "")
+        return ProcResult(0, self.run_stdout, "")
 
     def open(self, headed):
         self.calls.append(("open", [headed]))
@@ -158,6 +159,24 @@ def test_no_state_skips_state_load(tmp_path):
     brain = FakeBrain([dec(("done", ["success", "ok"]))])
     Agent("t", pw, brain, tmp_path).run()
     assert all(c[0] != "state-load" for c in pw.calls)
+
+
+GOTO_OUT = "### Ran Playwright code\n```js\nawait page.goto('u');\n```\n"
+
+
+def test_step_records_generated_code(tmp_path):
+    pw = FakePW(run_stdout=GOTO_OUT)
+    brain = FakeBrain([dec(("goto", ["u"])), dec(("done", ["success", "ok"]))])
+    r = Agent("t", pw, brain, tmp_path).run()
+    assert r.history[0].codes == ["await page.goto('u');"]
+    assert r.history[1].codes == [None]
+
+
+def test_brain_error_step_has_no_codes(tmp_path):
+    pw = FakePW(run_stdout=GOTO_OUT)
+    brain = FakeBrain([BrainError("x"), dec(("done", ["success", "ok"]))])
+    r = Agent("t", pw, brain, tmp_path).run()
+    assert r.history[0].codes == []
 
 
 def test_state_load_failure_closes_browser(tmp_path):

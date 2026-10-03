@@ -66,7 +66,14 @@ def _history_json(task, success, answer, steps, cost, history: list[StepRecord])
                 "evaluation_previous_goal": r.decision.evaluation_previous_goal,
                 "memory": r.decision.memory,
                 "next_goal": r.decision.next_goal,
-                "actions": [{"cmd": a.cmd, "args": list(a.args)} for a in r.decision.actions],
+                "actions": [
+                    {
+                        "cmd": a.cmd,
+                        "args": list(a.args),
+                        "code": r.codes[i] if i < len(r.codes) else None,
+                    }
+                    for i, a in enumerate(r.decision.actions)
+                ],
                 "results": list(r.results),
             }
             for r in history

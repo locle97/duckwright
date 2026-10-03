@@ -1,4 +1,4 @@
-from pw_agent.actions import ALLOWED_LIST, execute
+from pw_agent.actions import ALLOWED_LIST, execute, extract_code
 from pw_agent.brain import Action
 from pw_agent.proc import ProcResult
 from pw_agent.pw import PlaywrightCLI
@@ -181,3 +181,96 @@ def test_done_failure_allowed_after_earlier_error():
     results, done = execute(pw, [Action("fill", ["e9", "x"]), Action("done", ["failure", "gave up"])])
     assert results == ["error: nope", "done"]
     assert done == (False, "gave up")
+
+
+FILL_OUT = (
+    "### Ran Playwright code\n"
+    "```js\n"
+    "await page.getByRole('textbox', { name: 'Name' }).fill('hello');\n"
+    "```\n"
+)
+FILL_CODE = "await page.getByRole('textbox', { name: 'Name' }).fill('hello');"
+PRESS_OUT = (
+    "### Ran Playwright code\n"
+    "```js\n"
+    "// Press Enter\n"
+    "await page.keyboard.press('Enter');\n"
+    "```\n"
+    "### Page\n"
+    "- Page URL: https://e.com/\n"
+)
+SCREENSHOT_OUT = (
+    "### Result\n"
+    "- [Screenshot of viewport](.playwright-cli/p.png)\n"
+    "### Ran Playwright code\n"
+    "```js\n"
+    "await page.screenshot({\n"
+    "  path: '.playwright-cli/p.png',\n"
+    "  type: 'png'\n"
+    "});\n"
+    "```\n"
+)
+
+
+def test_extract_code_single_line():
+    assert extract_code(FILL_OUT) == FILL_CODE
+
+
+def test_extract_code_multi_line_stops_at_closing_fence():
+    assert extract_code(PRESS_OUT) == "// Press Enter\nawait page.keyboard.press('Enter');"
+
+
+def test_extract_code_after_result_block():
+    assert extract_code(SCREENSHOT_OUT) == (
+        "await page.screenshot({\n  path: '.playwright-cli/p.png',\n  type: 'png'\n});"
+    )
+
+
+def test_extract_code_absent():
+    assert extract_code("### Result\n- 0: (current) [x](y)\n") is None
+    assert extract_code("") is None
+
+
+def test_codes_collected_per_action():
+    pw, _ = make_pw(stdout=FILL_OUT)
+    codes = []
+    results, _ = execute(pw, [Action("fill", ["e1", "a"]), Action("hover", ["e2"])], codes=codes)
+    assert results == ["ok", "ok"]
+    assert codes == [FILL_CODE, FILL_CODE]
+
+
+def test_codes_none_for_rejected_skipped_failed_and_done():
+    pw, _ = make_pw(stdout=FILL_OUT)
+    codes = []
+    execute(
+        pw,
+        [Action("eval", ["1"]), Action("click", ["e1"]), Action("fill", ["e2", "x"])],
+        codes=codes,
+    )
+    assert codes == [None, FILL_CODE, None]
+
+    codes = []
+    execute(pw, [Action("hover", ["e1"]), Action("done", ["failure", "x"])], codes=codes)
+    assert codes == [FILL_CODE, None]
+
+
+def test_codes_none_for_failed_action():
+    pw, _ = make_pw(code=1, stdout=FILL_OUT)
+    codes = []
+    execute(pw, [Action("fill", ["e1", "a"])], codes=codes)
+    assert codes == [None]
+
+
+def test_codes_none_when_stdout_has_no_code():
+    pw, _ = make_pw(stdout="### Result\n- done\n")
+    codes = []
+    execute(pw, [Action("hover", ["e1"])], codes=codes)
+    assert codes == [None]
+
+
+def test_extract_code_empty_block_is_none():
+    out = (
+        "### Ran Playwright code\n```js\n```\n"
+        "### Snapshot\n```yaml\n- button\n```\n"
+    )
+    assert extract_code(out) is None

@@ -46,6 +46,7 @@ def test_playwright_error_history_shape(env, monkeypatch):
         1,
         Decision("ev", "mem", "goal", [Action("click", ["e1"])]),
         ["ok"],
+        ["await page.getByRole('button', { name: 'Go' }).click();"],
     )
 
     def fail(self):
@@ -67,11 +68,23 @@ def test_playwright_error_history_shape(env, monkeypatch):
                 "evaluation_previous_goal": "ev",
                 "memory": "mem",
                 "next_goal": "goal",
-                "actions": [{"cmd": "click", "args": ["e1"]}],
+                "actions": [
+                    {
+                        "cmd": "click",
+                        "args": ["e1"],
+                        "code": "await page.getByRole('button', { name: 'Go' }).click();",
+                    }
+                ],
                 "results": ["ok"],
             }
         ],
     }
+
+
+def test_history_json_defaults_for_records_without_codes():
+    rec = StepRecord(1, Decision("", "", "", [Action("click", ["e1"])]), ["brain error: x"])
+    step = m._history_json("t", False, "a", 1, 0.0, [rec])["history"][0]
+    assert step["actions"] == [{"cmd": "click", "args": ["e1"], "code": None}]
 
 
 def test_keyboard_interrupt_writes_history(env, monkeypatch):

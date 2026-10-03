@@ -46,3 +46,6 @@ def test_e2e_form(tmp_path):
     assert result.success
     assert "Hello, Linh!" in result.answer
     assert result.steps <= 8
+    codes = [c for rec in result.history for c in rec.codes if c]
+    assert any("page.goto(" in c for c in codes)
+    assert any("Linh" in c for c in codes)
