@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "jsonschema"]
 
 [build-system]
 requires = ["setuptools>=61"]
