@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from pw_agent.brain import Decision
@@ -31,6 +32,14 @@ class StepRecord:
         return f"step {self.step} | {_flat(d.evaluation_previous_goal)} | {_flat(d.next_goal)} | {acts}"
 
 
+_HARNESS_TAG = re.compile(r"<(?=/?(?:page_snapshot|tabs|task|memory|history))", re.IGNORECASE)
+
+
+def _neutralise(body: str) -> str:
+    """Escape harness section tags inside untrusted page data so it cannot close its block."""
+    return _HARNESS_TAG.sub("&lt;", body)
+
+
 def _section(tag: str, body: str) -> str:
     return f"<{tag}>\n{body}\n</{tag}>"
 
@@ -54,10 +63,10 @@ def build_prompt(
         f"Step {step}/{max_steps}",
         _section("task", task),
         _section("memory", memory or "(empty)"),
-        _section("tabs", obs.tabs),
+        _section("tabs", _neutralise(obs.tabs)),
         _section("history", "\n".join(lines) if lines else "(none)"),
     ]
     if nudge:
         parts.append(nudge)
-    parts.append(_section("page_snapshot", obs.snapshot))
+    parts.append(_section("page_snapshot", _neutralise(obs.snapshot)))
     return "\n\n".join(parts) + "\n"

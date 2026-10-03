@@ -53,6 +53,7 @@ class Agent:
         self.max_failures = max_failures
         self.headed = headed
         self.on_step = on_step
+        self.cost_usd = 0.0
 
     def _record(self, history: list[StepRecord], rec: StepRecord) -> None:
         history.append(rec)
@@ -71,7 +72,7 @@ class Agent:
     def _loop(self) -> RunResult:
         history: list[StepRecord] = []
         memory = ""
-        cost = 0.0
+        self.cost_usd = 0.0
         failures = 0
         steps = 0
         for step in range(1, self.max_steps + 1):
@@ -84,6 +85,7 @@ class Agent:
             try:
                 decision, c = self.brain.decide(prompt)
             except BrainError as e:
+                self.cost_usd += e.cost
                 failures += 1
                 self._record(
                     history, StepRecord(step, Decision("", memory, "", []), [f"brain error: {e}"])
@@ -93,15 +95,15 @@ class Agent:
                         False,
                         f"stopped after {failures} consecutive brain failures: {e}",
                         steps,
-                        cost,
+                        self.cost_usd,
                         history,
                     )
                 continue
             failures = 0
-            cost += c
+            self.cost_usd += c
             memory = decision.memory
             results, done = execute(self.pw, decision.actions)
             self._record(history, StepRecord(step, decision, results))
             if done is not None:
-                return RunResult(done[0], done[1], steps, cost, history)
-        return RunResult(False, "max steps reached", steps, cost, history)
+                return RunResult(done[0], done[1], steps, self.cost_usd, history)
+        return RunResult(False, "max steps reached", steps, self.cost_usd, history)

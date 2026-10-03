@@ -43,7 +43,9 @@ class Decision:
 
 
 class BrainError(Exception):
-    pass
+    def __init__(self, msg: str = "", cost: float = 0.0):
+        super().__init__(msg)
+        self.cost = cost
 
 
 def _parse_decision(so: object) -> Decision:
@@ -86,6 +88,7 @@ class Brain:
     def _argv(self) -> list[str]:
         argv = [
             "claude", "-p", "--output-format", "json", "--tools", "",
+            "--strict-mcp-config", "--disable-slash-commands",
             "--no-session-persistence",
             "--model", self.model,
             "--json-schema", json.dumps(DECISION_SCHEMA),
@@ -106,13 +109,18 @@ class Brain:
             raise BrainError(f"non-JSON output: {e}") from e
         if not isinstance(env, dict):
             raise BrainError("envelope is not an object")
-        if env.get("is_error"):
-            raise BrainError(f"claude error: {env.get('result') or 'unknown'}")
-        so = env.get("structured_output")
-        if so is None:
-            raise BrainError("missing structured_output")
-        decision = _parse_decision(so)
         cost = env.get("total_cost_usd")
         if isinstance(cost, bool) or not isinstance(cost, (int, float)):
             cost = 0.0
-        return decision, float(cost)
+        cost = float(cost)
+        try:
+            if env.get("is_error"):
+                raise BrainError(f"claude error: {env.get('result') or 'unknown'}")
+            so = env.get("structured_output")
+            if so is None:
+                raise BrainError("missing structured_output")
+            decision = _parse_decision(so)
+        except BrainError as e:
+            e.cost = cost
+            raise
+        return decision, cost

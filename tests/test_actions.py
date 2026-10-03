@@ -46,8 +46,11 @@ def test_done_returns_answer():
 
 def test_done_invalid_status_continues():
     pw, _ = make_pw()
-    results, done = execute(pw, [Action("done", ["maybe"]), Action("hover", ["e1"])])
-    assert results == ["error: done requires success|failure", "ok"]
+    results, done = execute(pw, [Action("done", ["maybe", "x"]), Action("hover", ["e1"])])
+    assert results == [
+        'error: done needs ["success"|"failure", "<answer>"], got ["maybe", "x"]',
+        "ok",
+    ]
     assert done is None
 
 
@@ -80,3 +83,75 @@ def test_success_hides_stdout():
     pw, _ = make_pw(stdout="huge")
     results, _ = execute(pw, [Action("hover", ["e1"])])
     assert results == ["ok"]
+
+
+def test_rejects_filename_flag():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("screenshot", ["--filename=/x"])])
+    assert results == ["error: flag '--filename=/x' not allowed"]
+    assert calls == []
+
+
+def test_rejects_session_hop_flag():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("click", ["e1", "-s=other"])])
+    assert results == ["error: flag '-s=other' not allowed"]
+    assert calls == []
+
+
+def test_negative_number_and_dash_values_allowed():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("fill", ["e1", "-5"]), Action("type", ["-"])])
+    assert results == ["ok", "ok"]
+    assert calls == [["fill", "e1", "-5"], ["type", "-"]]
+
+
+def test_per_command_flag_allow_set():
+    pw, calls = make_pw()
+    results, _ = execute(
+        pw,
+        [Action("fill", ["e1", "x", "--submit"]), Action("screenshot", ["--full-page"]),
+         Action("fill", ["e1", "--full-page"])],
+    )
+    assert results == ["ok", "ok", "error: flag '--full-page' not allowed"]
+    assert calls == [["fill", "e1", "x", "--submit"], ["screenshot", "--full-page"]]
+
+
+def test_flag_flagged_on_unlisted_command():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("goto", ["--browser=firefox"])])
+    assert results == ["error: flag '--browser=firefox' not allowed"]
+    assert calls == []
+
+
+def test_skips_after_page_change_timeout():
+    pw, calls = make_pw(code=-1, stderr="timeout")
+    results, _ = execute(pw, [Action("click", ["e5"]), Action("fill", ["e9", "hi"])])
+    assert results == ["error: timeout", "skipped: page may have changed"]
+    assert calls == [["click", "e5"]]
+
+
+def test_done_success_rejected_after_earlier_error():
+    pw, calls = make_pw(code=1, stderr="ref e9 not found")
+    results, done = execute(
+        pw, [Action("fill", ["e9", "x"]), Action("done", ["success", "yay"])]
+    )
+    assert results == [
+        "error: ref e9 not found",
+        "error: an earlier action failed; verify before finishing",
+    ]
+    assert done is None
+
+
+def test_done_success_rejected_after_rejected_command():
+    pw, _ = make_pw()
+    results, done = execute(pw, [Action("eval", ["1"]), Action("done", ["success", "yay"])])
+    assert results[1] == "error: an earlier action failed; verify before finishing"
+    assert done is None
+
+
+def test_done_failure_allowed_after_earlier_error():
+    pw, _ = make_pw(code=1, stderr="nope")
+    results, done = execute(pw, [Action("fill", ["e9", "x"]), Action("done", ["failure", "gave up"])])
+    assert results == ["error: nope", "done"]
+    assert done == (False, "gave up")

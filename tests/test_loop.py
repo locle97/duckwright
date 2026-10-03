@@ -114,3 +114,31 @@ def test_on_step_and_memory(tmp_path):
     Agent("t", pw, brain, tmp_path, on_step=seen.append).run()
     assert len(seen) == 2
     assert "remember" in brain.prompts[1]
+
+
+def test_brain_error_cost_is_counted(tmp_path):
+    pw = FakePW()
+    err = BrainError("refused")
+    err.cost = 0.25
+    brain = FakeBrain([err, dec(("done", ["success", "x"]))])
+    agent = Agent("t", pw, brain, tmp_path)
+    r = agent.run()
+    assert r.cost_usd == 0.75
+    assert agent.cost_usd == 0.75
+
+
+def test_running_cost_survives_exception(tmp_path):
+    class SnapFailsSecond(FakePW):
+        n = 0
+
+        def snapshot(self, path):
+            self.n += 1
+            if self.n == 2:
+                raise PlaywrightError("snap boom")
+            return "- page"
+
+    pw = SnapFailsSecond()
+    agent = Agent("t", pw, FakeBrain([dec(("hover", ["e1"]))]), tmp_path)
+    with pytest.raises(PlaywrightError):
+        agent.run()
+    assert agent.cost_usd == 0.5

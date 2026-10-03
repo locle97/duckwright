@@ -36,7 +36,10 @@ def test_decide_argv():
     Brain([Path("prompts/system.md"), Path("skill.md")], runner=fake).decide("PROMPT")
     argv, stdin, timeout = fake.calls[0]
     assert argv[:6] == ["claude", "-p", "--output-format", "json", "--tools", ""]
-    assert "--no-session-persistence" in argv
+    assert argv[6:9] == [
+        "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+    ]
+    assert "--setting-sources" not in argv
     assert argv[argv.index("--json-schema") + 1] == json.dumps(DECISION_SCHEMA)
     assert argv[argv.index("--model") + 1] == "sonnet"
     pairs = [argv[i + 1] for i, a in enumerate(argv) if a == "--append-system-prompt-file"]
@@ -101,3 +104,22 @@ def test_malformed_structured_output(so):
 def test_non_dict_envelope():
     with pytest.raises(BrainError):
         Brain([], runner=FakeRunner(ProcResult(0, "[1]", ""))).decide("x")
+
+
+def test_error_envelope_carries_cost():
+    with pytest.raises(BrainError) as ei:
+        Brain([], runner=FakeRunner(env(is_error=True, result="boom", total_cost_usd=0.07))).decide("x")
+    assert ei.value.cost == 0.07
+
+
+def test_brain_error_cost_defaults_to_zero():
+    assert BrainError("x").cost == 0.0
+    with pytest.raises(BrainError) as ei:
+        Brain([], runner=FakeRunner(ProcResult(-1, "", "timeout"))).decide("x")
+    assert ei.value.cost == 0.0
+
+
+def test_parse_failure_after_cost_carries_cost():
+    with pytest.raises(BrainError) as ei:
+        Brain([], runner=FakeRunner(env(structured_output=None, total_cost_usd=0.02))).decide("x")
+    assert ei.value.cost == 0.02
