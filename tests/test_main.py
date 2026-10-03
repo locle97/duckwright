@@ -123,12 +123,30 @@ def test_missing_system_md_exits_2(env, monkeypatch, capsys):
     assert not (tmp / "runs").exists()
 
 
-def test_default_skill_is_cwd_relative():
-    assert m.DEFAULT_SKILL == "prompts/playwright-cli.md"
+def test_default_prompts_live_in_package():
+    pkg = Path(m.__file__).resolve().parent
+    assert m.SYSTEM_MD == pkg / "prompts" / "system.md"
+    assert m.DEFAULT_SKILL == pkg / "prompts" / "playwright-cli.md"
+    assert m.SYSTEM_MD.is_file() and m.DEFAULT_SKILL.is_file()
+
+
+def test_default_prompts_found_from_any_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # not the repo root
+    monkeypatch.setattr(m.shutil, "which", lambda n: "/usr/bin/" + n)
+    args = m._parse(["task"])
+    assert m._preflight(Path(args.skill), None) is None
+
+
+def test_relative_skill_resolves_against_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m.shutil, "which", lambda n: "/usr/bin/" + n)
+    (tmp_path / "my-skill.md").write_text("x")
+    assert m._preflight(Path(m._parse(["t", "--skill", "my-skill.md"]).skill), None) is None
+    assert "skill not found" in m._preflight(Path(m._parse(["t", "--skill", "nope.md"]).skill), None)
 
 
 def test_agent_skill_omits_find_and_eval():
-    text = (Path(__file__).parent.parent / m.DEFAULT_SKILL).read_text()
+    text = m.DEFAULT_SKILL.read_text()
     assert re.search(r"\b(find|eval)\b", text) is None
 
 
@@ -181,6 +199,6 @@ def test_state_passed_to_agent_as_absolute_path(env, monkeypatch):
 
 
 def test_system_prompt_says_browser_is_open():
-    text = (Path(__file__).resolve().parent.parent / "prompts" / "system.md").read_text()
+    text = m.SYSTEM_MD.read_text()
     assert "browser is already open" in text
     assert "no `open` command" in text

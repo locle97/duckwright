@@ -31,8 +31,8 @@ def test_e2e_form(tmp_path):
     task = f"Open file://{form}, enter the name Linh, submit, and report the greeting."
     brain = Brain(
         system_files=[
-            ROOT / "prompts" / "system.md",
-            ROOT / "prompts" / "playwright-cli.md",
+            ROOT / "pw_agent" / "prompts" / "system.md",
+            ROOT / "pw_agent" / "prompts" / "playwright-cli.md",
         ]
     )
     pw = PlaywrightCLI(session="pw-agent-e2e", allow_file_access=True)

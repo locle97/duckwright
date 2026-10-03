@@ -12,7 +12,10 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["pw_agent"]
+packages = ["pw_agent", "pw_agent.prompts"]
+
+[tool.setuptools.package-data]
+"pw_agent.prompts" = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
