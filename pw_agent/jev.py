@@ -8,6 +8,9 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from pw_agent.brain import Action, Brain, BrainError, Decision, StepContext
+from pw_agent.observe import Observation
+
 
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 JEV_INPUT_USD_PER_TOKEN = 42e-9
@@ -165,3 +168,113 @@ class JevClient:
         if not isinstance(answers, dict):
             raise JevError("jev response has no answers", cost)
         return answers, cost
+
+
+ACTION_INSTRUCTIONS = (
+    "You control a web browser to complete `task`. `snapshot` is the current page, "
+    "`history` the steps so far, `memory` the agent's notes. Which single next action best advances the task?"
+)
+TARGET_INSTRUCTIONS = (
+    "If the next action clicks, checks, unchecks or hovers an element of `snapshot`, which element should it be?"
+)
+# option: (description, cmd, args, needs_target); args None means [target ref]
+ACTION_OPTIONS = {
+    "click":        ("Click a link, button, tab or menu item on the page", "click", None, True),
+    "check":        ("Tick an unticked checkbox or select a radio button", "check", None, True),
+    "uncheck":      ("Untick a ticked checkbox", "uncheck", None, True),
+    "hover":        ("Hover over an element to reveal a menu or tooltip", "hover", None, True),
+    "press_enter":  ("Press Enter to submit the focused field", "press", ["Enter"], False),
+    "press_tab":    ("Press Tab to move focus to the next field", "press", ["Tab"], False),
+    "press_escape": ("Press Escape to close a dialog or menu", "press", ["Escape"], False),
+    "go_back":      ("Go back to the previous page", "go-back", [], False),
+    "needs_text":   ("The next action needs typed text: open a URL, fill or type into a field, or choose a value", None, None, False),
+    "done":         ("The task is complete or cannot be completed", None, None, False),
+}
+MAX_CHOICES = 255
+
+
+def _choice(answers: dict, qid: str, options) -> tuple[str, float]:
+    """Read (choice, confidence) for `qid`; raise JevError if malformed."""
+    a = answers.get(qid)
+    if not isinstance(a, dict):
+        raise JevError(f"jev answer {qid!r} missing or malformed")
+    choice = a.get("choice")
+    if not isinstance(choice, str) or choice not in options:
+        raise JevError(f"jev answer {qid!r} has unknown choice {choice!r}")
+    conf = a.get("confidence")
+    if not isinstance(conf, (int, float)) or isinstance(conf, bool):
+        raise JevError(f"jev answer {qid!r} has no numeric confidence")
+    return choice, float(conf)
+
+
+class HybridBrain:
+    """Ask Jev for text-free steps; fall back to Claude when it is unsure."""
+
+    def __init__(self, jev: JevClient, claude: Brain, min_confidence: float = 0.8):
+        self.jev = jev
+        self.claude = claude
+        self.min_confidence = min_confidence
+
+    def _claude(self, prompt, obs, ctx, record, jev_cost):
+        try:
+            decision, cost = self.claude.decide(prompt, obs, ctx)
+        except BrainError as e:
+            e.cost += jev_cost
+            raise
+        decision.source = "claude"
+        decision.jev = record
+        return decision, jev_cost + cost
+
+    def decide(
+        self, prompt: str, obs: Observation | None = None, ctx: StepContext | None = None
+    ) -> tuple[Decision, float]:
+        if obs is None or ctx is None or ctx.step == 1 or ctx.nudged or ctx.previous_failed:
+            return self.claude.decide(prompt, obs, ctx)
+        targets = extract_targets(obs.snapshot)
+        if not targets or len(targets) > MAX_CHOICES:
+            return self.claude.decide(prompt, obs, ctx)
+
+        by_ref = {t.ref: t for t in targets}
+        state = {"task": ctx.task, "memory": ctx.memory, "history": ctx.history_lines,
+                 "tabs": obs.tabs, "snapshot": obs.snapshot}
+        questions = {
+            "action": {"type": "choice", "instructions": ACTION_INSTRUCTIONS,
+                       "criteria": {k: v[0] for k, v in ACTION_OPTIONS.items()}},
+            "target": {"type": "choice", "instructions": TARGET_INSTRUCTIONS,
+                       "criteria": {t.ref: f'{t.role} "{t.name}"' for t in targets}},
+        }
+        record = {"action": None, "action_confidence": None, "target": None,
+                  "target_confidence": None, "routed": ""}
+        try:
+            answers, cost = self.jev.ask(state, questions)
+        except JevError as e:
+            record["routed"] = f"error: {e}"
+            return self._claude(prompt, obs, ctx, record, e.cost)
+        try:
+            action, ac = _choice(answers, "action", ACTION_OPTIONS)
+            record["action"], record["action_confidence"] = action, ac
+            target, tc = _choice(answers, "target", by_ref)
+            record["target"], record["target_confidence"] = target, tc
+        except JevError as e:
+            record["routed"] = f"error: {e}"
+            return self._claude(prompt, obs, ctx, record, cost)
+
+        _, cmd, args, needs_target = ACTION_OPTIONS[action]
+        mc = self.min_confidence
+        if action in ("needs_text", "done"):
+            record["routed"] = action
+        elif ac < mc or (needs_target and tc < mc):
+            record["routed"] = "low_confidence"
+        else:
+            record["routed"] = "accepted"
+        if record["routed"] != "accepted":
+            return self._claude(prompt, obs, ctx, record, cost)
+
+        if needs_target:
+            t = by_ref[target]
+            goal = f'jev: {action} {t.role} "{t.name}" ({min(ac, tc):.2f})'
+            acts = [Action(cmd, [target])]
+        else:
+            goal = f"jev: {action} ({ac:.2f})"
+            acts = [Action(cmd, list(args))]
+        return Decision("", ctx.memory, goal, acts, source="jev", jev=record), cost
