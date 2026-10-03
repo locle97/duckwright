@@ -137,7 +137,7 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
    ```js
    await expect(page.getByRole('heading')).toHaveText('Hello, Linh!');
    ```
-3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
+3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/playwright-agent-loop/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 
 > [!IMPORTANT]
 > Some setup leaves no `code` behind. If the run used `--state FILE`, load the same state in the test with `test.use({ storageState: 'auth.json' })`. If it used `tab-new`, `tab-select` or `tab-close`, edit the code by hand, because it assumes a single `page`.
@@ -156,7 +156,7 @@ flowchart LR
 ```
 
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
-2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`pw_agent/prompts/system.md`](pw_agent/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
+2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`pw_agent/prompts/system.md`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
@@ -164,12 +164,12 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 
 | Module | Responsibility |
 | --- | --- |
-| [`loop.py`](pw_agent/loop.py) | The agent loop, repeat detection, and failure handling |
-| [`brain.py`](pw_agent/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
-| [`actions.py`](pw_agent/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
-| [`observe.py`](pw_agent/observe.py) | Tab list and page snapshot |
-| [`prompt.py`](pw_agent/prompt.py) | Prompt sections, history lines, escaping untrusted content |
-| [`pw.py`](pw_agent/pw.py) | `playwright-cli` wrapper |
+| [`loop.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/loop.py) | The agent loop, repeat detection, and failure handling |
+| [`brain.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
+| [`actions.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
+| [`observe.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/observe.py) | Tab list and page snapshot |
+| [`prompt.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/prompt.py) | Prompt sections, history lines, escaping untrusted content |
+| [`pw.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/pw.py) | `playwright-cli` wrapper |
 
 ## Roadmap
 
@@ -209,7 +209,7 @@ PW_AGENT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real clau
 ```
 
 > [!TIP]
-> The e2e test fills in and submits [`tests/fixtures/form.html`](tests/fixtures/form.html) using a real model, so each run costs a small amount.
+> The e2e test fills in and submits [`tests/fixtures/form.html`](https://github.com/locle97/playwright-agent-loop/blob/main/tests/fixtures/form.html) using a real model, so each run costs a small amount.
 
 CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request. A `package` job also builds the wheel and smoke-tests it in a fresh venv.
 
