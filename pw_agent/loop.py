@@ -106,8 +106,9 @@ class Agent:
             failures = 0
             self.cost_usd += c
             memory = decision.memory
-            results, done = execute(self.pw, decision.actions)
-            self._record(history, StepRecord(step, decision, results))
+            codes: list[str | None] = []
+            results, done = execute(self.pw, decision.actions, codes=codes)
+            self._record(history, StepRecord(step, decision, results, codes))
             if done is not None:
                 return RunResult(done[0], done[1], steps, self.cost_usd, history)
         return RunResult(False, "max steps reached", steps, self.cost_usd, history)
