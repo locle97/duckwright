@@ -6,7 +6,7 @@ import pytest
 
 from duckwright import __main__ as m
 from duckwright.brain import Action, Decision
-from duckwright.loop import Agent
+from duckwright.loop import Agent, RunResult
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightError
 
@@ -229,3 +229,107 @@ def test_system_prompt_documents_expect():
     assert '{"cmd": "expect", "args": ["text", "e15", ' in text
     for check in ("visible", "value", "checked", "unchecked", "url"):
         assert f'"{check}"' in text
+
+
+GOTO = "await page.goto('https://example.com');"
+EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");"
+
+
+def _write_run(tmp_path, success=True, code=GOTO):
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    data = {
+        "task": "t", "success": success, "answer": "", "steps": 1, "cost_usd": 0.0,
+        "history": [{"step": 1, "actions": [{"cmd": "goto", "args": ["u"], "code": code}],
+                     "results": ["ok"]}],
+    }
+    (run_dir / "history.json").write_text(json.dumps(data))
+    return run_dir
+
+
+def test_export_subcommand_writes_spec(tmp_path, capsys):
+    run_dir = _write_run(tmp_path)
+    assert m.main(["export", str(run_dir)]) == 0
+    spec = run_dir / "duckwright.spec.ts"
+    assert spec.is_file()
+    assert f"Test: {spec}" in capsys.readouterr().out
+
+
+def test_export_subcommand_output_flag(tmp_path):
+    run_dir = _write_run(tmp_path)
+    out = tmp_path / "e2e" / "greet.spec.ts"
+    assert m.main(["export", str(run_dir), "-o", str(out)]) == 0
+    assert out.is_file()
+    assert not (run_dir / "duckwright.spec.ts").exists()
+
+
+def test_export_skips_preflight(tmp_path, monkeypatch):
+    monkeypatch.setattr(m.shutil, "which", lambda n: None)
+    assert m.main(["export", str(_write_run(tmp_path))]) == 0
+
+
+def test_export_failed_run_exits_1(tmp_path, capsys):
+    run_dir = _write_run(tmp_path, success=False)
+    assert m.main(["export", str(run_dir)]) == 1
+    assert "did not succeed" in capsys.readouterr().err
+    assert not (run_dir / "duckwright.spec.ts").exists()
+
+
+def test_export_bad_path_exits_2(tmp_path, capsys):
+    assert m.main(["export", str(tmp_path / "nope")]) == 2
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1
+    assert "Traceback" not in err
+
+
+def test_export_warnings_go_to_stderr(tmp_path, capsys):
+    assert m.main(["export", str(_write_run(tmp_path))]) == 0
+    assert "warning: no assertions recorded" in capsys.readouterr().err
+
+
+def _fake_run(monkeypatch, success=True, actions=None, codes=None):
+    actions = actions or [Action("goto", ["u"]), Action("expect", ["url", "u"])]
+    codes = codes if codes is not None else [GOTO, EXPECT]
+    rec = StepRecord(1, Decision("", "", "", actions), ["ok"] * len(actions), codes)
+
+    def run(self):
+        self.on_step(rec)
+        return RunResult(success, "a", 1, 0.0, [rec])
+
+    monkeypatch.setattr(Agent, "run", run)
+
+
+def test_run_with_export_writes_spec(env, monkeypatch, capsys):
+    tmp, argv = env
+    _fake_run(monkeypatch)
+    assert m.main(argv + ["--export"]) == 0
+    (run_dir,) = tmp.glob("runs/*")
+    assert (run_dir / "history.json").is_file()
+    spec = run_dir / "duckwright.spec.ts"
+    assert spec.is_file()
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out[-2].startswith("History: ")
+    assert out[-1] == f"Test: {spec.relative_to(tmp)}"
+
+
+def test_run_without_export_writes_no_spec(env, monkeypatch):
+    tmp, argv = env
+    _fake_run(monkeypatch)
+    assert m.main(argv) == 0
+    assert not list(tmp.glob("runs/*/duckwright.spec.ts"))
+
+
+def test_run_export_on_failed_run(env, monkeypatch, capsys):
+    tmp, argv = env
+    _fake_run(monkeypatch, success=False)
+    assert m.main(argv + ["--export"]) == 1
+    assert not list(tmp.glob("runs/*/duckwright.spec.ts"))
+    assert "Test: not exported (run did not succeed)" in capsys.readouterr().out
+
+
+def test_run_export_failure_keeps_exit_0(env, monkeypatch, capsys):
+    tmp, argv = env
+    _fake_run(monkeypatch, actions=[Action("done", ["success", "a"])], codes=[None])
+    assert m.main(argv + ["--export"]) == 0
+    assert len(list(tmp.glob("runs/*/history.json"))) == 1
+    assert "export failed: nothing to export" in capsys.readouterr().err
