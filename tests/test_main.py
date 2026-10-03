@@ -710,3 +710,76 @@ def test_batch_same_stem_shares_group(env, monkeypatch, capsys):
     assert len(list(tmp.glob("runs/login/*/history.json"))) == 2
     rows = [l for l in capsys.readouterr().out.splitlines() if l.startswith("pass  ")]
     assert len({r.split("  ")[2] for r in rows}) == 2
+
+
+def _hist(d, task, success=True, task_file=None):
+    d.mkdir(parents=True, exist_ok=True)
+    data = {"task": task, "task_file": task_file, "success": success, "answer": "",
+            "steps": 1, "cost_usd": 0.0, "history": []}
+    (d / "history.json").write_text(json.dumps(data))
+
+
+def _lines(capsys):
+    return capsys.readouterr().out.splitlines()
+
+
+def test_runs_command_lists_newest_first(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _hist(tmp_path / "runs" / "a" / "20261003-090000-000000", "first")
+    _hist(tmp_path / "runs" / "b" / "20261003-100000-000000", "second")
+    assert m.main(["runs"]) == 0
+    out = _lines(capsys)
+    assert len(out) == 2
+    assert out[0].endswith("second") and out[1].endswith("first")
+
+
+def test_runs_command_query_and_status(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _hist(tmp_path / "runs" / "greet" / "20261003-090000-000000", "g1", success=False)
+    _hist(tmp_path / "runs" / "greet" / "20261003-100000-000000", "g2")
+    _hist(tmp_path / "runs" / "login" / "20261003-110000-000000", "l1", success=False)
+    assert m.main(["runs", "greet", "--status", "fail"]) == 0
+    out = _lines(capsys)
+    assert len(out) == 1 and out[0].endswith("g1")
+
+
+def test_runs_command_limit(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    for i in range(3):
+        _hist(tmp_path / "runs" / "t" / f"20261003-10000{i}-000000", f"t{i}")
+    assert m.main(["runs", "-n", "2"]) == 0
+    assert len(_lines(capsys)) == 2
+    with pytest.raises(SystemExit) as e:
+        m.main(["runs", "-n", "0"])
+    assert e.value.code == 2
+
+
+def test_runs_command_empty(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert m.main(["runs"]) == 0
+    assert capsys.readouterr().out == "No runs found.\n"
+
+
+def test_runs_command_skips_bad_history(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _hist(tmp_path / "runs" / "ok" / "20261003-100000-000000", "good")
+    bad = tmp_path / "runs" / "bad" / "20261003-110000-000000"
+    bad.mkdir(parents=True)
+    (bad / "history.json").write_text("{nope")
+    assert m.main(["runs"]) == 0
+    captured = capsys.readouterr()
+    assert len(captured.out.splitlines()) == 1
+    assert captured.err.startswith("warning: skipped ")
+
+
+def test_runs_command_skips_preflight(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m.shutil, "which", lambda n: None)
+    assert m.main(["runs"]) == 0
+
+
+def test_task_named_runs_still_runs(env, monkeypatch):
+    tmp, argv = env
+    seen = _record_run(monkeypatch)
+    assert m.main(["--skill", argv[2], "--", "runs"]) == 0
+    assert seen["task"] == "runs"

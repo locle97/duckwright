@@ -100,6 +100,7 @@ duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--allow-file-access] [--[no-]export] [--name NAME]
 duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export RUN [-o FILE]
+duckwright runs [QUERY] [-n N] [--status pass|fail]
 ```
 
 `python3 -m duckwright` works the same way. Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
@@ -118,7 +119,7 @@ duckwright export RUN [-o FILE]
 | `--export` | off | After a successful run, write a Playwright test to `runs/<name>/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 
 > [!NOTE]
-> When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
+> When the first argument is exactly `export` or `runs`, it is read as that subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export` or `runs`, write `duckwright -- export` or `duckwright -- runs`.
 
 > [!IMPORTANT]
 > Two runs at the same time must use different `--session` names. Otherwise they drive the same browser.
@@ -235,6 +236,21 @@ Each run directory contains:
 > [!CAUTION]
 > `code` contains whatever the agent typed, passwords included. Treat `history.json` and any exported spec like `auth.json`.
 
+### Finding past runs
+
+`duckwright runs` lists the runs in `runs/`, newest first:
+
+```console
+$ duckwright runs greet
+2026-10-03 11:42  pass   3 steps  $0.0310  runs/greet/20261003-114200-000042  Open https://example.com/form, enter the…
+2026-10-03 10:15  fail  25 steps  $0.2104  runs/greet/20261003-101500-123456  Open https://example.com/form, enter the…
+```
+
+- `QUERY` keeps the runs whose name, task file or task text contains it, ignoring case.
+- `--status pass` or `--status fail` keeps only passed or failed runs. `-n N` shows at most `N` runs (default `20`).
+- Runs in the old flat layout are listed too. A `history.json` that cannot be read is skipped with a warning on stderr.
+- The path in each line can be passed straight to `duckwright export`.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -302,6 +318,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`brain.py`](https://github.com/locle97/duckwright/blob/main/duckwright/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
 | [`actions.py`](https://github.com/locle97/duckwright/blob/main/duckwright/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
 | [`export.py`](https://github.com/locle97/duckwright/blob/main/duckwright/export.py) | Renders `history.json` as a `@playwright/test` spec |
+| [`runs.py`](https://github.com/locle97/duckwright/blob/main/duckwright/runs.py) | Names and creates run folders, and lists past runs for `duckwright runs` |
 | [`expect.py`](https://github.com/locle97/duckwright/blob/main/duckwright/expect.py) | `expect` checks: verified against the live page and recorded as assertions |
 | [`taskfile.py`](https://github.com/locle97/duckwright/blob/main/duckwright/taskfile.py) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
 | [`observe.py`](https://github.com/locle97/duckwright/blob/main/duckwright/observe.py) | Tab list and page snapshot |
@@ -332,6 +349,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 **Experience**
 
 - [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
+- [x] **Readable run history**: runs are grouped by task name under `runs/<name>/`, and `duckwright runs [QUERY]` lists and searches them.
 - [x] **Batch runs**: `duckwright -f tasks/` (or several files) runs task files one after another and prints a summary.
 - [x] **Packaging**: a console-script entry point, so `duckwright` runs from any directory after a local or GitHub install.
 - [ ] **PyPI release**: publish `duckwright` so `pipx install duckwright` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.

@@ -10,7 +10,7 @@ from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
-from duckwright.runs import new_run_dir
+from duckwright.runs import find_runs, format_run, matches, new_run_dir
 from duckwright.taskfile import TaskFile, TaskFileError, load_task_file, task_paths
 
 DIST_NAME = "duckwright"
@@ -32,6 +32,7 @@ def _run_parser() -> argparse.ArgumentParser:
         description="Duckwright: browser agent loop on playwright-cli + claude -p",
         epilog=(
             "Run a task file: duckwright -f tasks/login.md. "
+            "To find an earlier run: duckwright runs [QUERY]. "
             "To turn an earlier run into a test: duckwright export runs/<name>/<id>"
         ),
     )
@@ -101,6 +102,50 @@ def _export_main(argv) -> int:
         print(e, file=sys.stderr)
         return e.exit_code
     print(f"Test: {path}")
+    return 0
+
+
+def _positive_int(v: str) -> int:
+    try:
+        n = int(v)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be a whole number of at least 1, got {v!r}")
+    return n
+
+
+def _parse_runs(argv):
+    p = argparse.ArgumentParser(
+        prog="duckwright runs",
+        description="List earlier runs in runs/, newest first",
+    )
+    p.add_argument(
+        "query", nargs="?",
+        help="only runs whose name, task file or task contains this text (any case)",
+    )
+    p.add_argument(
+        "-n", "--limit", type=_positive_int, default=20, metavar="N",
+        help="show at most N runs (default: 20)",
+    )
+    p.add_argument("--status", choices=["pass", "fail"], help="only passed or failed runs")
+    return p.parse_args(argv)
+
+
+def _runs_main(argv) -> int:
+    args = _parse_runs(argv)
+    runs, warnings = find_runs()
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    if args.query:
+        runs = [r for r in runs if matches(r, args.query)]
+    if args.status:
+        runs = [r for r in runs if r.success == (args.status == "pass")]
+    if not runs:
+        print("No runs found.")
+        return 0
+    for r in runs[: args.limit]:
+        print(format_run(r))
     return 0
 
 
@@ -265,6 +310,8 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "export":
         return _export_main(argv[1:])
+    if argv and argv[0] == "runs":
+        return _runs_main(argv[1:])
     parser = _run_parser()
     args = parser.parse_args(argv)
     if args.task is not None and args.file is not None:
