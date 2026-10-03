@@ -52,9 +52,16 @@ def test_quoted_typed_values(tmp_path):
     assert load_task_file(p).settings == {"export": True, "max_steps": 15}
 
 
-def test_full_snapshot_setting(tmp_path):
-    p = _w(tmp_path, "---\nfull-snapshot: false\n---\nGo")
-    assert load_task_file(p).settings == {"full_snapshot": False}
+@pytest.mark.parametrize("mode", ["full", "grep", "hybrid"])
+def test_snapshot_setting(tmp_path, mode):
+    p = _w(tmp_path, f"---\nsnapshot: {mode}\n---\nGo")
+    assert load_task_file(p).settings == {"snapshot": mode}
+
+
+def test_bad_snapshot_setting_is_a_located_error(tmp_path):
+    p = _w(tmp_path, "---\nsnapshot: fast\n---\nGo")
+    with pytest.raises(TaskFileError, match=r':2: snapshot must be full, grep or hybrid, got "fast"$'):
+        load_task_file(p)
 
 
 def test_bom_and_crlf(tmp_path):

@@ -3,6 +3,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from duckwright.observe import SNAPSHOT_MODES
+
 # Front-matter key -> (argparse dest, kind). allow-file-access is deliberately absent:
 # a shared task file must not be able to grant the browser unrestricted file access.
 KEYS = {
@@ -13,7 +15,7 @@ KEYS = {
     "session": ("session", "str"),
     "state": ("state", "path"),
     "export": ("export", "bool"),
-    "full-snapshot": ("full_snapshot", "bool"),
+    "snapshot": ("snapshot", "snapshot"),
 }
 FENCE = "---"
 COMMENT = re.compile(r"\s#")
@@ -60,6 +62,10 @@ def _convert(key: str, kind: str, v: str, base_dir: Path) -> object:
         if v not in ("true", "false"):
             raise _Line(f'{key} must be true or false, got "{v}"')
         return v == "true"
+    if kind == "snapshot":
+        if v not in SNAPSHOT_MODES:
+            raise _Line(f'{key} must be full, grep or hybrid, got "{v}"')
+        return v
     if kind == "path":
         try:
             return str((base_dir / Path(v).expanduser()).resolve())

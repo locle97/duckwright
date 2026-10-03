@@ -27,22 +27,22 @@ def test_missing_skill_exits():
 @pytest.mark.skipif(
     os.environ.get("DUCKWRIGHT_E2E") != "1", reason="set DUCKWRIGHT_E2E=1 to run live e2e"
 )
-@pytest.mark.parametrize("full_snapshot", [True, False], ids=["full", "grep"])
-def test_e2e_form(tmp_path, full_snapshot):
+@pytest.mark.parametrize("mode", ["full", "grep", "hybrid"])
+def test_e2e_form(tmp_path, mode):
     form = (ROOT / "tests" / "fixtures" / "form.html").resolve()
     task = f"Open file://{form}, enter the name Linh, submit, and report the greeting."
     prompts = ROOT / "duckwright" / "prompts"
-    mode_md = "snapshot-full.md" if full_snapshot else "snapshot-grep.md"
     brain = Brain(
-        system_files=[prompts / "system.md", prompts / mode_md, prompts / "playwright-cli.md"],
-        snapshot_dir=None if full_snapshot else page_dir(tmp_path),
+        system_files=[
+            prompts / "system.md", prompts / f"snapshot-{mode}.md", prompts / "playwright-cli.md",
+        ],
+        snapshot_dir=None if mode == "full" else page_dir(tmp_path),
     )
-    mode = "full" if full_snapshot else "grep"
     pw = PlaywrightCLI(session=f"duckwright-e2e-{mode}", allow_file_access=True)
     try:
         result = Agent(
             task, pw, brain, tmp_path, max_steps=8, on_step=lambda r: print(r.line()),
-            full_snapshot=full_snapshot,
+            snapshot_mode=mode,
         ).run()
     finally:
         pw.close()

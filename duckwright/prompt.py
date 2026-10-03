@@ -56,7 +56,7 @@ def build_prompt(
     obs: Observation,
     window: int = HISTORY_WINDOW,
     nudge: str | None = None,
-    full_snapshot: bool = True,
+    paste: bool = True,
 ) -> str:
     shown = history[-window:] if window > 0 else []
     omitted = len(history) - len(shown)
@@ -72,7 +72,7 @@ def build_prompt(
     ]
     if nudge:
         parts.append(nudge)
-    if full_snapshot:
+    if paste:
         parts.append(_section("page_snapshot", _neutralise(obs.snapshot)))
     else:
         # Every value here comes from the harness, so there is nothing to escape.

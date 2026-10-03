@@ -60,6 +60,7 @@ def test_wheel_bundles_prompts(wheel):
     assert "duckwright/prompts/playwright-cli.md" in names
     assert "duckwright/prompts/snapshot-full.md" in names
     assert "duckwright/prompts/snapshot-grep.md" in names
+    assert "duckwright/prompts/snapshot-hybrid.md" in names
     assert not any(n.startswith(("prompts/", "tests/")) for n in names)
 
 

@@ -8,6 +8,9 @@ TRUNCATION_MARKER = "\n…[snapshot truncated]"
 # The snapshot gets a folder of its own: in grep mode it is the only thing Claude can read.
 PAGE_DIR = "page"
 SNAPSHOT_FILE = "snapshot.yml"
+# How the agent reads the page: always pasted, always grepped, or by size (hybrid).
+SNAPSHOT_MODES = ("hybrid", "full", "grep")
+HYBRID_MAX_CHARS = 5_000
 
 
 @dataclass
@@ -22,6 +25,13 @@ class Observation:
 
 def page_dir(workdir: Path) -> Path:
     return Path(workdir) / PAGE_DIR
+
+
+def paste_snapshot(mode: str, obs: Observation) -> bool:
+    """Whether this step pastes the snapshot into the prompt rather than letting Claude grep it."""
+    if mode == "hybrid":
+        return obs.chars <= HYBRID_MAX_CHARS
+    return mode == "full"
 
 
 def observe(

@@ -206,3 +206,15 @@ def test_snapshot_mode_resolves_system_files(tmp_path, monkeypatch):
     Brain([Path("skill.md")], runner=fake, snapshot_dir=Path("page")).decide("P")
     argv = fake.calls[0][0]
     assert argv[argv.index("--append-system-prompt-file") + 1] == str(tmp_path.resolve() / "skill.md")
+
+
+def test_grep_false_runs_without_tools_even_with_snapshot_dir():
+    calls = []
+
+    def runner(argv, stdin, timeout):  # no cwd: a pasted step runs like full mode
+        calls.append(argv)
+        return env()
+
+    Brain([Path("skill.md")], runner=runner, snapshot_dir=Path("page")).decide("P", grep=False)
+    assert calls[0][4:6] == ["--tools", ""]
+    assert "--restricted" not in calls[0]

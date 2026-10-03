@@ -139,8 +139,8 @@ class Brain:
             timeout = TOOL_TIMEOUT if snapshot_dir is not None else 60
         self.timeout = timeout
 
-    def _argv(self) -> list[str]:
-        if self.snapshot_dir is None:
+    def _argv(self, grep: bool = True) -> list[str]:
+        if self.snapshot_dir is None or not grep:
             tools = ["--tools", ""]
         else:
             # --allowedTools takes several values, so a -- flag must follow it.
@@ -156,13 +156,14 @@ class Brain:
         ]
         for f in self.system_files:
             # In grep mode claude runs inside snapshot_dir, so a relative path would miss.
-            path = f if self.snapshot_dir is None else Path(f).resolve()
+            path = f if self.snapshot_dir is None or not grep else Path(f).resolve()
             argv += ["--append-system-prompt-file", str(path)]
         return argv
 
-    def decide(self, prompt: str) -> tuple[Decision, float]:
-        if self.snapshot_dir is None:
-            res = self.runner(self._argv(), prompt, self.timeout)
+    def decide(self, prompt: str, grep: bool = True) -> tuple[Decision, float]:
+        """grep=False runs this one call without tools, for a step whose snapshot is pasted."""
+        if self.snapshot_dir is None or not grep:
+            res = self.runner(self._argv(grep=False), prompt, self.timeout)
         else:
             res = self.runner(
                 self._argv(), prompt, self.timeout, cwd=Path(self.snapshot_dir).resolve()

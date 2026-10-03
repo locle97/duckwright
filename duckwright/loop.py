@@ -4,7 +4,7 @@ from typing import Callable
 
 from duckwright.actions import execute
 from duckwright.brain import Brain, BrainError, Decision
-from duckwright.observe import observe
+from duckwright.observe import observe, paste_snapshot
 from duckwright.prompt import StepRecord, build_prompt
 from duckwright.pw import PlaywrightCLI, PlaywrightError
 
@@ -45,7 +45,7 @@ class Agent:
         headed: bool = False,
         state: Path | None = None,
         on_step: Callable[[StepRecord], None] | None = None,
-        full_snapshot: bool = True,
+        snapshot_mode: str = "full",
     ):
         self.task = task
         self.pw = pw
@@ -56,7 +56,7 @@ class Agent:
         self.headed = headed
         self.state = state
         self.on_step = on_step
-        self.full_snapshot = full_snapshot
+        self.snapshot_mode = snapshot_mode
         self.cost_usd = 0.0
 
     def _record(self, history: list[StepRecord], rec: StepRecord) -> None:
@@ -84,13 +84,14 @@ class Agent:
         for step in range(1, self.max_steps + 1):
             obs = observe(self.pw, self.workdir)
             nudge = REPEAT_NUDGE if _is_repeating(history) else None
+            paste = paste_snapshot(self.snapshot_mode, obs)
             prompt = build_prompt(
                 self.task, step, self.max_steps, history, memory, obs,
-                nudge=nudge, full_snapshot=self.full_snapshot,
+                nudge=nudge, paste=paste,
             )
             steps = step
             try:
-                decision, c = self.brain.decide(prompt)
+                decision, c = self.brain.decide(prompt, grep=not paste)
             except BrainError as e:
                 self.cost_usd += e.cost
                 failures += 1

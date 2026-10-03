@@ -9,7 +9,7 @@ from pathlib import Path
 from duckwright.brain import Brain
 from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
-from duckwright.observe import page_dir
+from duckwright.observe import HYBRID_MAX_CHARS, page_dir
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
 from duckwright.taskfile import TaskFile, TaskFileError, load_task_file, task_paths
@@ -21,6 +21,7 @@ DEFAULT_SKILL = PROMPTS_DIR / "playwright-cli.md"
 # How the agent reads the page: pasted into the prompt, or grepped from the saved file.
 SNAPSHOT_FULL_MD = PROMPTS_DIR / "snapshot-full.md"
 SNAPSHOT_GREP_MD = PROMPTS_DIR / "snapshot-grep.md"
+SNAPSHOT_HYBRID_MD = PROMPTS_DIR / "snapshot-hybrid.md"
 
 
 def _version() -> str:
@@ -69,13 +70,23 @@ def _run_parser() -> argparse.ArgumentParser:
         "--export", action=argparse.BooleanOptionalAction, default=False,
         help=f"after a successful run, write a Playwright test to runs/<id>/{SPEC_NAME}",
     )
-    p.add_argument(
-        "--full-snapshot", action=argparse.BooleanOptionalAction, default=False,
+    snap = p.add_mutually_exclusive_group()
+    snap.add_argument(
+        "--snapshot-hybrid", dest="snapshot", action="store_const", const="hybrid",
         help=(
-            "paste the whole page snapshot (up to 40k characters) into every prompt, "
-            "instead of letting Claude grep the saved snapshot file"
+            f"default: paste page snapshots of up to {HYBRID_MAX_CHARS:,} characters into the "
+            "prompt, and let Claude grep larger ones from the saved file"
         ),
     )
+    snap.add_argument(
+        "--snapshot-full", dest="snapshot", action="store_const", const="full",
+        help="always paste the page snapshot (up to 40k characters) into the prompt",
+    )
+    snap.add_argument(
+        "--snapshot-grep", dest="snapshot", action="store_const", const="grep",
+        help="never paste the page snapshot; Claude always greps the saved file",
+    )
+    p.set_defaults(snapshot="hybrid")
     return p
 
 
@@ -112,7 +123,7 @@ def _export_main(argv) -> int:
 
 
 def _preflight(skill: Path, state: Path | None) -> str | None:
-    for path in (SYSTEM_MD, SNAPSHOT_FULL_MD, SNAPSHOT_GREP_MD):
+    for path in (SYSTEM_MD, SNAPSHOT_FULL_MD, SNAPSHOT_GREP_MD, SNAPSHOT_HYBRID_MD):
         if not path.is_file():
             return f"system prompt not found: {path} (is the installation complete?)"
     if not skill.is_file():
@@ -188,17 +199,19 @@ def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path
         collected.append(rec)
         print(rec.line(), flush=True)
 
-    mode_md = SNAPSHOT_FULL_MD if args.full_snapshot else SNAPSHOT_GREP_MD
+    mode_md = {
+        "full": SNAPSHOT_FULL_MD, "grep": SNAPSHOT_GREP_MD, "hybrid": SNAPSHOT_HYBRID_MD,
+    }[args.snapshot]
     brain = Brain(
         system_files=[SYSTEM_MD, mode_md, skill],
         model=args.model,
-        snapshot_dir=None if args.full_snapshot else page_dir(workdir),
+        snapshot_dir=None if args.snapshot == "full" else page_dir(workdir),
     )
     pw = PlaywrightCLI(session=args.session, allow_file_access=args.allow_file_access)
     agent = Agent(
         args.task, pw, brain, workdir,
         max_steps=args.max_steps, headed=args.headed, state=state, on_step=on_step,
-        full_snapshot=args.full_snapshot,
+        snapshot_mode=args.snapshot,
     )
     def write_failure(answer: str) -> None:
         data = _history_json(

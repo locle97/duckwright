@@ -1,6 +1,6 @@
 ---
 # Benchmark: one very large page (well over 40k characters of snapshot),
-# with answers far down the page, past the --full-snapshot truncation point.
+# with answers far down the page, past the --snapshot-full truncation point.
 # Expected answer: Guido van Rossum; 1991; Python 2.0 in 2000; Python 3.0 in 2008.
 max-steps: 15
 ---
