@@ -105,7 +105,10 @@ python3 -m pw_agent "Open https://app.example.com/settings and report my plan" -
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
 
 - `snapshot.yml`: the latest accessibility snapshot of the page
-- `history.json`: the task, the outcome, the total cost, and every step's decision and results
+- `history.json`: the task, the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, or was `done`).
+
+> [!CAUTION]
+> `code` contains whatever the agent typed, passwords included. Treat `history.json` like `auth.json`.
 
 ### Exit codes
 
@@ -115,6 +118,20 @@ Each step's history line is printed as it happens, followed by the result, answe
 | `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error |
 | `2` | A preflight check failed: missing `prompts/system.md`, skill, `--state` file, `claude`, or `playwright-cli` |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written) |
+
+### Turning a run into a Playwright test
+
+`history.json` holds the code for a Node.js `@playwright/test` regression test, so you don't have to drive the agent again:
+
+1. Read `history.json` in step order and collect every action's `code`, skipping `null`.
+2. Put the code together in that order. It already uses semantic locators, for example:
+   ```js
+   await page.goto('https://example.com/form');
+   await page.getByRole('textbox', { name: 'Name' }).fill('Linh');
+   await page.getByRole('button', { name: 'Submit' }).click();
+   ```
+3. Add assertions for the outcome the run reported in `answer`, for example `await expect(page.getByRole('heading')).toHaveText('Hello, Linh!')`.
+4. Run the test with `npx playwright test` and fix any locator that fails. [`.claude/skills/playwright-cli/references/test-generation.md`](.claude/skills/playwright-cli/references/test-generation.md) covers that workflow.
 
 ## How it works
 
