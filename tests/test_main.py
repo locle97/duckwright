@@ -677,3 +677,53 @@ def test_snapshot_mode_prompts():
     assert "Grep" in grep and "snapshot.yml" in grep
     assert "Grep" not in full
     assert "snapshot.yml" in system  # untrusted section covers tool output
+
+
+def _capture(monkeypatch):
+    seen = {}
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    def run(self):
+        seen.update(full=self.full_snapshot, dir=self.brain.snapshot_dir,
+                    files=list(self.brain.system_files), workdir=self.workdir)
+        return R()
+
+    monkeypatch.setattr(Agent, "run", run)
+    return seen
+
+
+def test_grep_is_default(env, monkeypatch):
+    tmp, argv = env
+    seen = _capture(monkeypatch)
+    assert m.main(argv) == 0
+    assert seen["full"] is False
+    assert seen["dir"] == seen["workdir"] / "page"
+    assert seen["files"][:2] == [m.SYSTEM_MD, m.SNAPSHOT_GREP_MD]
+
+
+def test_full_snapshot_flag(env, monkeypatch):
+    tmp, argv = env
+    seen = _capture(monkeypatch)
+    assert m.main(argv + ["--full-snapshot"]) == 0
+    assert seen["full"] is True and seen["dir"] is None
+    assert seen["files"][:2] == [m.SYSTEM_MD, m.SNAPSHOT_FULL_MD]
+
+
+def test_full_snapshot_file_setting_and_cli_override(env, monkeypatch):
+    tmp, argv = env
+    (tmp / "t.md").write_text("---\nfull-snapshot: true\n---\nDo it\n")
+    seen = _capture(monkeypatch)
+    skill = argv[2]
+    assert m.main(["-f", "t.md", "--skill", skill]) == 0
+    assert seen["full"] is True
+    assert m.main(["-f", "t.md", "--skill", skill, "--no-full-snapshot"]) == 0
+    assert seen["full"] is False
+
+
+def test_missing_mode_prompt_exits_2(env, monkeypatch, capsys):
+    tmp, argv = env
+    monkeypatch.setattr(m, "SNAPSHOT_GREP_MD", tmp / "nope.md")
+    assert m.main(argv) == 2
+    assert "system prompt not found" in capsys.readouterr().err

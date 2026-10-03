@@ -15,7 +15,7 @@ A [browser-use](https://github.com/browser-use/browser-use) style agent loop bui
 
 </div>
 
-Give it a task in plain English and Duckwright drives a real browser to finish it, one step at a time. The harness runs the loop, not the model: each step Claude sees the page and replies with a single structured decision. The harness checks that decision and runs it. Claude never gets a shell or any tools.
+Give it a task in plain English and Duckwright drives a real browser to finish it, one step at a time. The harness runs the loop, not the model: each step Claude sees the page and replies with a single structured decision. The harness checks that decision and runs it. Claude never gets a shell. By default its only tools are Read and Grep, limited to the folder that holds the page snapshot; with `--full-snapshot` it gets no tools at all.
 
 Every run also records the Playwright code behind each action, so a task the agent solved once can become a repeatable `@playwright/test` regression test.
 
@@ -36,7 +36,8 @@ History: runs/20261003-101500-123456/history.json
 - **The harness owns the loop**: snapshot, decide, validate, execute, record. The steps run in a fixed order and the browser is always closed at the end.
 - **Structured decisions**: every step returns JSON that must match a schema: evaluation of the previous goal, memory, next goal, and 1 to 3 actions.
 - **Commands go through an allow-list**: the decision schema restricts `cmd` to navigation and interaction commands and requires `done` to carry exactly two args, one of them `success` or `failure`. The harness checks again before running anything. Unknown commands and flags such as `--session` or `--filename` are rejected before they reach the browser.
-- **Page content is treated as untrusted**: snapshots and tab titles are fenced and escaped, and the system prompt tells the model never to follow instructions found in them.
+- **Page content is treated as untrusted**: snapshots and tab titles are fenced and escaped, and the system prompt tells the model never to follow instructions found in them, including in what it reads from `snapshot.yml`.
+- **Snapshots are searched, not pasted**: by default Claude greps the saved snapshot for what it needs instead of receiving up to 40k characters every step. `--full-snapshot` restores pasting.
 - **Built-in safeguards**: actions after a page-changing command are skipped, a `done success` is refused if an earlier action in the same step failed, repeated actions trigger a "try something different" nudge, and the run stops after repeated brain failures.
 - **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
 - **Replayable as a test**: each action in `history.json` carries the Playwright code `playwright-cli` ran for it, exported as a regression test with `duckwright export`.
@@ -52,7 +53,7 @@ History: runs/20261003-101500-123456/history.json
   ```bash
   npm i -g @playwright/cli@latest
   ```
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in. The default grep mode needs a version with the `--restricted` option (tested with 2.1.288); `--full-snapshot` also works with older versions
 
 > [!NOTE]
 > The agent uses `duckwright/prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `duckwright/prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
@@ -115,6 +116,7 @@ duckwright export RUN [-o FILE]
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
+| `--full-snapshot` | off | Paste the whole page snapshot (up to 40k characters) into every prompt instead of letting Claude grep the saved file; `--no-full-snapshot` overrides a task file |
 
 > [!NOTE]
 > When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
@@ -171,6 +173,7 @@ and check the greeting says "Hello, Linh!".
 | `session` | text |
 | `state` | a path |
 | `export` | `true` or `false` |
+| `full-snapshot` | `true` or `false` |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
 - Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
@@ -212,7 +215,7 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
 
-- `snapshot.yml`: the latest accessibility snapshot of the page
+- `page/snapshot.yml`: the latest accessibility snapshot of the page
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 
 - `duckwright.spec.ts`: the generated regression test, only with `--export`
@@ -266,7 +269,7 @@ Only successful runs can be exported. `duckwright export` exits with `0` when th
 ```mermaid
 flowchart LR
     A[playwright-cli snapshot] --> B[Build prompt<br/>task · memory · tabs · history · page]
-    B --> C["claude -p<br/>(no tools, JSON schema)"]
+    B --> C["claude -p<br/>(Read/Grep on snapshot, JSON schema)"]
     C --> D[Validate against<br/>allow-list]
     D --> E[Execute via<br/>playwright-cli]
     E --> F{done?}
@@ -274,8 +277,8 @@ flowchart LR
     F -- yes --> G[Close browser,<br/>write history.json]
 ```
 
-1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
-2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`duckwright/prompts/system.md`](https://github.com/locle97/duckwright/blob/main/duckwright/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
+1. **Observe**: the harness lists the open tabs and saves an accessibility snapshot to `page/snapshot.yml`. By default the prompt only names the file and its size, and Claude searches it. With `--full-snapshot` the snapshot is pasted into the prompt, truncated at 40k characters.
+2. **Decide**: `claude -p` runs in the `page/` folder with only the Read and Grep tools and `--restricted`, which keeps them inside that folder; with `--full-snapshot` it gets no tools. MCP servers and slash commands are always disabled. It gets [`duckwright/prompts/system.md`](https://github.com/locle97/duckwright/blob/main/duckwright/prompts/system.md), the prompt for its reading mode (`snapshot-grep.md` or `snapshot-full.md`), and the playwright-cli skill as its system prompt, and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `expect`, `done`) and their allowed flags, then run through `playwright-cli`. `expect` is handled by the harness: it gets a locator for the ref with `playwright-cli generate-locator`, reads the element's state, and compares it with the expected value. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 

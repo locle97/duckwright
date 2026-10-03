@@ -52,6 +52,11 @@ def test_quoted_typed_values(tmp_path):
     assert load_task_file(p).settings == {"export": True, "max_steps": 15}
 
 
+def test_full_snapshot_setting(tmp_path):
+    p = _w(tmp_path, "---\nfull-snapshot: false\n---\nGo")
+    assert load_task_file(p).settings == {"full_snapshot": False}
+
+
 def test_bom_and_crlf(tmp_path):
     tf = load_task_file(_w(tmp_path, b"\xef\xbb\xbf---\r\nmodel: opus\r\n---\r\nGo\r\n"))
     assert tf.settings == {"model": "opus"}

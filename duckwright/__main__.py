@@ -9,6 +9,7 @@ from pathlib import Path
 from duckwright.brain import Brain
 from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
+from duckwright.observe import page_dir
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
 from duckwright.taskfile import TaskFile, TaskFileError, load_task_file, task_paths
@@ -68,6 +69,13 @@ def _run_parser() -> argparse.ArgumentParser:
         "--export", action=argparse.BooleanOptionalAction, default=False,
         help=f"after a successful run, write a Playwright test to runs/<id>/{SPEC_NAME}",
     )
+    p.add_argument(
+        "--full-snapshot", action=argparse.BooleanOptionalAction, default=False,
+        help=(
+            "paste the whole page snapshot (up to 40k characters) into every prompt, "
+            "instead of letting Claude grep the saved snapshot file"
+        ),
+    )
     return p
 
 
@@ -104,8 +112,9 @@ def _export_main(argv) -> int:
 
 
 def _preflight(skill: Path, state: Path | None) -> str | None:
-    if not SYSTEM_MD.is_file():
-        return f"system prompt not found: {SYSTEM_MD} (is the installation complete?)"
+    for path in (SYSTEM_MD, SNAPSHOT_FULL_MD, SNAPSHOT_GREP_MD):
+        if not path.is_file():
+            return f"system prompt not found: {path} (is the installation complete?)"
     if not skill.is_file():
         return f"playwright-cli skill not found: {skill}"
     if state and not state.is_file():
@@ -178,11 +187,17 @@ def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path
         collected.append(rec)
         print(rec.line(), flush=True)
 
-    brain = Brain(system_files=[SYSTEM_MD, skill], model=args.model)
+    mode_md = SNAPSHOT_FULL_MD if args.full_snapshot else SNAPSHOT_GREP_MD
+    brain = Brain(
+        system_files=[SYSTEM_MD, mode_md, skill],
+        model=args.model,
+        snapshot_dir=None if args.full_snapshot else page_dir(workdir),
+    )
     pw = PlaywrightCLI(session=args.session, allow_file_access=args.allow_file_access)
     agent = Agent(
         args.task, pw, brain, workdir,
         max_steps=args.max_steps, headed=args.headed, state=state, on_step=on_step,
+        full_snapshot=args.full_snapshot,
     )
     def write_failure(answer: str) -> None:
         data = _history_json(
