@@ -60,8 +60,9 @@ def extract_targets(snapshot: str) -> list[Target]:
         if raw_name is not None:
             # Unescape the name: convert backslash-escaped characters to the character itself
             name = re.sub(r"\\(.)", r"\1", raw_name)
-        # If no name provided, check if cursor=pointer is in rest - if not, skip
-        elif "[cursor=pointer]" not in rest:
+
+        # Skip if no name and no cursor=pointer (applies to both missing and empty names)
+        if not name and "[cursor=pointer]" not in rest:
             continue
 
         targets.append(Target(ref, role, name))

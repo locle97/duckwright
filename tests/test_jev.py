@@ -29,3 +29,12 @@ def test_extract_targets():
 
 def test_extract_targets_empty():
     assert extract_targets("") == [] and extract_targets("- page") == []
+
+
+def test_extract_targets_empty_names():
+    """Test that empty quoted names are handled like missing names."""
+    snap = '''- button "" [ref=e10]
+  - button "" [ref=e11] [cursor=pointer]'''
+    assert extract_targets(snap) == [
+        Target("e11", "button", ""),
+    ]
