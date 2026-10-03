@@ -11,6 +11,7 @@ from duckwright.export import SPEC_NAME, ExportError, export_run
 from duckwright.loop import Agent
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
+from duckwright.taskfile import TaskFileError, load_task_file
 
 DIST_NAME = "duckwright"
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -25,17 +26,24 @@ def _version() -> str:
         return "unknown"
 
 
-def _parse(argv):
+def _run_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="duckwright",
         description="Duckwright: browser agent loop on playwright-cli + claude -p",
-        epilog="To turn an earlier run into a test: duckwright export runs/<id>",
+        epilog=(
+            "Run a task file: duckwright -f tasks/login.md. "
+            "To turn an earlier run into a test: duckwright export runs/<id>"
+        ),
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
-    p.add_argument("task")
+    p.add_argument("task", nargs="?")
+    p.add_argument(
+        "-f", "--file", metavar="FILE",
+        help="read the task, and optional settings, from a .txt or .md file",
+    )
     p.add_argument("--max-steps", type=int, default=25)
     p.add_argument("--model", default="sonnet")
-    p.add_argument("--headed", action="store_true")
+    p.add_argument("--headed", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument("--skill", default=str(DEFAULT_SKILL))
     p.add_argument("--session", default="duckwright")
     p.add_argument(
@@ -51,10 +59,14 @@ def _parse(argv):
         ),
     )
     p.add_argument(
-        "--export", action="store_true",
+        "--export", action=argparse.BooleanOptionalAction, default=False,
         help=f"after a successful run, write a Playwright test to runs/<id>/{SPEC_NAME}",
     )
-    return p.parse_args(argv)
+    return p
+
+
+def _parse(argv):
+    return _run_parser().parse_args(argv)
 
 
 def _parse_export(argv):
@@ -99,9 +111,12 @@ def _preflight(skill: Path, state: Path | None) -> str | None:
     return None
 
 
-def _history_json(task, success, answer, steps, cost, history: list[StepRecord]) -> dict:
+def _history_json(
+    task, success, answer, steps, cost, history: list[StepRecord], task_file: str | None = None
+) -> dict:
     return {
         "task": task,
+        "task_file": task_file,
         "success": success,
         "answer": answer,
         "steps": steps,
@@ -131,7 +146,22 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "export":
         return _export_main(argv[1:])
-    args = _parse(argv)
+    parser = _run_parser()
+    args = parser.parse_args(argv)
+    if args.task is not None and args.file is not None:
+        parser.error("give a task or --file, not both")
+    if args.task is None and args.file is None:
+        parser.error("give a task or --file")
+    if args.file is not None:
+        try:
+            tf = load_task_file(Path(args.file))
+        except TaskFileError as e:
+            print(e, file=sys.stderr)
+            return 2
+        # File settings become defaults, so flags given on the command line still win.
+        parser.set_defaults(**tf.settings)
+        args = parser.parse_args(argv)
+        args.task = tf.task
     skill = Path(args.skill)
     state = Path(args.state).resolve() if args.state else None
     err = _preflight(skill, state)
@@ -157,7 +187,7 @@ def main(argv=None) -> int:
     )
     def write_failure(answer: str) -> None:
         data = _history_json(
-            args.task, False, answer, len(collected), agent.cost_usd, collected
+            args.task, False, answer, len(collected), agent.cost_usd, collected, args.file
         )
         (workdir / "history.json").write_text(json.dumps(data, indent=2))
 
@@ -178,7 +208,8 @@ def main(argv=None) -> int:
         return 1
 
     data = _history_json(
-        args.task, result.success, result.answer, result.steps, result.cost_usd, result.history
+        args.task, result.success, result.answer, result.steps, result.cost_usd, result.history,
+        args.file,
     )
     (workdir / "history.json").write_text(json.dumps(data, indent=2))
     print(f"Result: {'success' if result.success else 'failure'}")
