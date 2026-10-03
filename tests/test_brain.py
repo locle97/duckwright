@@ -11,10 +11,12 @@ from duckwright.proc import ProcResult
 class FakeRunner:
     def __init__(self, result):
         self.calls = []
+        self.cwds = []
         self.result = result
 
-    def __call__(self, argv, stdin, timeout):
+    def __call__(self, argv, stdin, timeout, cwd=None):
         self.calls.append((argv, stdin, timeout))
+        self.cwds.append(cwd)
         return self.result
 
 
@@ -160,3 +162,38 @@ def test_schema_expect_checks_match_expect_module():
 
     expect = DECISION_SCHEMA["properties"]["actions"]["items"]["anyOf"][1]
     assert expect["properties"]["args"]["contains"] == {"enum": list(CHECKS)}
+
+
+def test_snapshot_dir_argv_and_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    fake = FakeRunner(env())
+    Brain([], runner=fake, snapshot_dir=Path("runs/r1/page")).decide("P")
+    argv, _, timeout = fake.calls[0]
+    assert argv[:9] == [
+        "claude", "-p", "--output-format", "json",
+        "--tools", "Read,Grep", "--allowedTools", "Read,Grep", "--restricted",
+    ]
+    assert argv[9:12] == [
+        "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+    ]
+    assert fake.cwds == [(tmp_path / "runs" / "r1" / "page").resolve()]
+    assert fake.cwds[0].is_absolute()
+    assert timeout == 120
+
+
+def test_no_snapshot_dir_keeps_three_arg_call():
+    calls = []
+
+    def runner(argv, stdin, timeout):  # no cwd parameter: must still work
+        calls.append(argv)
+        return env()
+
+    Brain([], runner=runner).decide("P")
+    assert "--restricted" not in calls[0]
+    assert calls[0][4:6] == ["--tools", ""]
+
+
+def test_explicit_timeout_wins_in_snapshot_mode():
+    fake = FakeRunner(env())
+    Brain([], runner=fake, timeout=30, snapshot_dir=Path("p")).decide("P")
+    assert fake.calls[0][2] == 30

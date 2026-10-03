@@ -5,6 +5,10 @@ from pathlib import Path
 from duckwright.expect import CHECKS
 from duckwright.proc import Runner, run_process
 
+# Grep mode: the only tools Claude gets, confined (--restricted) to the snapshot folder.
+SNAPSHOT_TOOLS = "Read,Grep"
+TOOL_TIMEOUT = 120
+
 ALLOWED_COMMANDS: tuple[str, ...] = (
     "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
     "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
@@ -124,16 +128,27 @@ class Brain:
         system_files: list[Path],
         model: str = "sonnet",
         runner: Runner = run_process,
-        timeout: float = 60,
+        timeout: float | None = None,
+        snapshot_dir: Path | None = None,
     ):
         self.system_files = system_files
         self.model = model
         self.runner = runner
+        self.snapshot_dir = snapshot_dir
+        if timeout is None:
+            timeout = TOOL_TIMEOUT if snapshot_dir is not None else 60
         self.timeout = timeout
 
     def _argv(self) -> list[str]:
+        if self.snapshot_dir is None:
+            tools = ["--tools", ""]
+        else:
+            # --allowedTools takes several values, so a -- flag must follow it.
+            tools = [
+                "--tools", SNAPSHOT_TOOLS, "--allowedTools", SNAPSHOT_TOOLS, "--restricted",
+            ]
         argv = [
-            "claude", "-p", "--output-format", "json", "--tools", "",
+            "claude", "-p", "--output-format", "json", *tools,
             "--strict-mcp-config", "--disable-slash-commands",
             "--no-session-persistence",
             "--model", self.model,
@@ -144,7 +159,12 @@ class Brain:
         return argv
 
     def decide(self, prompt: str) -> tuple[Decision, float]:
-        res = self.runner(self._argv(), prompt, self.timeout)
+        if self.snapshot_dir is None:
+            res = self.runner(self._argv(), prompt, self.timeout)
+        else:
+            res = self.runner(
+                self._argv(), prompt, self.timeout, cwd=Path(self.snapshot_dir).resolve()
+            )
         if res.code == -1:
             raise BrainError("timeout")
         if res.code != 0:

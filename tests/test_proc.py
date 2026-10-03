@@ -21,3 +21,17 @@ def test_run_process_uses_utf8_replace(monkeypatch):
 def test_run_process_decodes_bad_bytes():
     r = proc.run_process(["python3", "-c", "import sys; sys.stdout.buffer.write(b'a\\xffb')"], None, 10)
     assert r.stdout == "a�b"
+
+
+def test_run_process_passes_cwd(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(proc.subprocess, "run", fake_run)
+    proc.run_process(["x"], None, 1, cwd=tmp_path)
+    assert seen["cwd"] == tmp_path
+    proc.run_process(["x"], None, 1)
+    assert seen["cwd"] is None
