@@ -4,8 +4,8 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from pw_agent.brain import DECISION_SCHEMA, Action, Brain, BrainError, Decision
-from pw_agent.proc import ProcResult
+from duckwright.brain import DECISION_SCHEMA, Action, Brain, BrainError, Decision
+from duckwright.proc import ProcResult
 
 
 class FakeRunner:
@@ -127,7 +127,7 @@ def test_parse_failure_after_cost_carries_cost():
 
 
 def test_schema_restricts_cmd_to_allowed():
-    from pw_agent.actions import ALLOWED
+    from duckwright.actions import ALLOWED
 
     done, other = DECISION_SCHEMA["properties"]["actions"]["items"]["anyOf"]
     assert done["properties"]["cmd"] == {"const": "done"}

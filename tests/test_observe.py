@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from pw_agent.observe import observe
-from pw_agent.proc import ProcResult
-from pw_agent.pw import PlaywrightCLI, PlaywrightError
+from duckwright.observe import observe
+from duckwright.proc import ProcResult
+from duckwright.pw import PlaywrightCLI, PlaywrightError
 
 
 def make_pw(snapshot_text, tabs="0: [current] Example", tab_code=0):

@@ -1,6 +1,6 @@
-from pw_agent.brain import Action, Decision
-from pw_agent.observe import Observation
-from pw_agent.prompt import HISTORY_WINDOW, StepRecord, build_prompt
+from duckwright.brain import Action, Decision
+from duckwright.observe import Observation
+from duckwright.prompt import HISTORY_WINDOW, StepRecord, build_prompt
 
 
 def rec(n, actions=None, results=None):

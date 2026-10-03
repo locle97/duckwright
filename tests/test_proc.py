@@ -1,6 +1,6 @@
 import subprocess
 
-from pw_agent import proc
+from duckwright import proc
 
 
 def test_run_process_uses_utf8_replace(monkeypatch):

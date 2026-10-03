@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from pw_agent.actions import execute
-from pw_agent.brain import Brain, BrainError, Decision
-from pw_agent.observe import observe
-from pw_agent.prompt import StepRecord, build_prompt
-from pw_agent.pw import PlaywrightCLI, PlaywrightError
+from duckwright.actions import execute
+from duckwright.brain import Brain, BrainError, Decision
+from duckwright.observe import observe
+from duckwright.prompt import StepRecord, build_prompt
+from duckwright.pw import PlaywrightCLI, PlaywrightError
 
 REPEAT_NUDGE = "You are repeating the same actions; try a different approach."
 REPEAT_THRESHOLD = 3

@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from pw_agent.brain import Brain
-from pw_agent.loop import Agent
-from pw_agent.pw import PlaywrightCLI
+from duckwright.brain import Brain
+from duckwright.loop import Agent
+from duckwright.pw import PlaywrightCLI
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_missing_skill_exits():
     r = subprocess.run(
-        [sys.executable, "-m", "pw_agent", "x", "--skill", "/nope"],
+        [sys.executable, "-m", "duckwright", "x", "--skill", "/nope"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -24,18 +24,18 @@ def test_missing_skill_exits():
 
 
 @pytest.mark.skipif(
-    os.environ.get("PW_AGENT_E2E") != "1", reason="set PW_AGENT_E2E=1 to run live e2e"
+    os.environ.get("DUCKWRIGHT_E2E") != "1", reason="set DUCKWRIGHT_E2E=1 to run live e2e"
 )
 def test_e2e_form(tmp_path):
     form = (ROOT / "tests" / "fixtures" / "form.html").resolve()
     task = f"Open file://{form}, enter the name Linh, submit, and report the greeting."
     brain = Brain(
         system_files=[
-            ROOT / "pw_agent" / "prompts" / "system.md",
-            ROOT / "pw_agent" / "prompts" / "playwright-cli.md",
+            ROOT / "duckwright" / "prompts" / "system.md",
+            ROOT / "duckwright" / "prompts" / "playwright-cli.md",
         ]
     )
-    pw = PlaywrightCLI(session="pw-agent-e2e", allow_file_access=True)
+    pw = PlaywrightCLI(session="duckwright-e2e", allow_file_access=True)
     try:
         result = Agent(
             task, pw, brain, tmp_path, max_steps=8, on_step=lambda r: print(r.line())

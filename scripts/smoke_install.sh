@@ -29,16 +29,16 @@ python3 -m venv "$venv"
 
 cd "$work"
 
-got="$("$venv/bin/pw_agent" --version)"
-if [ "$got" != "pw_agent $version" ]; then
-  echo "version mismatch: expected 'pw_agent $version', got '$got'" >&2
+got="$("$venv/bin/duckwright" --version)"
+if [ "$got" != "duckwright $version" ]; then
+  echo "version mismatch: expected 'duckwright $version', got '$got'" >&2
   exit 1
 fi
 
 # PATH is restricted so a machine that has `claude` installed never starts a real run.
 # Reaching the claude check also proves both bundled prompt files resolved.
 set +e
-err="$(PATH="$venv/bin" "$venv/bin/pw_agent" x 2>&1 >/dev/null)"
+err="$(PATH="$venv/bin" "$venv/bin/duckwright" x 2>&1 >/dev/null)"
 code=$?
 set -e
 if [ "$code" -ne 2 ]; then

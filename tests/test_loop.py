@@ -1,9 +1,9 @@
 import pytest
 
-from pw_agent.brain import Action, BrainError, Decision
-from pw_agent.loop import Agent
-from pw_agent.proc import ProcResult
-from pw_agent.pw import PlaywrightCLI, PlaywrightError
+from duckwright.brain import Action, BrainError, Decision
+from duckwright.loop import Agent
+from duckwright.proc import ProcResult
+from duckwright.pw import PlaywrightCLI, PlaywrightError
 
 
 class FakePW(PlaywrightCLI):

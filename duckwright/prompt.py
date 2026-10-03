@@ -1,8 +1,8 @@
 import re
 from dataclasses import dataclass, field
 
-from pw_agent.brain import Decision
-from pw_agent.observe import Observation
+from duckwright.brain import Decision
+from duckwright.observe import Observation
 
 HISTORY_WINDOW = 15
 

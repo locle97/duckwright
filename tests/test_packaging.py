@@ -43,27 +43,27 @@ def wheel(dists):
 
 def test_dist_name(dists):
     assert sorted(p.name for p in dists.iterdir()) == [
-        "playwright_agent_loop-0.1.0-py3-none-any.whl",
-        "playwright_agent_loop-0.1.0.tar.gz",
+        "duckwright-0.1.0-py3-none-any.whl",
+        "duckwright-0.1.0.tar.gz",
     ]
 
 
 def test_sdist_contains_prompts(dists):
     with tarfile.open(next(dists.glob("*.tar.gz"))) as t:
         names = t.getnames()
-    assert any(n.endswith("pw_agent/prompts/system.md") for n in names)
+    assert any(n.endswith("duckwright/prompts/system.md") for n in names)
 
 
 def test_wheel_bundles_prompts(wheel):
     names = wheel.namelist()
-    assert "pw_agent/prompts/system.md" in names
-    assert "pw_agent/prompts/playwright-cli.md" in names
+    assert "duckwright/prompts/system.md" in names
+    assert "duckwright/prompts/playwright-cli.md" in names
     assert not any(n.startswith(("prompts/", "tests/")) for n in names)
 
 
 def test_wheel_console_script(wheel):
     ep = _read(wheel, "entry_points.txt")
-    assert "[console_scripts]\npw_agent = pw_agent.__main__:main" in ep
+    assert "[console_scripts]\nduckwright = duckwright.__main__:main" in ep
 
 
 def test_wheel_has_no_runtime_deps(wheel):

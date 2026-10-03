@@ -1,7 +1,7 @@
-from pw_agent.actions import ALLOWED_LIST, execute, extract_code
-from pw_agent.brain import Action
-from pw_agent.proc import ProcResult
-from pw_agent.pw import PlaywrightCLI
+from duckwright.actions import ALLOWED_LIST, execute, extract_code
+from duckwright.brain import Action
+from duckwright.proc import ProcResult
+from duckwright.pw import PlaywrightCLI
 
 
 def make_pw(code=0, stderr="", stdout=""):
