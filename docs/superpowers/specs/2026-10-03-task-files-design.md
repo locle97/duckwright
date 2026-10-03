@@ -199,4 +199,4 @@ Exit codes are otherwise unchanged.
 
 ## Follow-up
 
-The batch runs plan (`docs/superpowers/plans/2026-10-03-batch-runs.md`) treats each line of a text file as one task. It must be revised to run task files instead (for example `duckwright batch tasks/*.md`), with each child run started as `-f <file>`.
+Batch runs come after this. They should run task files (for example `duckwright batch tasks/*.md`), starting each child run with `-f <file>`.
