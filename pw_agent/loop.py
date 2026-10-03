@@ -3,9 +3,9 @@ from pathlib import Path
 from typing import Callable
 
 from pw_agent.actions import execute
-from pw_agent.brain import Brain, BrainError, Decision
+from pw_agent.brain import Brain, BrainError, Decision, StepContext
 from pw_agent.observe import observe
-from pw_agent.prompt import StepRecord, build_prompt
+from pw_agent.prompt import StepRecord, build_prompt, history_lines
 from pw_agent.pw import PlaywrightCLI, PlaywrightError
 
 REPEAT_NUDGE = "You are repeating the same actions; try a different approach."
@@ -31,6 +31,12 @@ def _is_repeating(history: list[StepRecord]) -> bool:
         return False
     keys = [_action_key(r) for r in last]
     return all(k == keys[0] for k in keys)
+
+
+def _previous_failed(history: list[StepRecord]) -> bool:
+    return bool(history) and any(
+        r.startswith(("error:", "brain error:")) for r in history[-1].results
+    )
 
 
 class Agent:
@@ -86,13 +92,19 @@ class Agent:
                 self.task, step, self.max_steps, history, memory, obs, nudge=nudge
             )
             steps = step
+            ctx = StepContext(
+                step, self.task, memory, history_lines(history),
+                nudge is not None, _previous_failed(history),
+            )
             try:
-                decision, c = self.brain.decide(prompt)
+                decision, c = self.brain.decide(prompt, obs, ctx)
             except BrainError as e:
                 self.cost_usd += e.cost
                 failures += 1
                 self._record(
-                    history, StepRecord(step, Decision("", memory, "", []), [f"brain error: {e}"])
+                    history, StepRecord(
+                        step, Decision("", memory, "", []), [f"brain error: {e}"], cost=e.cost
+                    )
                 )
                 if failures >= self.max_failures:
                     return RunResult(
@@ -108,7 +120,7 @@ class Agent:
             memory = decision.memory
             codes: list[str | None] = []
             results, done = execute(self.pw, decision.actions, codes=codes)
-            self._record(history, StepRecord(step, decision, results, codes))
+            self._record(history, StepRecord(step, decision, results, codes, cost=c))
             if done is not None:
                 return RunResult(done[0], done[1], steps, self.cost_usd, history)
         return RunResult(False, "max steps reached", steps, self.cost_usd, history)

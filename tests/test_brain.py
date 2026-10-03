@@ -146,3 +146,15 @@ def test_schema_done_requires_status_and_answer():
     assert not ok({"cmd": "done", "args": ["42", "x"]})
     assert ok({"cmd": "click", "args": ["e1"]})
     assert not ok({"cmd": "eval", "args": ["1"]})
+
+
+def test_decision_routing_defaults():
+    d = Decision("", "", "", [])
+    assert (d.source, d.jev) == ("claude", None)
+
+
+def test_decide_ignores_obs_and_ctx():
+    a, b = FakeRunner(env()), FakeRunner(env())
+    Brain([Path("s.md")], runner=a).decide("P")
+    Brain([Path("s.md")], runner=b).decide("P", obs=object(), ctx=object())
+    assert a.calls == b.calls

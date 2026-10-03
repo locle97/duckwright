@@ -1,6 +1,6 @@
 from pw_agent.brain import Action, Decision
 from pw_agent.observe import Observation
-from pw_agent.prompt import HISTORY_WINDOW, StepRecord, build_prompt
+from pw_agent.prompt import HISTORY_WINDOW, StepRecord, build_prompt, history_lines
 
 
 def rec(n, actions=None, results=None):
@@ -67,3 +67,15 @@ def test_escape_leaves_other_angle_brackets():
     obs = Observation(tabs="t", snapshot='- text: "a < b" <div>', truncated=False)
     p = build_prompt("t", 1, 5, [], "", obs)
     assert '- text: "a < b" <div>' in p
+
+
+def test_history_lines_matches_prompt_window():
+    hist = [StepRecord(i, Decision("e", "m", f"g{i}", []), ["ok"]) for i in range(1, 21)]
+    lines = history_lines(hist)
+    assert len(lines) == 16 and lines[0] == "(5 earlier steps omitted)"
+    prompt = build_prompt("t", 21, 25, hist, "", OBS)
+    assert "<history>\n" + "\n".join(lines) + "\n</history>" in prompt
+
+
+def test_history_lines_empty():
+    assert history_lines([]) == []

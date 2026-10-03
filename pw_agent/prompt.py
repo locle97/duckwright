@@ -18,6 +18,7 @@ class StepRecord:
     results: list[str]
     # Playwright code playwright-cli ran per action (None where nothing ran), for replay.
     codes: list[str | None] = field(default_factory=list)
+    cost: float = 0.0
 
     def line(self) -> str:
         d = self.decision
@@ -46,6 +47,15 @@ def _section(tag: str, body: str) -> str:
     return f"<{tag}>\n{body}\n</{tag}>"
 
 
+def history_lines(history: list[StepRecord], window: int = HISTORY_WINDOW) -> list[str]:
+    shown = history[-window:] if window > 0 else []
+    omitted = len(history) - len(shown)
+    lines = [r.line() for r in shown]
+    if omitted:
+        lines.insert(0, f"({omitted} earlier steps omitted)")
+    return lines
+
+
 def build_prompt(
     task: str,
     step: int,
@@ -56,11 +66,7 @@ def build_prompt(
     window: int = HISTORY_WINDOW,
     nudge: str | None = None,
 ) -> str:
-    shown = history[-window:] if window > 0 else []
-    omitted = len(history) - len(shown)
-    lines = [r.line() for r in shown]
-    if omitted:
-        lines.insert(0, f"({omitted} earlier steps omitted)")
+    lines = history_lines(history, window)
     parts = [
         f"Step {step}/{max_steps}",
         _section("task", task),

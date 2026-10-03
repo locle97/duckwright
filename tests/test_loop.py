@@ -35,9 +35,13 @@ class FakeBrain:
     def __init__(self, script):
         self.script = script
         self.prompts = []
+        self.obs = []
+        self.ctxs = []
 
-    def decide(self, prompt):
+    def decide(self, prompt, obs=None, ctx=None):
         self.prompts.append(prompt)
+        self.obs.append(obs)
+        self.ctxs.append(ctx)
         item = self.script[min(len(self.prompts) - 1, len(self.script) - 1)]
         if isinstance(item, Exception):
             raise item
@@ -189,3 +193,37 @@ def test_state_load_failure_closes_browser(tmp_path):
     with pytest.raises(PlaywrightError, match="bad state"):
         Agent("t", pw, FakeBrain([]), tmp_path, state=tmp_path / "a.json").run()
     assert pw.closed == 1
+
+
+def test_brain_gets_obs_and_ctx(tmp_path):
+    brain = FakeBrain([dec(("hover", ["e1"])), dec(("done", ["success", "x"]))])
+    Agent("t", FakePW(), brain, tmp_path).run()
+    c1, c2 = brain.ctxs
+    assert (c1.step, c1.task, c1.memory, c1.history_lines, c1.nudged, c1.previous_failed) == (1, "t", "", [], False, False)
+    assert (c2.step, c2.memory, len(c2.history_lines)) == (2, "m", 1)
+    assert brain.obs[0].snapshot == "- page"
+
+
+def test_previous_failed_after_rejected_action(tmp_path):
+    brain = FakeBrain([dec(("eval", ["x"])), dec(("hover", ["e1"])), dec(("done", ["success", "x"]))])
+    Agent("t", FakePW(), brain, tmp_path).run()
+    assert [c.previous_failed for c in brain.ctxs] == [False, True, False]
+
+
+def test_previous_failed_after_brain_error(tmp_path):
+    brain = FakeBrain([BrainError("x"), dec(("done", ["success", "x"]))])
+    Agent("t", FakePW(), brain, tmp_path).run()
+    assert brain.ctxs[1].previous_failed is True
+
+
+def test_nudged_in_ctx(tmp_path):
+    brain = FakeBrain([dec(("hover", ["e1"]))])
+    Agent("t", FakePW(), brain, tmp_path, max_steps=4).run()
+    assert [c.nudged for c in brain.ctxs] == [False, False, False, True]
+
+
+def test_step_cost_recorded(tmp_path):
+    err = BrainError("x", cost=0.25)
+    brain = FakeBrain([err, dec(("done", ["success", "x"]))])
+    r = Agent("t", FakePW(), brain, tmp_path).run()
+    assert [h.cost for h in r.history] == [0.25, 0.5]

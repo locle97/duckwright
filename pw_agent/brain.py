@@ -70,6 +70,18 @@ class Decision:
     memory: str
     next_goal: str
     actions: list[Action]
+    source: str = "claude"
+    jev: dict | None = None
+
+
+@dataclass
+class StepContext:
+    step: int
+    task: str
+    memory: str
+    history_lines: list[str]
+    nudged: bool
+    previous_failed: bool
 
 
 class BrainError(Exception):
@@ -127,7 +139,12 @@ class Brain:
             argv += ["--append-system-prompt-file", str(f)]
         return argv
 
-    def decide(self, prompt: str) -> tuple[Decision, float]:
+    def decide(
+        self,
+        prompt: str,
+        obs: object | None = None,
+        ctx: StepContext | None = None,
+    ) -> tuple[Decision, float]:
         res = self.runner(self._argv(), prompt, self.timeout)
         if res.code == -1:
             raise BrainError("timeout")
