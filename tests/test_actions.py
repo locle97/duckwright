@@ -1,4 +1,4 @@
-from pw_agent.actions import execute
+from pw_agent.actions import ALLOWED_LIST, execute
 from pw_agent.brain import Action
 from pw_agent.proc import ProcResult
 from pw_agent.pw import PlaywrightCLI
@@ -17,9 +17,35 @@ def make_pw(code=0, stderr="", stdout=""):
 def test_rejects_unknown_cmd():
     pw, calls = make_pw()
     results, done = execute(pw, [Action("eval", ["1"])])
-    assert results == ["error: command 'eval' not allowed"]
+    assert results == [f"error: command 'eval' not allowed (allowed: {ALLOWED_LIST})"]
     assert done is None
     assert calls == []
+
+
+def test_rejects_prefixed_cmd():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("playwright-cli", ["eval", "1"])])
+    assert results == [
+        f"error: command 'playwright-cli' not allowed (allowed: {ALLOWED_LIST})"
+    ]
+    assert calls == []
+
+
+def test_disallowed_cmd_after_page_change_reports_rejection():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("goto", ["x"]), Action("eval", ["1"])])
+    assert results == [
+        "ok",
+        f"error: command 'eval' not allowed (allowed: {ALLOWED_LIST})",
+    ]
+    assert calls == [["goto", "x"]]
+
+
+def test_bad_flag_after_page_change_reports_rejection():
+    pw, calls = make_pw()
+    results, _ = execute(pw, [Action("goto", ["x"]), Action("fill", ["e1", "a", "-s=o"])])
+    assert results == ["ok", "error: flag '-s=o' not allowed"]
+    assert calls == [["goto", "x"]]
 
 
 def test_skips_after_page_change():

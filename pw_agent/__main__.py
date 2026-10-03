@@ -10,7 +10,7 @@ from pw_agent.loop import Agent
 from pw_agent.prompt import StepRecord
 from pw_agent.pw import PlaywrightCLI, PlaywrightError
 
-DEFAULT_SKILL = ".claude/skills/playwright-cli/SKILL.md"
+DEFAULT_SKILL = "prompts/playwright-cli.md"
 SYSTEM_MD = Path(__file__).resolve().parent.parent / "prompts" / "system.md"
 
 

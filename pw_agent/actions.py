@@ -4,13 +4,13 @@ import re
 from pw_agent.brain import Action
 from pw_agent.pw import PlaywrightCLI
 
-ALLOWED: frozenset[str] = frozenset(
-    {
-        "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
-        "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
-        "screenshot", "done",
-    }
+_ALLOWED_ORDER = (
+    "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
+    "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
+    "screenshot", "done",
 )
+ALLOWED: frozenset[str] = frozenset(_ALLOWED_ORDER)
+ALLOWED_LIST = ", ".join(_ALLOWED_ORDER)
 PAGE_CHANGING: frozenset[str] = frozenset(
     {"goto", "click", "press", "tab-new", "tab-select", "tab-close", "go-back"}
 )
@@ -37,6 +37,16 @@ def _bad_flag(cmd: str, args: list[str]) -> str | None:
     return None
 
 
+def _rejection(a: Action) -> str | None:
+    """Static allowlist check, so a rejected action is reported even when skipped."""
+    if a.cmd not in ALLOWED:
+        return f"error: command '{a.cmd}' not allowed (allowed: {ALLOWED_LIST})"
+    bad = _bad_flag(a.cmd, a.args)
+    if bad is not None:
+        return f"error: flag '{bad}' not allowed"
+    return None
+
+
 def execute(
     pw: PlaywrightCLI, actions: list[Action]
 ) -> tuple[list[str], tuple[bool, str] | None]:
@@ -44,11 +54,12 @@ def execute(
     done: tuple[bool, str] | None = None
     skip: str | None = None
     for a in actions:
+        rejected = _rejection(a)
+        if rejected is not None:
+            results.append(rejected)
+            continue
         if skip:
             results.append(skip)
-            continue
-        if a.cmd not in ALLOWED:
-            results.append(f"error: command '{a.cmd}' not allowed")
             continue
         if a.cmd == "done":
             if not a.args or a.args[0] not in ("success", "failure"):
@@ -64,10 +75,6 @@ def execute(
             done = (success, a.args[1] if len(a.args) > 1 else "")
             results.append("done")
             skip = "skipped: done"
-            continue
-        bad = _bad_flag(a.cmd, a.args)
-        if bad is not None:
-            results.append(f"error: flag '{bad}' not allowed")
             continue
         res = pw.run(a.cmd, a.args)
         if res.code == 0:
