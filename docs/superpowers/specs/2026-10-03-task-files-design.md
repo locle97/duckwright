@@ -26,6 +26,8 @@ duckwright -f FILE [options]
 - Exactly one of `task` and `--file` is required:
   - both given: `give a task or --file, not both`, exit `2`
   - neither given: `give a task or --file`, exit `2`
+  
+  Both errors go through `parser.error()`, so they print the usage line plus `duckwright: error: <message>`, the same as any other argument error.
 - `--headed` and `--export` become `argparse.BooleanOptionalAction`, which adds `--no-headed` and `--no-export`, so the command line can override a file's `true`. Their defaults stay off.
 - Command-line flags always win over the file.
 - `.txt`, `.md` and any other extension are read the same way.
@@ -48,7 +50,7 @@ and check the greeting says "Hello, Linh!".
 
 ### Front matter
 
-- **Opening and closing:** front matter is present only when the file's first line is exactly `---` (trailing whitespace allowed). It ends at the next line that is exactly `---`. If no closing line is found, that is an error.
+- **Opening and closing:** front matter is present only when the file's first line is exactly `---`. It ends at the next line that is exactly `---`. Trailing whitespace is allowed on both lines. If no closing line is found, that is an error.
 - **Lines:** each line inside is one of:
   - blank
   - a full-line comment (first non-space character is `#`)
@@ -75,6 +77,8 @@ and check the greeting says "Hello, Linh!".
 - A repeated key is an error.
 - An empty value is an error.
 - **Values:**
+  - Quotes are removed before the type check, so `export: "true"` and `max-steps: "15"` are accepted.
+  - An empty value, quoted or not (`model: ""`), gives `"<key>" has no value`.
   - Text values keep their case.
   - `true`/`false` are lowercase only.
   - Numbers are base-10 digits, with no sign and no underscores.
@@ -89,7 +93,7 @@ and check the greeting says "Hello, Linh!".
 
 ### `duckwright/taskfile.py` (new, standard library only)
 
-- `class TaskFileError(Exception)`: the message is already formatted as `<path>[:<line>]: <problem>`.
+- `class TaskFileError(Exception)`: the message is already formatted as `<path>[:<line>]: <problem>`, where `<path>` is the `-f` argument as typed.
 - `@dataclass(frozen=True) class TaskFile`, with fields:
   - `task: str`
   - `settings: dict[str, object]`: keys are argparse dests (`max_steps`, `model`, `headed`, `skill`, `session`, `state`, `export`), and values are already converted to `int`, `bool`, or `str`. Path values are absolute strings.
@@ -106,7 +110,7 @@ and check the greeting says "Hello, Linh!".
      - load the file
      - `parser.set_defaults(**tf.settings)`
      - parse the same arguments again
-     - use `tf.task` as the task
+     - set `args.task = tf.task`, so every later use of `args.task` (both `_history_json` calls, the `Agent`) gets the body
   4. Run preflight and everything after it unchanged.
 - `TaskFileError` prints its message to stderr and returns `2`. That happens before preflight, so no `runs/` folder is created.
 - **`history.json`** gets a new key, `"task_file"`, placed after `"task"`. Its value is the `--file` argument as given, or `null` for a task given on the command line. It is written on every path: success, failure, error and interrupt. `export` ignores it.
@@ -153,7 +157,7 @@ Every case prints one line to stderr, `<file>[:<line>]: <message>`, and exits `2
 | Case | Message (after the location) |
 | --- | --- |
 | Missing file | `file not found` |
-| Unreadable or not UTF-8 | `cannot read: <reason>` |
+| Unreadable, a directory, or not UTF-8 | `cannot read: <reason>` |
 | No closing `---` | `front matter is not closed with ---` |
 | Bad line | `expected "key: value"` |
 | Unclosed quote, or text after a closing quote | `bad quoted value` |
