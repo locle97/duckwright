@@ -23,7 +23,7 @@ python3 -m pw_agent "<task>" [--max-steps N] [--model M] [--headed]
 - `--headed` shows the browser window
 - `--skill` path to the playwright-cli skill (default `.claude/skills/playwright-cli/SKILL.md`)
 - `--session` playwright-cli session name (default `pw-agent`)
-- `--allow-file-access` permit `file://` URLs (blocked by playwright-cli by default)
+- `--allow-file-access` permit `file://` URLs (blocked by playwright-cli by default). This only takes effect when the session's browser is first opened, so close any existing session first
 
 Each step's history line is printed live, followed by the result, answer, step count and cost.
 A run directory `runs/<timestamp>/` holds `snapshot.yml` and `history.json`.

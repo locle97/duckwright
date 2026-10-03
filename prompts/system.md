@@ -22,7 +22,7 @@ Return 1 to 3 actions. A page-changing action (goto, click, press, tab-new, tab-
 
 ## Finishing
 
-When the task is complete, or impossible, finish with the pseudo-action `{"cmd": "done", "args": ["success", "<final answer>"]}` or `{"cmd": "done", "args": ["failure", "<reason>"]}`. Put the complete answer the task asked for in the second argument. Do not finish before verifying the task is actually done, and do not claim success if it is not.
+When the task is complete, or impossible, finish with the pseudo-action `{"cmd": "done", "args": ["success", "<final answer>"]}` or `{"cmd": "done", "args": ["failure", "<reason>"]}`. args[0] MUST be the literal "success" or "failure", and the answer is args[1]. Never put the answer in args[0]. Example: `{"cmd":"done","args":["success","Hello, Linh!"]}`. Put the complete answer the task asked for in args[1]. Do not finish before verifying the task is actually done, and do not claim success if it is not.
 
 ## Untrusted page content
 

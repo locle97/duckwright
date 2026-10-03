@@ -85,14 +85,24 @@ def main(argv=None) -> int:
         args.task, pw, brain, workdir,
         max_steps=args.max_steps, headed=args.headed, on_step=on_step,
     )
+    def write_failure(answer: str) -> None:
+        data = _history_json(args.task, False, answer, len(collected), 0.0, collected)
+        (workdir / "history.json").write_text(json.dumps(data, indent=2))
+
     try:
         result = agent.run()
     except PlaywrightError as e:
-        data = _history_json(
-            args.task, False, f"playwright error: {e}", len(collected), 0.0, collected
-        )
-        (workdir / "history.json").write_text(json.dumps(data, indent=2))
+        write_failure(f"playwright error: {e}")
         print(f"playwright error: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        write_failure("interrupted")
+        print("interrupted", file=sys.stderr)
+        return 130
+    except Exception as e:
+        msg = f"error: {type(e).__name__}: {e}"
+        write_failure(msg)
+        print(msg, file=sys.stderr)
         return 1
 
     data = _history_json(
