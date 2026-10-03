@@ -82,6 +82,7 @@ class StepContext:
     history_lines: list[str]
     nudged: bool
     previous_failed: bool
+    last_goal: str = ""
 
 
 class BrainError(Exception):

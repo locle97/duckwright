@@ -3,7 +3,6 @@
 import http.client
 import json
 import math
-import re
 import time
 import urllib.error
 import urllib.request
@@ -11,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pw_agent.brain import Action, Brain, BrainError, Decision, StepContext
-from pw_agent.observe import Observation
+from pw_agent.observe import SNAPSHOT_LINE, SNAPSHOT_REF, Observation, unescape_name
 
 
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
@@ -20,11 +19,6 @@ JEV_OUTPUT_USD_PER_TOKEN = 0.0
 
 
 TARGET_ROLES = ("link", "button", "checkbox", "radio", "tab", "menuitem", "option")
-
-# Regex to parse snapshot lines: role, optional quoted name, rest of line
-_LINE = re.compile(r'^\s*-\s+([a-z]+)(?:\s+"((?:[^"\\]|\\.)*)")?(.*)$')
-# Regex to extract ref from the rest of the line
-_REF = re.compile(r"\[ref=([^\]\s]+)\]")
 
 
 @dataclass(frozen=True)
@@ -48,7 +42,7 @@ def extract_targets(snapshot: str) -> list[Target]:
     seen_refs = set()
 
     for line in snapshot.split('\n'):
-        match = _LINE.match(line)
+        match = SNAPSHOT_LINE.match(line)
         if not match:
             continue
 
@@ -59,7 +53,7 @@ def extract_targets(snapshot: str) -> list[Target]:
             continue
 
         # Extract ref from the rest of the line
-        ref_match = _REF.search(rest)
+        ref_match = SNAPSHOT_REF.search(rest)
         if not ref_match:
             continue
 
@@ -74,7 +68,7 @@ def extract_targets(snapshot: str) -> list[Target]:
         name = ""
         if raw_name is not None:
             # Unescape the name: convert backslash-escaped characters to the character itself
-            name = re.sub(r"\\(.)", r"\1", raw_name)
+            name = unescape_name(raw_name)
 
         # Skip if no name and no cursor=pointer (applies to both missing and empty names)
         if not name and "[cursor=pointer]" not in rest:
@@ -178,11 +172,16 @@ class JevClient:
 
 
 ACTION_INSTRUCTIONS = (
-    "You control a web browser to complete `task`. `snapshot` is the current page, "
-    "`history` the steps so far, `memory` the agent's notes. Which single next action best advances the task?"
+    "You control a web browser to complete `task`. `snapshot` is the current page and `history` "
+    "the steps so far, naming the element each step used. `memory` is the planner's progress list "
+    "(what is done, what is left, what is next) and `last_claude_goal` its most recent goal; steps "
+    "in `history` after that goal may already have carried the plan forward. "
+    "Which single next action continues the plan?"
 )
 TARGET_INSTRUCTIONS = (
-    "If the next action clicks, checks, unchecks or hovers an element of `snapshot`, which element should it be?"
+    "If the next action clicks, checks, unchecks or hovers an element of `snapshot`, which element "
+    "should it be? Pick the next item the plan in `memory` and `last_claude_goal` still has to do, "
+    "skipping items `history` shows were already done."
 )
 # option: (description, cmd, args, needs_target); args None means [target ref]
 ACTION_OPTIONS = {
@@ -245,7 +244,8 @@ class HybridBrain:
             return self.claude.decide(prompt, obs, ctx)
 
         by_ref = {t.ref: t for t in targets}
-        state = {"task": ctx.task, "memory": ctx.memory, "history": ctx.history_lines,
+        state = {"task": ctx.task, "memory": ctx.memory, "last_claude_goal": ctx.last_goal,
+                 "history": ctx.history_lines,
                  "tabs": obs.tabs, "snapshot": obs.snapshot}
         questions = {
             "action": {"type": "choice", "instructions": ACTION_INSTRUCTIONS,

@@ -235,3 +235,27 @@ def test_brain_error_keeps_jev_record(tmp_path):
     agent = Agent("t", FakePW(), FakeBrain([err, dec(("done", ["success", "x"]))]), tmp_path)
     r = agent.run()
     assert r.history[0].decision.jev == {"routed": "low_confidence"}
+
+
+class LabelPW(FakePW):
+    def snapshot(self, path):
+        return '- link "Tags" [ref=e1]\n- button "Save" [ref=e2]'
+
+
+def test_step_records_element_labels(tmp_path):
+    brain = FakeBrain([dec(("click", ["e1"])), dec(("done", ["success", "x"]))])
+    r = Agent("t", LabelPW(), brain, tmp_path).run()
+    assert r.history[0].labels == {"e1": 'link "Tags"'}
+    assert 'click e1 (link "Tags")' in brain.ctxs[1].history_lines[0]
+
+
+def test_ctx_last_goal_is_latest_claude_goal(tmp_path):
+    jev_step = Decision("", "m", "jev: click link \"Tags\" (0.9)", [Action("hover", ["e1"])], source="jev")
+    brain = FakeBrain([
+        Decision("", "m", "Open Tags", [Action("hover", ["e1"])]),
+        jev_step,
+        BrainError("x"),
+        dec(("done", ["success", "x"])),
+    ])
+    Agent("t", FakePW(), brain, tmp_path).run()
+    assert [c.last_goal for c in brain.ctxs] == ["", "Open Tags", "Open Tags", "Open Tags"]

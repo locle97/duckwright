@@ -6,7 +6,9 @@ import pytest
 
 from pw_agent.brain import Action, BrainError, Decision, StepContext
 from pw_agent.jev import (
+    ACTION_INSTRUCTIONS,
     ACTION_OPTIONS,
+    TARGET_INSTRUCTIONS,
     HybridBrain,
     JevAuthError,
     JevClient,
@@ -196,7 +198,8 @@ PAGE = Observation("tabs", '- link "Home" [ref=e2]\n- button "Submit" [ref=e3]',
 
 
 def ctx(**kw):
-    d = dict(step=2, task="t", memory="mem", history_lines=["h"], nudged=False, previous_failed=False)
+    d = dict(step=2, task="t", memory="mem", history_lines=["h"], nudged=False, previous_failed=False,
+             last_goal="Open Tags")
     d.update(kw)
     return StepContext(**d)
 
@@ -326,8 +329,9 @@ def test_auth_error_propagates():
 def test_request_shape():
     _, jev, _, _ = run([ans("click", .9)])
     state, q = jev.calls[0]
-    assert set(state) == {"task", "memory", "history", "tabs", "snapshot"}
+    assert set(state) == {"task", "memory", "last_claude_goal", "history", "tabs", "snapshot"}
     assert state["history"] == ["h"]
+    assert state["last_claude_goal"] == "Open Tags"
     assert set(q["action"]["criteria"]) == set(ACTION_OPTIONS)
     assert q["target"]["criteria"] == {"e2": 'link "Home"', "e3": 'button "Submit"'}
 
@@ -398,3 +402,8 @@ def test_brain_error_after_jev_carries_record():
     with pytest.raises(BrainError) as ei:
         hb.decide("p", PAGE, ctx())
     assert ei.value.jev["routed"] == "low_confidence"
+
+
+def test_instructions_point_jev_at_the_plan():
+    for text in (ACTION_INSTRUCTIONS, TARGET_INSTRUCTIONS):
+        assert "`memory`" in text and "`last_claude_goal`" in text and "`history`" in text

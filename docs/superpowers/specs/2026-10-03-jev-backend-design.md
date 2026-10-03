@@ -95,6 +95,7 @@ It uses the standard library only (`urllib.request`, `json`), so the runtime kee
 Otherwise it makes one Jev call:
 
 - `state`: `{"task": ..., "memory": ..., "history": [...], "tabs": obs.tabs, "snapshot": obs.snapshot}`. `history` is the same 15-line window Claude gets.
+  - Added after the first live runs: `last_claude_goal`, the `next_goal` of the latest Claude step. History lines name the element behind each ref (`click e12 (link "Tags")`), and the system prompt asks Claude to keep a done/left/next progress list in `memory`. Refs are renumbered on every page, so without names Jev could not tell which items were already done, and its target confidence stayed below the threshold.
 - Question `action` (`choice`). Each option has a one-line description in `criteria`.
 
   | Option | Becomes |

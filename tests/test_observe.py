@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pw_agent.observe import observe
+from pw_agent.observe import observe, element_labels
 from pw_agent.proc import ProcResult
 from pw_agent.pw import PlaywrightCLI, PlaywrightError
 
@@ -49,3 +49,20 @@ def test_observe_includes_tabs(tmp_path):
 def test_observe_tab_list_failure(tmp_path):
     with pytest.raises(PlaywrightError, match="tab boom"):
         observe(make_pw("abc", tab_code=1), tmp_path)
+
+
+def test_element_labels():
+    snap = '''- generic [ref=e1]:
+  - link "Tags" [ref=e2] [cursor=pointer]
+  - textbox "Say \\"hi\\"" [ref=e3]
+  - button [ref=e4]
+  - link "Tags" [ref=e2]
+  - text: no ref here'''
+    assert element_labels(snap) == {
+        "e1": "generic", "e2": 'link "Tags"', "e3": 'textbox "Say "hi""', "e4": "button",
+    }
+
+
+def test_element_labels_truncates_long_names():
+    label = element_labels(f'- link "{"x" * 100}" [ref=e1]')["e1"]
+    assert label == 'link "' + "x" * 60 + '…"'

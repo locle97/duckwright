@@ -162,7 +162,7 @@ flowchart LR
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
 2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`prompts/system.md`](prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
-4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
+4. **Record**: the step is added to the history as one compact line, with each ref followed by the element it pointed to (`click e12 (link "Tags")`), together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
 The loop ends when the model sends a `done` action, when max steps is reached, or after 3 consecutive brain failures.
 

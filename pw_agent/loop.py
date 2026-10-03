@@ -4,7 +4,7 @@ from typing import Callable
 
 from pw_agent.actions import execute
 from pw_agent.brain import Brain, BrainError, Decision, StepContext
-from pw_agent.observe import observe
+from pw_agent.observe import element_labels, observe
 from pw_agent.prompt import StepRecord, build_prompt, history_lines
 from pw_agent.pw import PlaywrightCLI, PlaywrightError
 
@@ -37,6 +37,13 @@ def _previous_failed(history: list[StepRecord]) -> bool:
     return bool(history) and any(
         r.startswith(("error:", "brain error:")) for r in history[-1].results
     )
+
+
+def _last_claude_goal(history: list[StepRecord]) -> str:
+    for rec in reversed(history):
+        if rec.decision.source == "claude" and rec.decision.next_goal:
+            return rec.decision.next_goal
+    return ""
 
 
 class Agent:
@@ -94,7 +101,7 @@ class Agent:
             steps = step
             ctx = StepContext(
                 step, self.task, memory, history_lines(history),
-                nudge is not None, _previous_failed(history),
+                nudge is not None, _previous_failed(history), _last_claude_goal(history),
             )
             try:
                 decision, c = self.brain.decide(prompt, obs, ctx)
@@ -120,7 +127,9 @@ class Agent:
             memory = decision.memory
             codes: list[str | None] = []
             results, done = execute(self.pw, decision.actions, codes=codes)
-            self._record(history, StepRecord(step, decision, results, codes, cost=c))
+            refs = element_labels(obs.snapshot)
+            labels = {x: refs[x] for a in decision.actions for x in a.args if x in refs}
+            self._record(history, StepRecord(step, decision, results, codes, cost=c, labels=labels))
             if done is not None:
                 return RunResult(done[0], done[1], steps, self.cost_usd, history)
         return RunResult(False, "max steps reached", steps, self.cost_usd, history)

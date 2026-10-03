@@ -19,6 +19,12 @@ class StepRecord:
     # Playwright code playwright-cli ran per action (None where nothing ran), for replay.
     codes: list[str | None] = field(default_factory=list)
     cost: float = 0.0
+    # ref -> element label from that step's snapshot, so history lines name what was used.
+    labels: dict[str, str] = field(default_factory=dict)
+
+    def _arg(self, arg: str) -> str:
+        label = self.labels.get(arg)
+        return f"{arg} ({_neutralise(label)})" if label else arg
 
     def line(self) -> str:
         d = self.decision
@@ -26,7 +32,7 @@ class StepRecord:
         if d.actions:
             parts = []
             for i, a in enumerate(d.actions):
-                cmd = _flat(" ".join([a.cmd, *a.args]))
+                cmd = _flat(" ".join([a.cmd, *map(self._arg, a.args)]))
                 res = results[i] if i < len(results) else "(no result)"
                 parts.append(f"{cmd} → {res}")
             acts = "; ".join(parts)

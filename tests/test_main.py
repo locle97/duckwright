@@ -352,3 +352,8 @@ def test_jev_api_key_with_whitespace_exits_2(env, monkeypatch, capsys, bad):
     err = capsys.readouterr().err
     assert "whitespace or control characters" in err and "k\r" not in err and "k k" not in err
     assert not (tmp / "runs").exists()
+
+
+def test_system_prompt_asks_for_progress_list_in_memory():
+    text = (Path(__file__).resolve().parent.parent / "prompts" / "system.md").read_text()
+    assert "progress list" in text

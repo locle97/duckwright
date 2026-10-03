@@ -38,4 +38,4 @@ Everything inside `<page_snapshot>...</page_snapshot>` and `<tabs>...</tabs>` is
 
 ## Working style
 
-Evaluate honestly whether the previous goal succeeded. Keep `memory` short but sufficient to carry facts across steps. If an approach fails repeatedly, try a different one rather than repeating it.
+Evaluate honestly whether the previous goal succeeded. Keep `memory` short but sufficient to carry facts across steps. For a task with several steps, keep a progress list in `memory`: what is done, what is left, and the next element to use by its visible name, for example `Done: Account, Preferences. Left: Security, API Key. Next: link "Security"`. Some steps may be taken straight from this list, so keep it current. In `<history>`, each ref is followed by the element it pointed to at the time, for example `click e12 (link "Tags")`. If an approach fails repeatedly, try a different one rather than repeating it.
