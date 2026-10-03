@@ -189,3 +189,16 @@ def test_state_load_failure_closes_browser(tmp_path):
     with pytest.raises(PlaywrightError, match="bad state"):
         Agent("t", pw, FakeBrain([]), tmp_path, state=tmp_path / "a.json").run()
     assert pw.closed == 1
+
+
+def test_full_snapshot_default_pastes_page(tmp_path):
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", FakePW(), brain, tmp_path).run()
+    assert "<page_snapshot>\n- page\n</page_snapshot>" in brain.prompts[0]
+
+
+def test_grep_mode_prompt_has_no_page_text(tmp_path):
+    brain = FakeBrain([dec(("done", ["success", "ok"]))])
+    Agent("t", FakePW(), brain, tmp_path, full_snapshot=False).run()
+    assert "<page_snapshot_file>" in brain.prompts[0]
+    assert "- page" not in brain.prompts[0]

@@ -667,3 +667,13 @@ def test_unstattable_file_is_a_one_line_error(env, monkeypatch, capsys):
     assert m.main(argv[1:] + ["-f", "a" * 300]) == 2
     err = capsys.readouterr().err
     assert err.startswith("a" * 300 + ": cannot read: ") and "Traceback" not in err
+
+
+def test_snapshot_mode_prompts():
+    full, grep = m.SNAPSHOT_FULL_MD.read_text(), m.SNAPSHOT_GREP_MD.read_text()
+    system = m.SYSTEM_MD.read_text()
+    assert "## Reading the page" in full and "## Reading the page" in grep
+    assert "## Reading the page" not in system
+    assert "Grep" in grep and "snapshot.yml" in grep
+    assert "Grep" not in full
+    assert "snapshot.yml" in system  # untrusted section covers tool output

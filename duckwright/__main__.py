@@ -17,6 +17,9 @@ DIST_NAME = "duckwright"
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 SYSTEM_MD = PROMPTS_DIR / "system.md"
 DEFAULT_SKILL = PROMPTS_DIR / "playwright-cli.md"
+# How the agent reads the page: pasted into the prompt, or grepped from the saved file.
+SNAPSHOT_FULL_MD = PROMPTS_DIR / "snapshot-full.md"
+SNAPSHOT_GREP_MD = PROMPTS_DIR / "snapshot-grep.md"
 
 
 def _version() -> str:
