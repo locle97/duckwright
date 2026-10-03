@@ -1,7 +1,9 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LEGACY = ("duckwright", "pw-agent", "PW_AGENT", "playwright-agent-loop", "playwright_agent_loop")
+LEGACY = ("pw_agent", "pw-agent", "PW_AGENT", "playwright-agent-loop", "playwright_agent_loop")
+# Lines that must mention the old name on purpose (migration instructions).
+ALLOWED = ("Upgrading from `pw_agent`", "pipx uninstall playwright-agent-loop")
 SKIP_DIRS = {".git", "docs", "build", "dist", ".pytest_cache", "runs", "__pycache__"}
 
 
@@ -21,5 +23,9 @@ def test_no_legacy_name():
             lines = path.read_text().splitlines()
         except (UnicodeDecodeError, OSError):
             continue
-        hits += [f"{rel}:{i}" for i, line in enumerate(lines, 1) if any(t in line for t in LEGACY)]
+        hits += [
+            f"{rel}:{i}"
+            for i, line in enumerate(lines, 1)
+            if any(t in line for t in LEGACY) and not any(a in line for a in ALLOWED)
+        ]
     assert hits == []

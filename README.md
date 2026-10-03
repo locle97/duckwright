@@ -1,11 +1,13 @@
 <div align="center">
 
-# pw_agent
+# 🦆 Duckwright
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/playwright-agent-loop/blob/main/LICENSE)
-[![CI](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/playwright-agent-loop/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/duckwright/blob/main/LICENSE)
+[![CI](https://github.com/locle97/duckwright/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/duckwright/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+
+**The rubber duck that drives your browser, then writes the regression test.**
 
 A [browser-use](https://github.com/browser-use/browser-use) style agent loop built on [`playwright-cli`](https://www.npmjs.com/package/@playwright/cli) and `claude -p`.
 
@@ -13,14 +15,14 @@ A [browser-use](https://github.com/browser-use/browser-use) style agent loop bui
 
 </div>
 
-Give it a task in plain English and `pw_agent` drives a real browser to finish it, one step at a time. The harness runs the loop, not the model: each step Claude sees the page and replies with a single structured decision. The harness checks that decision and runs it. Claude never gets a shell or any tools.
+Give it a task in plain English and Duckwright drives a real browser to finish it, one step at a time. The harness runs the loop, not the model: each step Claude sees the page and replies with a single structured decision. The harness checks that decision and runs it. Claude never gets a shell or any tools.
 
 Every run also records the Playwright code behind each action, so a task the agent solved once can become a repeatable `@playwright/test` regression test.
 
 An example run looks like this (illustrative output):
 
 ```console
-$ pw_agent "Go to example.com and report the page heading"
+$ duckwright "Go to example.com and report the page heading"
 step 1 | Starting task | Open example.com | goto https://example.com → ok
 step 2 | Page loaded | Read the heading | done success Example Domain → done
 Result: success
@@ -52,23 +54,23 @@ History: runs/20261003-101500-123456/history.json
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in
 
 > [!NOTE]
-> The agent uses `pw_agent/prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `pw_agent/prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
+> The agent uses `duckwright/prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `duckwright/prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
 
 ### Install
 
-`pw_agent` is not on PyPI yet, so install it from GitHub or from a local build. Each option puts a `pw_agent` command on your `PATH` that works from any directory. [pipx](https://pipx.pypa.io/) keeps it in its own environment; plain `pip install` works too.
+Duckwright is not on PyPI yet, so install it from GitHub or from a local build. Each option puts a `duckwright` command on your `PATH` that works from any directory. [pipx](https://pipx.pypa.io/) keeps it in its own environment; plain `pip install` works too.
 
 **From GitHub**, without cloning:
 
 ```bash
-pipx install "git+https://github.com/locle97/playwright-agent-loop.git"
+pipx install "git+https://github.com/locle97/duckwright.git"
 ```
 
 **From a clone**:
 
 ```bash
-git clone https://github.com/locle97/playwright-agent-loop.git
-cd playwright-agent-loop
+git clone https://github.com/locle97/duckwright.git
+cd duckwright
 pipx install .
 ```
 
@@ -78,28 +80,34 @@ pipx install .
 pip install build
 python -m build                          # writes dist/*.whl and dist/*.tar.gz
 bash scripts/smoke_install.sh dist       # optional: install check in a fresh venv, prints "smoke ok"
-pipx install dist/playwright_agent_loop-0.1.0-py3-none-any.whl
+pipx install dist/duckwright-0.1.0-py3-none-any.whl
 ```
 
-Check the install with `pw_agent --version`. To pick up a newer version, re-run the same install command with `--force`. The package is named `playwright-agent-loop`, but the command it installs is `pw_agent`. To work on the code instead, see [Development](#development).
+Check the install with `duckwright --version`. To pick up a newer version, re-run the same install command with `--force`. To work on the code instead, see [Development](#development).
+
+> [!NOTE]
+> **Upgrading from `pw_agent`**: the project was renamed from `pw_agent` / `playwright-agent-loop` to Duckwright. If you installed the old version, replace it with:
+> ```bash
+> pipx uninstall playwright-agent-loop && pipx install "git+https://github.com/locle97/duckwright.git"
+> ```
 
 ## Usage
 
 ```bash
-pw_agent "<task>" [--max-steps N] [--model M] [--headed]
+duckwright "<task>" [--max-steps N] [--model M] [--headed]
                   [--skill PATH] [--session NAME] [--state FILE]
                   [--allow-file-access]
 ```
 
-`python3 -m pw_agent` works the same way. Run `pw_agent --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
+`python3 -m duckwright` works the same way. Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window |
-| `--skill` | bundled `pw_agent/prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
-| `--session` | `pw-agent` | playwright-cli session name |
+| `--skill` | bundled `duckwright/prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
+| `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 
@@ -119,7 +127,7 @@ playwright-cli -s=login open https://app.example.com/login --headed
 playwright-cli -s=login state-save auth.json
 playwright-cli -s=login close
 
-pw_agent "Open https://app.example.com/settings and report my plan" --state auth.json
+duckwright "Open https://app.example.com/settings and report my plan" --state auth.json
 ```
 
 > [!CAUTION]
@@ -158,7 +166,7 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
    ```js
    await expect(page.getByRole('heading')).toHaveText('Hello, Linh!');
    ```
-3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/playwright-agent-loop/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
+3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 
 > [!IMPORTANT]
 > Some setup leaves no `code` behind. If the run used `--state FILE`, load the same state in the test with `test.use({ storageState: 'auth.json' })`. If it used `tab-new`, `tab-select` or `tab-close`, edit the code by hand, because it assumes a single `page`.
@@ -177,7 +185,7 @@ flowchart LR
 ```
 
 1. **Observe**: the harness lists the open tabs and takes an accessibility snapshot. Snapshots longer than 40k characters are truncated.
-2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`pw_agent/prompts/system.md`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
+2. **Decide**: `claude -p` runs with all tools, MCP servers, and slash commands disabled. It gets [`duckwright/prompts/system.md`](https://github.com/locle97/duckwright/blob/main/duckwright/prompts/system.md) plus the playwright-cli skill as its system prompt and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `done`) and their allowed flags, then run through `playwright-cli`. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
@@ -185,12 +193,12 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 
 | Module | Responsibility |
 | --- | --- |
-| [`loop.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/loop.py) | The agent loop, repeat detection, and failure handling |
-| [`brain.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
-| [`actions.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
-| [`observe.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/observe.py) | Tab list and page snapshot |
-| [`prompt.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/prompt.py) | Prompt sections, history lines, escaping untrusted content |
-| [`pw.py`](https://github.com/locle97/playwright-agent-loop/blob/main/pw_agent/pw.py) | `playwright-cli` wrapper |
+| [`loop.py`](https://github.com/locle97/duckwright/blob/main/duckwright/loop.py) | The agent loop, repeat detection, and failure handling |
+| [`brain.py`](https://github.com/locle97/duckwright/blob/main/duckwright/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
+| [`actions.py`](https://github.com/locle97/duckwright/blob/main/duckwright/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
+| [`observe.py`](https://github.com/locle97/duckwright/blob/main/duckwright/observe.py) | Tab list and page snapshot |
+| [`prompt.py`](https://github.com/locle97/duckwright/blob/main/duckwright/prompt.py) | Prompt sections, history lines, escaping untrusted content |
+| [`pw.py`](https://github.com/locle97/duckwright/blob/main/duckwright/pw.py) | `playwright-cli` wrapper |
 
 ## Roadmap
 
@@ -198,7 +206,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Test generation**
 
-- [ ] **Automatic test export**: `python3 -m pw_agent export runs/<id>` writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
+- [ ] **Automatic test export**: `python3 -m duckwright export runs/<id>` writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
 - [ ] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
 - [ ] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that currently need hand edits.
 
@@ -217,21 +225,24 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [ ] **Batch runs**: run many tasks from a file, each in its own session.
-- [x] **Packaging**: a console-script entry point, so `pw_agent` runs from any directory after a local or GitHub install.
-- [ ] **PyPI release**: publish `playwright-agent-loop` so `pipx install playwright-agent-loop` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.
+- [x] **Packaging**: a console-script entry point, so `duckwright` runs from any directory after a local or GitHub install.
+- [ ] **PyPI release**: publish `duckwright` so `pipx install duckwright` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.
 
 ## Development
 
 ```bash
-git clone https://github.com/locle97/playwright-agent-loop.git
-cd playwright-agent-loop
+git clone https://github.com/locle97/duckwright.git
+cd duckwright
 pip install -e ".[dev]"
 python3 -m pytest                                          # unit tests
-PW_AGENT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real claude + headless browser
+DUCKWRIGHT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real claude + headless browser
 ```
 
+> [!NOTE]
+> If your clone predates the rename to Duckwright, delete any old `*.egg-info` directory and re-run `pip install -e ".[dev]"` once. Otherwise `duckwright --version` prints `unknown`.
+
 > [!TIP]
-> The e2e test fills in and submits [`tests/fixtures/form.html`](https://github.com/locle97/playwright-agent-loop/blob/main/tests/fixtures/form.html) using a real model, so each run costs a small amount.
+> The e2e test fills in and submits [`tests/fixtures/form.html`](https://github.com/locle97/duckwright/blob/main/tests/fixtures/form.html) using a real model, so each run costs a small amount.
 
 CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request. A `package` job also builds the wheel and smoke-tests it in a fresh venv.
 
@@ -239,6 +250,8 @@ Releasing to PyPI (not set up yet): add a trusted publisher on PyPI for `release
 
 ## License
 
-[MIT](https://github.com/locle97/playwright-agent-loop/blob/main/LICENSE).
+[MIT](https://github.com/locle97/duckwright/blob/main/LICENSE).
 
-`pw_agent/prompts/playwright-cli.md` and `.claude/skills/playwright-cli/` are adapted from the skill shipped with Microsoft's [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli), which is licensed under Apache-2.0.
+`duckwright/prompts/playwright-cli.md` and `.claude/skills/playwright-cli/` are adapted from the skill shipped with Microsoft's [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli), which is licensed under Apache-2.0.
+
+Duckwright is not affiliated with Microsoft or the Playwright project.
