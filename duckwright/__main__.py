@@ -2,7 +2,6 @@ import argparse
 import json
 import shutil
 import sys
-from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from duckwright.loop import Agent
 from duckwright.observe import HYBRID_MAX_CHARS, page_dir
 from duckwright.prompt import StepRecord
 from duckwright.pw import PlaywrightCLI, PlaywrightError
+from duckwright.rundir import make_run_dir
 from duckwright.taskfile import TaskFile, TaskFileError, load_task_file, task_paths
 
 DIST_NAME = "duckwright"
@@ -188,9 +188,7 @@ def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path
     skill = Path(args.skill)
     state = Path(args.state).resolve() if args.state else None
 
-    # Microseconds keep two runs started in the same second apart.
-    workdir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    workdir.mkdir(parents=True)
+    workdir = make_run_dir(Path("runs"), task_file)
     history_path = workdir / "history.json"
 
     collected: list[StepRecord] = []

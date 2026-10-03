@@ -527,6 +527,24 @@ def test_batch_runs_files_in_order_with_own_settings(env, monkeypatch):
     assert sorted(h["task_file"] for h in _histories(tmp)) == ["tasks/a.md", "tasks/b.md"]
 
 
+def test_run_dirs_named_after_task_files(env, monkeypatch):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/01-login.md")
+    b = _task_file(tmp, "B\n", "tasks/Check Out.txt")
+    _record_runs(monkeypatch, [True, True])
+    assert m.main(argv[1:] + ["-f", a, b]) == 0
+    names = sorted(p.name for p in tmp.glob("runs/*"))
+    assert [re.sub(r"^\d{8}-\d{6}-", "", n) for n in names] == ["01-login", "check-out"]
+
+
+def test_command_line_run_dir_gets_random_words(env, monkeypatch):
+    tmp, argv = env
+    _record_runs(monkeypatch, [True])
+    assert m.main(argv) == 0
+    (run_dir,) = tmp.glob("runs/*")
+    assert re.fullmatch(r"\d{8}-\d{6}-[a-z]+-[a-z]+", run_dir.name)
+
+
 def test_batch_cli_flag_applies_to_all(env, monkeypatch):
     tmp, argv = env
     a = _task_file(tmp, "---\nmax-steps: 7\n---\nA\n", "tasks/a.md")

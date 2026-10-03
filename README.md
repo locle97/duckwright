@@ -28,7 +28,7 @@ step 2 | Page loaded | Read the heading | done success Example Domain → done
 Result: success
 Answer: Example Domain
 Steps: 2  Cost: $0.0213
-History: runs/20261003-101500-123456/history.json
+History: runs/20261003-101500-brave-otter/history.json
 ```
 
 ## Features
@@ -204,9 +204,9 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 
   ```
   Batch: 2 passed, 1 failed, 0 not run  Cost: $0.4120
-  pass  tasks/a.md  $0.1467  runs/20261003-101500-123456/history.json
-  fail  tasks/b.md  $0.2121  runs/20261003-101530-654321/history.json
-  pass  tasks/c.md  $0.0532  runs/20261003-101612-000042/history.json
+  pass  tasks/a.md  $0.1467  runs/20261003-101500-a/history.json
+  fail  tasks/b.md  $0.2121  runs/20261003-101530-b/history.json
+  pass  tasks/c.md  $0.0532  runs/20261003-101612-c/history.json
   ```
 
   Each line is `pass`, `fail`, `stop` (interrupted) or `skip` (not run), then what that task cost and its `history.json`. The first line totals the cost of the whole batch, counting money spent by tasks that failed, crashed or were interrupted.
@@ -215,7 +215,7 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 
 ### Output
 
-Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<microseconds>/`, which contains:
+Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<label>/`, such as `runs/20261003-101500-login/`. The label is the task file's name without its extension (lowercased, accents dropped, anything but letters and digits turned into `-`, at most 40 characters), or two random words such as `brave-otter` for a task given on the command line or a file name with no usable characters. A run that would reuse an existing name gets `-2`, `-3` and so on. The directory contains:
 
 - `page/snapshot.yml`: the latest accessibility snapshot of the page
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
