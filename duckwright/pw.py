@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pw_agent.proc import ProcResult, Runner, run_process
+from duckwright.proc import ProcResult, Runner, run_process
 
 
 class PlaywrightError(Exception):
@@ -10,7 +10,7 @@ class PlaywrightError(Exception):
 class PlaywrightCLI:
     def __init__(
         self,
-        session: str = "pw-agent",
+        session: str = "duckwright",
         runner: Runner = run_process,
         timeout: float = 30,
         allow_file_access: bool = False,

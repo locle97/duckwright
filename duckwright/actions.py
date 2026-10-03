@@ -1,8 +1,8 @@
 import json
 import re
 
-from pw_agent.brain import ALLOWED_COMMANDS, Action
-from pw_agent.pw import PlaywrightCLI
+from duckwright.brain import ALLOWED_COMMANDS, Action
+from duckwright.pw import PlaywrightCLI
 
 ALLOWED: frozenset[str] = frozenset(ALLOWED_COMMANDS)
 ALLOWED_LIST = ", ".join(ALLOWED_COMMANDS)

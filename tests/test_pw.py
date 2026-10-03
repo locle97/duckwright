@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from pw_agent.proc import ProcResult
-from pw_agent.pw import PlaywrightCLI, PlaywrightError
+from duckwright.proc import ProcResult
+from duckwright.pw import PlaywrightCLI, PlaywrightError
 
 
 class FakeRunner:

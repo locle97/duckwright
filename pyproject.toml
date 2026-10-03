@@ -1,7 +1,7 @@
 [project]
-name = "playwright-agent-loop"
+name = "duckwright"
 version = "0.1.0"
-description = "Browser agent loop: playwright-cli + claude -p"
+description = "Duckwright: a browser agent loop on playwright-cli + claude -p"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -16,11 +16,11 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/locle97/playwright-agent-loop"
-Issues = "https://github.com/locle97/playwright-agent-loop/issues"
+Homepage = "https://github.com/locle97/duckwright"
+Issues = "https://github.com/locle97/duckwright/issues"
 
 [project.scripts]
-pw_agent = "pw_agent.__main__:main"
+duckwright = "duckwright.__main__:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "jsonschema", "build"]
@@ -30,10 +30,10 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["pw_agent", "pw_agent.prompts"]
+packages = ["duckwright", "duckwright.prompts"]
 
 [tool.setuptools.package-data]
-"pw_agent.prompts" = ["*.md"]
+"duckwright.prompts" = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

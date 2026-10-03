@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from pw_agent.proc import Runner, run_process
+from duckwright.proc import Runner, run_process
 
 ALLOWED_COMMANDS: tuple[str, ...] = (
     "goto", "click", "fill", "type", "press", "select", "check", "uncheck",

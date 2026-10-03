@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from pw_agent import __main__ as m
-from pw_agent.brain import Action, Decision
-from pw_agent.loop import Agent
-from pw_agent.prompt import StepRecord
-from pw_agent.pw import PlaywrightError
+from duckwright import __main__ as m
+from duckwright.brain import Action, Decision
+from duckwright.loop import Agent
+from duckwright.prompt import StepRecord
+from duckwright.pw import PlaywrightError
 
 
 @pytest.fixture
@@ -209,7 +209,11 @@ def test_version_flag(monkeypatch, capsys):
     with pytest.raises(SystemExit) as e:
         m._parse(["--version"])
     assert e.value.code == 0
-    assert capsys.readouterr().out.strip() == "pw_agent 1.2.3"
+    assert capsys.readouterr().out.strip() == "duckwright 1.2.3"
+
+
+def test_default_session():
+    assert m._parse(["x"]).session == "duckwright"
 
 
 def test_version_unknown_when_not_installed(monkeypatch):

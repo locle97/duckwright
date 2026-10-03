@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from pw_agent.pw import PlaywrightCLI, PlaywrightError
+from duckwright.pw import PlaywrightCLI, PlaywrightError
 
 MAX_SNAPSHOT_CHARS = 40_000
 TRUNCATION_MARKER = "\n…[snapshot truncated]"
