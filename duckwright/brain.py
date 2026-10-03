@@ -7,7 +7,7 @@ from duckwright.proc import Runner, run_process
 ALLOWED_COMMANDS: tuple[str, ...] = (
     "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
     "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
-    "screenshot", "done",
+    "screenshot", "expect", "done",
 )
 
 DECISION_SCHEMA: dict = {

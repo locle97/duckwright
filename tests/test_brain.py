@@ -146,3 +146,4 @@ def test_schema_done_requires_status_and_answer():
     assert not ok({"cmd": "done", "args": ["42", "x"]})
     assert ok({"cmd": "click", "args": ["e1"]})
     assert not ok({"cmd": "eval", "args": ["1"]})
+    assert ok({"cmd": "expect", "args": ["visible", "e1"]})

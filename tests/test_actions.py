@@ -1,4 +1,4 @@
-from duckwright.actions import ALLOWED_LIST, execute, extract_code
+from duckwright.actions import ALLOWED_LIST, EARLIER_FAILED, MAX_ERROR_CHARS, execute, extract_code
 from duckwright.brain import Action
 from duckwright.proc import ProcResult
 from duckwright.pw import PlaywrightCLI
@@ -274,3 +274,81 @@ def test_extract_code_empty_block_is_none():
         "### Snapshot\n```yaml\n- button\n```\n"
     )
     assert extract_code(out) is None
+
+
+def make_expect_pw(run_code_stdout="true", run_code_rc=0, run_code_err=""):
+    calls = []
+
+    def runner(argv, stdin, timeout):
+        calls.append(argv[2:])
+        if argv[2] == "generate-locator":
+            return ProcResult(0, "getByTestId('msg')\n", "")
+        if argv[2] == "run-code":
+            return ProcResult(run_code_rc, run_code_stdout, run_code_err)
+        return ProcResult(0, "", "")
+
+    return PlaywrightCLI(session="t", runner=runner), calls
+
+
+def test_expect_pass_records_assertion_code():
+    pw, _ = make_expect_pw()
+    codes = []
+    results, done = execute(pw, [Action("expect", ["visible", "e7"])], codes=codes)
+    assert results == ["ok"]
+    assert done is None
+    assert codes == ["await expect(page.getByTestId('msg')).toBeVisible();"]
+
+
+def test_expect_failure_records_no_code():
+    pw, _ = make_expect_pw(run_code_stdout="false")
+    codes = []
+    results, _ = execute(pw, [Action("expect", ["visible", "e7"])], codes=codes)
+    assert results == ["error: expect visible failed: element is not visible"]
+    assert codes == [None]
+
+
+def test_expect_bad_args_rejected_statically():
+    pw, calls = make_expect_pw()
+    results, _ = execute(pw, [Action("expect", ["text", "e1"])])
+    assert results == ["error: usage: expect text <ref> <expected>"]
+    assert calls == []
+    results, _ = execute(pw, [Action("goto", ["x"]), Action("expect", ["text", "e1"])])
+    assert results == ["ok", "error: usage: expect text <ref> <expected>"]
+    assert calls == [["goto", "x"]]
+
+
+def test_expect_expected_value_may_look_like_flag():
+    pw, calls = make_expect_pw(run_code_stdout='"--submit me"')
+    results, _ = execute(pw, [Action("expect", ["text", "e7", "--submit me"])])
+    assert results == ["ok"]
+    assert [c[0] for c in calls] == ["generate-locator", "run-code"]
+
+
+def test_expect_skipped_after_page_change():
+    pw, calls = make_expect_pw()
+    results, _ = execute(pw, [Action("click", ["e5"]), Action("expect", ["visible", "e7"])])
+    assert results == ["ok", "skipped: page may have changed"]
+    assert calls == [["click", "e5"]]
+
+
+def test_expect_does_not_skip_following_actions():
+    pw, calls = make_expect_pw()
+    results, _ = execute(pw, [Action("expect", ["visible", "e7"]), Action("fill", ["e4", "x"])])
+    assert results == ["ok", "ok"]
+    assert calls[-1] == ["fill", "e4", "x"]
+
+
+def test_done_success_refused_after_failed_expect():
+    pw, _ = make_expect_pw(run_code_stdout="false")
+    results, done = execute(
+        pw, [Action("expect", ["visible", "e7"]), Action("done", ["success", "x"])]
+    )
+    assert results[1] == EARLIER_FAILED
+    assert done is None
+
+
+def test_expect_error_truncated():
+    pw, _ = make_expect_pw(run_code_rc=1, run_code_err="x" * 1000)
+    results, _ = execute(pw, [Action("expect", ["visible", "e7"])])
+    assert results[0].startswith("error: x")
+    assert len(results[0]) == len("error: ") + MAX_ERROR_CHARS

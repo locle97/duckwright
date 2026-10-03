@@ -2,6 +2,7 @@ import json
 import re
 
 from duckwright.brain import ALLOWED_COMMANDS, Action
+from duckwright.expect import check_args, run_expect
 from duckwright.pw import PlaywrightCLI
 
 ALLOWED: frozenset[str] = frozenset(ALLOWED_COMMANDS)
@@ -42,6 +43,9 @@ def _rejection(a: Action) -> str | None:
     """Static allowlist check, so a rejected action is reported even when skipped."""
     if a.cmd not in ALLOWED:
         return f"error: command '{a.cmd}' not allowed (allowed: {ALLOWED_LIST})"
+    if a.cmd == "expect":
+        # Its args never reach playwright-cli as given, so expected text may look like a flag.
+        return check_args(a.args)
     bad = _bad_flag(a.cmd, a.args)
     if bad is not None:
         return f"error: flag '{bad}' not allowed"
@@ -84,6 +88,12 @@ def execute(
             done = (success, a.args[1] if len(a.args) > 1 else "")
             results.append("done")
             skip = "skipped: done"
+            continue
+        if a.cmd == "expect":
+            result, code = run_expect(pw, a.args)
+            results.append(result[: len("error: ") + MAX_ERROR_CHARS])
+            if code is not None:
+                ran[i] = code
             continue
         res = pw.run(a.cmd, a.args)
         if res.code == 0:
