@@ -62,3 +62,14 @@ def test_open_allow_file_access_prefixes_env():
         "open",
         "about:blank",
     ]
+
+
+def test_snapshot_reads_utf8_and_replaces_bad_bytes(tmp_path: Path, monkeypatch):
+    path = tmp_path / "snap.yml"
+    monkeypatch.setenv("LC_ALL", "C")
+
+    def write(argv):
+        path.write_bytes("café ".encode("utf-8") + b"\xff")
+
+    out = PlaywrightCLI(runner=FakeRunner(on_call=write)).snapshot(path)
+    assert out == "café �"

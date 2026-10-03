@@ -17,7 +17,12 @@ def run_process(argv: list[str], stdin: str | None, timeout: float) -> ProcResul
     """Real runner: argv list only, never a shell."""
     try:
         p = subprocess.run(
-            argv, input=stdin, capture_output=True, text=True, timeout=timeout
+            argv,
+            input=stdin,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return ProcResult(-1, "", "timeout")

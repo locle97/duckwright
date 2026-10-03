@@ -81,3 +81,51 @@ def test_keyboard_interrupt_writes_history(env, monkeypatch):
     monkeypatch.setattr(Agent, "run", stop)
     assert m.main(argv) == 130
     assert _history(tmp)["success"] is False
+
+
+def test_failure_history_records_running_cost(env, monkeypatch):
+    tmp, argv = env
+
+    def fail(self):
+        self.cost_usd = 0.42
+        raise PlaywrightError("snapshot died")
+
+    monkeypatch.setattr(Agent, "run", fail)
+    assert m.main(argv) == 1
+    assert _history(tmp)["cost_usd"] == 0.42
+
+
+def test_missing_system_md_exits_2(env, monkeypatch, capsys):
+    tmp, argv = env
+    monkeypatch.setattr(m, "SYSTEM_MD", tmp / "nope" / "system.md")
+
+    def never(self):
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(Agent, "run", never)
+    assert m.main(argv) == 2
+    assert "system prompt not found" in capsys.readouterr().err
+    assert not (tmp / "runs").exists()
+
+
+def test_default_skill_is_cwd_relative():
+    assert m.DEFAULT_SKILL == ".claude/skills/playwright-cli/SKILL.md"
+
+
+def test_run_dirs_do_not_collide(env, monkeypatch):
+    tmp, argv = env
+
+    class R:
+        success, answer, steps, cost_usd, history = True, "a", 1, 0.0, []
+
+    monkeypatch.setattr(Agent, "run", lambda self: R())
+    assert m.main(argv) == 0
+    assert m.main(argv) == 0
+    assert len(list(tmp.glob("runs/*/history.json"))) == 2
+
+
+def test_allow_file_access_help_warns(capsys):
+    with pytest.raises(SystemExit):
+        m._parse(["--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "trusted" in out

@@ -26,12 +26,18 @@ def _parse(argv):
     p.add_argument("--session", default="pw-agent")
     p.add_argument(
         "--allow-file-access", action="store_true",
-        help="allow file:// URLs and unrestricted file access in the browser",
+        help=(
+            "allow file:// URLs and UNRESTRICTED local file access in the browser. "
+            "A hijacked agent could read any file you can (e.g. ~/.ssh) and leak it; "
+            "only use with trusted pages and trusted tasks"
+        ),
     )
     return p.parse_args(argv)
 
 
 def _preflight(skill: Path) -> str | None:
+    if not SYSTEM_MD.is_file():
+        return f"system prompt not found: {SYSTEM_MD} (is the checkout complete?)"
     if not skill.is_file():
         return f"playwright-cli skill not found: {skill}"
     if not shutil.which("claude"):
@@ -70,8 +76,9 @@ def main(argv=None) -> int:
         print(err, file=sys.stderr)
         return 2
 
-    workdir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S")
-    workdir.mkdir(parents=True, exist_ok=True)
+    # Microseconds keep two runs started in the same second apart.
+    workdir = Path("runs") / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    workdir.mkdir(parents=True)
 
     collected: list[StepRecord] = []
 
@@ -86,7 +93,9 @@ def main(argv=None) -> int:
         max_steps=args.max_steps, headed=args.headed, on_step=on_step,
     )
     def write_failure(answer: str) -> None:
-        data = _history_json(args.task, False, answer, len(collected), 0.0, collected)
+        data = _history_json(
+            args.task, False, answer, len(collected), agent.cost_usd, collected
+        )
         (workdir / "history.json").write_text(json.dumps(data, indent=2))
 
     try:

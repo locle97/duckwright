@@ -43,4 +43,4 @@ class PlaywrightCLI:
         res = self.run("snapshot", [f"--filename={path}"])
         if res.code != 0:
             raise PlaywrightError(res.stderr or res.stdout)
-        return Path(path).read_text()
+        return Path(path).read_text(encoding="utf-8", errors="replace")
