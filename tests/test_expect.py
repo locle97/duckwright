@@ -40,8 +40,10 @@ def test_check_args_accepts_each_check(args):
 
 
 def test_check_args_unknown_check():
-    assert check_args(["exists", "e1"]) == f"error: expect check 'exists' not allowed {ALLOWED_MSG}"
-    assert check_args([]) == f"error: expect check '' not allowed {ALLOWED_MSG}"
+    assert check_args(["exists", "e1"]).startswith(
+        f"error: expect check 'exists' not allowed {ALLOWED_MSG}"
+    )
+    assert check_args([]).startswith(f"error: expect check '' not allowed {ALLOWED_MSG}")
 
 
 def test_check_args_wrong_arity():
@@ -248,3 +250,22 @@ def test_text_normalizes_like_playwright():
     assert run_expect(pw, ["text", "e7", "HelloWorld !"])[0] == "ok"
     pw, _ = make_pw({"generate-locator": LOC, "run-code": val("a\x1fb")})
     assert run_expect(pw, ["text", "e7", "a b"])[0].startswith("error: expect text failed")
+
+
+def test_ref_first_order_is_accepted():
+    # Models sometimes write `expect e15 text Hello`; a check name never matches a ref
+    # pattern's intent, so the swap is unambiguous.
+    assert check_args(["e1356", "text", "Hadilao"]) is None
+    assert check_args(["e1", "visible"]) is None
+    pw, calls = make_pw({"generate-locator": LOC, "run-code": val("Hadilao")})
+    assert run_expect(pw, ["e1356", "text", "Hadilao"]) == (
+        "ok",
+        "await expect(page.getByTestId('msg')).toHaveText(\"Hadilao\");",
+    )
+    assert calls[0] == ["generate-locator", "e1356", "--raw"]
+
+
+def test_unknown_check_error_shows_usage():
+    msg = check_args(["e1356", "toHaveText", "Hadilao"])
+    assert msg.startswith(f"error: expect check 'e1356' not allowed {ALLOWED_MSG}")
+    assert 'args are [<check>, <ref>, <expected>], e.g. ["text", "e15", "Hello"]' in msg

@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from duckwright.expect import CHECKS
 from duckwright.proc import Runner, run_process
 
 ALLOWED_COMMANDS: tuple[str, ...] = (
@@ -40,13 +41,28 @@ DECISION_SCHEMA: dict = {
                             },
                         },
                     },
+                    # expect must name one of its checks; expect.py checks the order.
+                    {
+                        "type": "object",
+                        "required": ["cmd", "args"],
+                        "properties": {
+                            "cmd": {"const": "expect"},
+                            "args": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "contains": {"enum": list(CHECKS)},
+                                "minItems": 1,
+                                "maxItems": 3,
+                            },
+                        },
+                    },
                     {
                         "type": "object",
                         "required": ["cmd", "args"],
                         "properties": {
                             "cmd": {
                                 "type": "string",
-                                "enum": [c for c in ALLOWED_COMMANDS if c != "done"],
+                                "enum": [c for c in ALLOWED_COMMANDS if c not in ("done", "expect")],
                             },
                             "args": {"type": "array", "items": {"type": "string"}},
                         },

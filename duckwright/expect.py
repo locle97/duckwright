@@ -65,11 +65,22 @@ def _is_locator(loc: str) -> bool:
     )
 
 
+def _ordered(args: list[str]) -> list[str]:
+    """Accept the ref-first order models sometimes write (`e15 text Hello`)."""
+    if len(args) >= 2 and args[0] not in CHECKS and args[1] in CHECKS:
+        return [args[1], args[0], *args[2:]]
+    return args
+
+
 def check_args(args: list[str]) -> str | None:
     """Static check of an expect action's args; an error string, or None if well formed."""
+    args = _ordered(args)
     check = args[0] if args else ""
     if check not in CHECKS:
-        return f"error: expect check '{check}' not allowed (allowed: {_CHECK_LIST})"
+        return (
+            f"error: expect check '{check}' not allowed (allowed: {_CHECK_LIST}); "
+            'args are [<check>, <ref>, <expected>], e.g. ["text", "e15", "Hello"]'
+        )
     names = CHECKS[check]
     if len(args) - 1 != len(names):
         usage = " ".join(f"<{n}>" for n in names)
@@ -86,6 +97,7 @@ def _cli_error(res: ProcResult) -> str:
 def run_expect(pw: PlaywrightCLI, args: list[str]) -> tuple[str, str | None]:
     """Verify one check against the live page. Returns ("ok", assertion code) on pass,
     or ("error: ...", None). Expects check_args(args) to be None."""
+    args = _ordered(args)
     check = args[0]
     if check == "url":
         subject, js = "page", _URL_JS

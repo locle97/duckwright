@@ -37,6 +37,8 @@ Before finishing with `done success`, verify the outcome the task asked for with
 - `{"cmd": "expect", "args": ["checked", "e15"]}` / `{"cmd": "expect", "args": ["unchecked", "e15"]}`: the checkbox or radio state
 - `{"cmd": "expect", "args": ["url", "https://example.com/done"]}`: the page URL is exactly this
 
+args[0] is always the check name from this list, then the ref, then the expected value. Playwright matcher names such as `toHaveText` are not check names.
+
 Point `expect` at the element that holds the text itself, not at a container around it. If an `expect` fails, its result shows the actual value: fix the check or the task, and never call `done success` in a step where an action failed.
 
 ## Finishing
