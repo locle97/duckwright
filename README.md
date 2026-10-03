@@ -327,6 +327,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [ ] **Parallel batches**: `-j N` runs up to N task files at once, giving each its own `--session` name automatically so they never share a browser.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
+- [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
 - [x] **Packaging**: a console-script entry point, so `duckwright` runs from any directory after a local or GitHub install.
 - [ ] **PyPI release**: publish `duckwright` so `pipx install duckwright` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.
 
