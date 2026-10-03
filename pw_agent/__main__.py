@@ -65,6 +65,8 @@ def _preflight(skill: Path, state: Path | None, jev: bool = False) -> str | None
         return "playwright-cli not found on PATH (npm i -g @playwright/cli@latest)"
     if jev and not os.environ.get("TYPESAFE_API_KEY"):
         return "TYPESAFE_API_KEY not set (required by --jev)"
+    if jev and any(c.isspace() or not c.isprintable() for c in os.environ["TYPESAFE_API_KEY"]):
+        return "TYPESAFE_API_KEY contains whitespace or control characters"
     return None
 
 

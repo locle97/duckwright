@@ -341,3 +341,14 @@ def test_prints_jev_steps_only_with_jev(env, monkeypatch, capsys):
     assert lines[i + 1] == "Jev steps: 1/2"
     assert m.main(argv) == 0
     assert "Jev steps" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", ["k\r", "k k", "k\n", "k\x1b"])
+def test_jev_api_key_with_whitespace_exits_2(env, monkeypatch, capsys, bad):
+    tmp, argv = env
+    monkeypatch.setenv("TYPESAFE_API_KEY", bad)
+    _never_run(monkeypatch)
+    assert m.main(argv + ["--jev"]) == 2
+    err = capsys.readouterr().err
+    assert "whitespace or control characters" in err and "k\r" not in err and "k k" not in err
+    assert not (tmp / "runs").exists()

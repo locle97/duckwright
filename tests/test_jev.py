@@ -344,3 +344,57 @@ def test_repeat_nudge_hands_step_to_claude(tmp_path):
                          Decision("", "", "", [Action("done", ["success", "x"])])])
     r = Agent("t", PagePW(), HybridBrain(jev, claude), tmp_path).run()
     assert [h.decision.source for h in r.history] == ["claude", "jev", "jev", "jev", "claude"]
+
+
+# ---- final-review fixes ----
+
+def test_ask_value_error_does_not_leak_key(sleeps):
+    t = FakeTransport([ValueError("Invalid header value b'Bearer SECRET123\\r'")])
+    c = JevClient("SECRET123", transport=t, sleep=sleeps.append)
+    with pytest.raises(JevError) as ei:
+        c.ask({}, {"a": Q})
+    assert "SECRET" not in str(ei.value)
+
+
+def test_ask_http_exception_is_jev_error(sleeps):
+    import http.client
+    t = FakeTransport([http.client.IncompleteRead(b"")])
+    c = JevClient("k", transport=t, sleep=sleeps.append)
+    with pytest.raises(JevError) as ei:
+        c.ask({}, {"a": Q})
+    assert "IncompleteRead" in str(ei.value)
+
+
+def test_urllib_post_maps_http_error(monkeypatch):
+    import io
+    import urllib.error
+    import urllib.request
+    from pw_agent.jev import _urllib_post
+
+    def boom(req, timeout):
+        raise urllib.error.HTTPError("u", 422, "x", {}, io.BytesIO(b"bad"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert _urllib_post("http://x", {}, b"{}", 1) == (422, b"bad")
+
+
+@pytest.mark.parametrize("conf", [float("nan"), 1.5, -0.1, float("inf")])
+def test_bad_confidence_falls_back(conf):
+    _, _, claude, (d, _) = run([ans("click", conf)])
+    assert len(claude.calls) == 1 and d.jev["routed"].startswith("error:")
+
+
+@pytest.mark.parametrize("n", [float("nan"), -5, float("inf")])
+def test_bad_token_counts_cost_zero(sleeps, n):
+    body = json.dumps({"answers": {"a": {"choice": "x"}},
+                       "usage": {"input_tokens": n, "output_tokens": n}}).encode()
+    c = JevClient("k", transport=FakeTransport([(200, body)]), sleep=sleeps.append)
+    assert c.ask({}, {"a": Q})[1] == 0.0
+
+
+def test_brain_error_after_jev_carries_record():
+    claude = FakeClaude([BrainError("x", cost=.25)])
+    hb = HybridBrain(FakeJev([ans("click", .5)]), claude)
+    with pytest.raises(BrainError) as ei:
+        hb.decide("p", PAGE, ctx())
+    assert ei.value.jev["routed"] == "low_confidence"

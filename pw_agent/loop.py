@@ -103,7 +103,7 @@ class Agent:
                 failures += 1
                 self._record(
                     history, StepRecord(
-                        step, Decision("", memory, "", []), [f"brain error: {e}"], cost=e.cost
+                        step, Decision("", memory, "", [], jev=getattr(e, "jev", None)), [f"brain error: {e}"], cost=e.cost
                     )
                 )
                 if failures >= self.max_failures:

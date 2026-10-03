@@ -88,6 +88,7 @@ class BrainError(Exception):
     def __init__(self, msg: str = "", cost: float = 0.0):
         super().__init__(msg)
         self.cost = cost
+        self.jev: dict | None = None
 
 
 def _parse_decision(so: object) -> Decision:

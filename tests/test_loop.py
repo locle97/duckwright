@@ -227,3 +227,11 @@ def test_step_cost_recorded(tmp_path):
     brain = FakeBrain([err, dec(("done", ["success", "x"]))])
     r = Agent("t", FakePW(), brain, tmp_path).run()
     assert [h.cost for h in r.history] == [0.25, 0.5]
+
+
+def test_brain_error_keeps_jev_record(tmp_path):
+    err = BrainError("refused")
+    err.jev = {"routed": "low_confidence"}
+    agent = Agent("t", FakePW(), FakeBrain([err, dec(("done", ["success", "x"]))]), tmp_path)
+    r = agent.run()
+    assert r.history[0].decision.jev == {"routed": "low_confidence"}

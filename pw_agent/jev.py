@@ -1,6 +1,8 @@
 """JEV snapshot target extraction and HTTP client for the Jev API."""
 
+import http.client
 import json
+import math
 import re
 import time
 import urllib.error
@@ -112,7 +114,9 @@ def _count(usage: object, key: str) -> float:
     if not isinstance(usage, dict):
         return 0
     n = usage.get(key)
-    return n if isinstance(n, (int, float)) and not isinstance(n, bool) else 0
+    if not isinstance(n, (int, float)) or isinstance(n, bool) or not math.isfinite(n) or n < 0:
+        return 0
+    return n
 
 
 class JevClient:
@@ -141,8 +145,11 @@ class JevClient:
         for attempt in range(3):
             try:
                 status, raw = self._transport(JEV_URL, headers, body, self.timeout)
-            except OSError as e:
-                raise JevError(f"jev network error: {e}") from e
+            except (OSError, http.client.HTTPException) as e:
+                raise JevError(f"jev network error: {type(e).__name__}") from None
+            except ValueError:
+                # http.client's ValueError text can embed the Authorization header.
+                raise JevError("jev request failed (invalid request)") from None
             if status in (429, 529):
                 if attempt < 2:
                     self._sleep((1, 3)[attempt])
@@ -204,6 +211,8 @@ def _choice(answers: dict, qid: str, options) -> tuple[str, float]:
     conf = a.get("confidence")
     if not isinstance(conf, (int, float)) or isinstance(conf, bool):
         raise JevError(f"jev answer {qid!r} has no numeric confidence")
+    if not math.isfinite(conf) or not 0 <= conf <= 1:
+        raise JevError(f"jev answer {qid!r} has confidence out of range")
     return choice, float(conf)
 
 
@@ -220,6 +229,7 @@ class HybridBrain:
             decision, cost = self.claude.decide(prompt, obs, ctx)
         except BrainError as e:
             e.cost += jev_cost
+            e.jev = record
             raise
         decision.source = "claude"
         decision.jev = record
