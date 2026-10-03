@@ -171,8 +171,9 @@ def _preflight_args(args: argparse.Namespace) -> str | None:
     return _preflight(Path(args.skill), Path(args.state).resolve() if args.state else None)
 
 
-def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path]:
-    """Run one task whose preflight has passed; returns the exit code and its history.json."""
+def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path, float]:
+    """Run one task whose preflight has passed; returns the exit code, its history.json
+    and what it cost, including what was spent before a crash or Ctrl-C."""
     skill = Path(args.skill)
     state = Path(args.state).resolve() if args.state else None
 
@@ -210,16 +211,16 @@ def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path
     except PlaywrightError as e:
         write_failure(f"playwright error: {e}")
         print(f"playwright error: {e}", file=sys.stderr)
-        return 1, history_path
+        return 1, history_path, agent.cost_usd
     except KeyboardInterrupt:
         write_failure("interrupted")
         print("interrupted", file=sys.stderr)
-        return 130, history_path
+        return 130, history_path, agent.cost_usd
     except Exception as e:
         msg = f"error: {type(e).__name__}: {e}"
         write_failure(msg)
         print(msg, file=sys.stderr)
-        return 1, history_path
+        return 1, history_path, agent.cost_usd
 
     data = _history_json(
         args.task, result.success, result.answer, result.steps, result.cost_usd, result.history,
@@ -239,7 +240,7 @@ def _run_one(args: argparse.Namespace, task_file: str | None) -> tuple[int, Path
             except ExportError as e:
                 # The run itself succeeded; a failed export does not change that.
                 print(f"export failed: {e}", file=sys.stderr)
-    return (0 if result.success else 1), history_path
+    return (0 if result.success else 1), history_path, result.cost_usd
 
 
 def _run_batch(runs: list[tuple[str, argparse.Namespace]]) -> int:
@@ -248,19 +249,24 @@ def _run_batch(runs: list[tuple[str, argparse.Namespace]]) -> int:
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 2
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []
+    total = 0.0
     interrupted = False
     for i, (path, args) in enumerate(runs, 1):
         if interrupted:
-            rows.append(("skip", path, "-"))
+            rows.append(("skip", path, "-", "-"))
             continue
         print(f"[{i}/{len(runs)}] {path}", flush=True)
-        code, history = _run_one(args, path)
+        code, history, cost = _run_one(args, path)
+        total += cost
         interrupted = code == 130
         status = "pass" if code == 0 else "stop" if interrupted else "fail"
-        rows.append((status, path, str(history)))
+        rows.append((status, path, f"${cost:.4f}", str(history)))
     count = {s: sum(r[0] == s for r in rows) for s in ("pass", "fail", "skip")}
-    print(f"Batch: {count['pass']} passed, {count['fail']} failed, {count['skip']} not run")
+    print(
+        f"Batch: {count['pass']} passed, {count['fail']} failed, {count['skip']} not run"
+        f"  Cost: ${total:.4f}"
+    )
     for row in rows:
         print("  ".join(row))
     if interrupted:

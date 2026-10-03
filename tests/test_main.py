@@ -475,7 +475,7 @@ def _record_runs(monkeypatch, outcomes):
         out = outcomes.pop(0)
         if isinstance(out, BaseException):
             raise out
-        return RunResult(out, "a", 1, 0.0, [])
+        return RunResult(out, "a", 1, 0.25, [])
 
     monkeypatch.setattr(Agent, "run", run)
     return calls
@@ -567,9 +567,29 @@ def test_batch_failure_continues_and_exits_1(env, monkeypatch, capsys):
     assert "[1/2] tasks/a.md" in out.splitlines()
     assert "[2/2] tasks/b.md" in out.splitlines()
     assert _summary(out) == [
-        "Batch: 1 passed, 1 failed, 0 not run",
-        "fail  tasks/a.md  runs/<id>/history.json",
-        "pass  tasks/b.md  runs/<id>/history.json",
+        "Batch: 1 passed, 1 failed, 0 not run  Cost: $0.5000",
+        "fail  tasks/a.md  $0.2500  runs/<id>/history.json",
+        "pass  tasks/b.md  $0.2500  runs/<id>/history.json",
+    ]
+
+
+def test_batch_total_includes_cost_spent_before_a_crash(env, monkeypatch, capsys):
+    tmp, argv = env
+    a = _task_file(tmp, "A\n", "tasks/a.md")
+    b = _task_file(tmp, "B\n", "tasks/b.md")
+
+    def run(self):
+        if self.task == "A":
+            self.cost_usd = 0.125  # spent before the crash
+            raise PlaywrightError("x")
+        return RunResult(True, "a", 1, 0.25, [])
+
+    monkeypatch.setattr(Agent, "run", run)
+    assert m.main(argv[1:] + ["-f", a, b]) == 1
+    assert _summary(capsys.readouterr().out) == [
+        "Batch: 1 passed, 1 failed, 0 not run  Cost: $0.3750",
+        "fail  tasks/a.md  $0.1250  runs/<id>/history.json",
+        "pass  tasks/b.md  $0.2500  runs/<id>/history.json",
     ]
 
 
@@ -588,7 +608,7 @@ def test_batch_all_pass_exits_0(env, monkeypatch, capsys):
     b = _task_file(tmp, "B\n", "tasks/b.md")
     _record_runs(monkeypatch, [True, True])
     assert m.main(argv[1:] + ["-f", a, b]) == 0
-    assert _summary(capsys.readouterr().out)[0] == "Batch: 2 passed, 0 failed, 0 not run"
+    assert _summary(capsys.readouterr().out)[0] == "Batch: 2 passed, 0 failed, 0 not run  Cost: $0.5000"
 
 
 def test_batch_bad_file_runs_nothing(env, monkeypatch, capsys):
@@ -621,10 +641,10 @@ def test_batch_interrupt_stops_and_summarises(env, monkeypatch, capsys):
     assert len(calls) == 1
     assert _history(tmp)["answer"] == "interrupted"
     assert _summary(capsys.readouterr().out) == [
-        "Batch: 0 passed, 0 failed, 2 not run",
-        "stop  tasks/a.md  runs/<id>/history.json",
-        "skip  tasks/b.md  -",
-        "skip  tasks/c.md  -",
+        "Batch: 0 passed, 0 failed, 2 not run  Cost: $0.0000",
+        "stop  tasks/a.md  $0.0000  runs/<id>/history.json",
+        "skip  tasks/b.md  -  -",
+        "skip  tasks/c.md  -  -",
     ]
 
 

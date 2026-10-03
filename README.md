@@ -201,13 +201,13 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 - A summary follows the last task:
 
   ```
-  Batch: 2 passed, 1 failed, 0 not run
-  pass  tasks/a.md  runs/20261003-101500-123456/history.json
-  fail  tasks/b.md  runs/20261003-101530-654321/history.json
-  pass  tasks/c.md  runs/20261003-101612-000042/history.json
+  Batch: 2 passed, 1 failed, 0 not run  Cost: $0.4120
+  pass  tasks/a.md  $0.1467  runs/20261003-101500-123456/history.json
+  fail  tasks/b.md  $0.2121  runs/20261003-101530-654321/history.json
+  pass  tasks/c.md  $0.0532  runs/20261003-101612-000042/history.json
   ```
 
-  Each line is `pass`, `fail`, `stop` (interrupted) or `skip` (not run).
+  Each line is `pass`, `fail`, `stop` (interrupted) or `skip` (not run), then what that task cost and its `history.json`. The first line totals the cost of the whole batch, counting money spent by tasks that failed, crashed or were interrupted.
 - When the paths come down to a single file, the run is an ordinary single run, with no summary.
 - `-f` reads every argument after it as a path, so `duckwright -f a.md "Open the site"` fails with `Open the site: file not found`. A task on the command line and `-f` cannot be combined anyway.
 
@@ -339,6 +339,19 @@ DUCKWRIGHT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real cl
 
 > [!TIP]
 > The e2e test fills in and submits [`tests/fixtures/form.html`](https://github.com/locle97/duckwright/blob/main/tests/fixtures/form.html) using a real model, so each run costs a small amount.
+
+### Benchmark tasks
+
+[`benchmark_tasks/`](https://github.com/locle97/duckwright/tree/main/benchmark_tasks) holds six tasks on public demo sites. They are for comparing cost and reliability between settings, for example the default grep mode against `--full-snapshot`:
+
+```bash
+duckwright -f benchmark_tasks                    # grep mode (default)
+duckwright -f benchmark_tasks --full-snapshot    # paste the full snapshot
+```
+
+The `Batch:` summary line gives each run's total cost, and every task line its own cost. Each file's front-matter comments give the expected answer. The tasks range from a small to-do app to a long checkout flow and a Wikipedia article far larger than the 40k-character `--full-snapshot` limit. They read public sites, so an answer can drift if a site changes. Model costs also vary from run to run, so compare more than one run of each.
+
+Every file at the top of the folder runs as a task, so keep notes out of it.
 
 CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request. A `package` job also builds the wheel and smoke-tests it in a fresh venv.
 
