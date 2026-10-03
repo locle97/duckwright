@@ -60,10 +60,10 @@ class Agent:
             self.on_step(rec)
 
     def run(self) -> RunResult:
-        res = self.pw.open(self.headed)
-        if res.code != 0:
-            raise PlaywrightError(res.stderr or res.stdout)
         try:
+            res = self.pw.open(self.headed)
+            if res.code != 0:
+                raise PlaywrightError(res.stderr or res.stdout)
             return self._loop()
         finally:
             self.pw.close()

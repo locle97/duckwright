@@ -70,7 +70,8 @@ def test_consecutive_brain_failures(tmp_path):
     r = Agent("t", pw, brain, tmp_path, max_failures=3).run()
     assert r.success is False
     assert r.steps == 3
-    assert "kaput" in r.answer and "3" in r.answer
+    assert r.answer == "stopped after 3 consecutive brain failures: kaput"
+    assert pw.closed == 1
     assert r.history[0].results == ["brain error: kaput"]
 
 
@@ -103,6 +104,7 @@ def test_open_failure_raises(tmp_path):
     pw = FakePW(open_code=1)
     with pytest.raises(PlaywrightError):
         Agent("t", pw, FakeBrain([dec()]), tmp_path).run()
+    assert pw.closed == 1
 
 
 def test_on_step_and_memory(tmp_path):
