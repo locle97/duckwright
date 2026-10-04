@@ -25,9 +25,10 @@
 
 **Intentional differences from Python** (each is pinned by a test in its task):
 1. CLI long options cannot be abbreviated (`--max` is an error, not `--max-steps`).
-2. `--help` text is hand-written. It lists every option but is not argparse's layout.
-3. A task-file path `~user/...` expands only when `user` is the current user. Any other `~name` is a located "not a usable path" error, as when Python cannot find the user.
-4. A child started with no stdin gets `/dev/null` instead of inheriting the terminal.
+2. A task-file path `~user/...` expands only when `user` is the current user. Any other `~name` is a located "not a usable path" error, as when Python cannot find the user.
+3. A child started with no stdin gets `/dev/null` instead of inheriting the terminal.
+
+(An earlier draft also allowed a hand-written `--help` layout. In the end the help text is copied from argparse's output, so it matches the Python version exactly.)
 
 ## Review Focus
 
