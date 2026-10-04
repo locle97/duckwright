@@ -354,7 +354,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
 - [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
 - [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
-- [ ] **npm release**: publish `duckwright` so `npm install -g duckwright` works. The `release.yml` workflow is ready; it needs npm trusted publishing set up for the package first.
+- [x] **npm release**: `npm install -g duckwright`, published from GitHub releases by `release.yml`.
 
 ## Development
 
@@ -390,7 +390,7 @@ Every file at the top of the folder runs as a task, so keep notes out of it.
 
 CI runs the typecheck and unit tests on Node 22 and 24 for every push to `main` and every pull request, then builds the package and smoke-tests it in a temporary install prefix.
 
-Releasing to npm (not set up yet): set up trusted publishing on npm for `release.yml` with environment `npm`, bump `version` in `package.json`, merge, then push tag `vX.Y.Z`. `release.yml` runs the tests and the install check, then publishes.
+Releasing to npm: create a GitHub release with a new tag `vX.Y.Z` (Releases → Draft a new release → choose a new tag). `release.yml` sets `package.json` to that version, runs the tests and the install check, publishes to npm with provenance, then commits the version bump to `main`. A release marked as pre-release (e.g. `v0.2.0-beta.1`) is published under the `next` dist-tag and does not bump `main`.
 
 ## License
 
