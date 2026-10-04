@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/duckwright/blob/main/LICENSE)
 [![CI](https://github.com/locle97/duckwright/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/duckwright/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
+![Node](https://img.shields.io/badge/node-%3E%3D22.18-blue)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 
 **The rubber duck that drives your browser, then writes the regression test.**
@@ -42,30 +42,29 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
 - **Replayable as a test**: each action in `history.json` carries the Playwright code `playwright-cli` ran for it, exported as a regression test with `duckwright export`.
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
-- **No Python dependencies**: the runtime uses only the standard library. `pytest` is needed only for tests.
+- **No runtime dependencies**: the CLI uses only Node's standard library. TypeScript and the test tools are development dependencies.
 
 ## Getting started
 
 ### Prerequisites
 
-- [Python](https://www.python.org/downloads/) 3.11 or later
-- [Node.js](https://nodejs.org/) to install the Playwright CLI:
+- [Node.js](https://nodejs.org/) 22.18 or later, which also installs the Playwright CLI:
   ```bash
   npm i -g @playwright/cli@latest
   ```
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH` and logged in. The default `--snapshot-hybrid` mode and `--snapshot-grep` need a version with the `--restricted` option (tested with 2.1.288); `--snapshot-full` also works with older versions
 
 > [!NOTE]
-> The agent uses `duckwright/prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `duckwright/prompts/playwright-cli.md` and remove `find` and `eval` again (`tests/test_main.py` checks this).
+> The agent uses `prompts/playwright-cli.md`, a copy of the playwright-cli skill with the `find` and `eval` commands removed so the agent never tries them. The full skill in `.claude/skills/playwright-cli/` is for Claude Code. After updating it with `playwright-cli install --skills`, re-copy it to `prompts/playwright-cli.md` and remove `find` and `eval` again (`test/cli.test.ts` checks this).
 
 ### Install
 
-Duckwright is not on PyPI yet, so install it from GitHub or from a local build. Each option puts a `duckwright` command on your `PATH` that works from any directory. [pipx](https://pipx.pypa.io/) keeps it in its own environment; plain `pip install` works too.
+Duckwright is not on npm yet, so install it from GitHub or from a local build. Each option puts a `duckwright` command on your `PATH` that works from any directory.
 
-**From GitHub**, without cloning:
+**From GitHub**, without cloning (npm builds it on install):
 
 ```bash
-pipx install "git+https://github.com/locle97/duckwright.git"
+npm install -g github:locle97/duckwright
 ```
 
 **From a clone**:
@@ -73,24 +72,28 @@ pipx install "git+https://github.com/locle97/duckwright.git"
 ```bash
 git clone https://github.com/locle97/duckwright.git
 cd duckwright
-pipx install .
+npm install                              # also builds dist/
+npm install -g .
 ```
 
-**From a wheel you build yourself**, for example to copy to another machine:
+**From a tarball you build yourself**, for example to copy to another machine:
 
 ```bash
-pip install build
-python -m build                          # writes dist/*.whl and dist/*.tar.gz
-bash scripts/smoke_install.sh dist       # optional: install check in a fresh venv, prints "smoke ok"
-pipx install dist/duckwright-0.1.0-py3-none-any.whl
+npm install
+npm pack                                 # writes duckwright-0.1.0.tgz
+bash scripts/smoke_install.sh            # optional: install check in a temporary prefix, prints "smoke ok"
+npm install -g ./duckwright-0.1.0.tgz
 ```
 
-Check the install with `duckwright --version`. To pick up a newer version, re-run the same install command with `--force`. To work on the code instead, see [Development](#development).
+Check the install with `duckwright --version`. To pick up a newer version, re-run the same install command. To work on the code instead, see [Development](#development).
+
+> [!NOTE]
+> **Upgrading from the Python version**: Duckwright was rewritten in TypeScript; the commands, task files and `history.json` are unchanged. If you installed it with pipx, remove that copy first with `pipx uninstall duckwright`. The Python code is kept, frozen, in [`legacy/`](https://github.com/locle97/duckwright/tree/main/legacy).
 
 > [!NOTE]
 > **Upgrading from `pw_agent`**: the project was renamed from `pw_agent` / `playwright-agent-loop` to Duckwright. If you installed the old version, replace it with:
 > ```bash
-> pipx uninstall playwright-agent-loop && pipx install "git+https://github.com/locle97/duckwright.git"
+> pipx uninstall playwright-agent-loop && npm install -g github:locle97/duckwright
 > ```
 
 ## Usage
@@ -103,7 +106,7 @@ duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export RUN [-o FILE]
 ```
 
-`python3 -m duckwright` works the same way. Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
+Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -111,7 +114,7 @@ duckwright export RUN [-o FILE]
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window (`--no-headed` overrides a task file) |
-| `--skill` | bundled `duckwright/prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
+| `--skill` | bundled `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
@@ -280,7 +283,7 @@ flowchart LR
 ```
 
 1. **Observe**: the harness lists the open tabs and saves an accessibility snapshot to `page/snapshot.yml`. The snapshot is then either pasted into the prompt or named there with its size for Claude to search; see [Reading the page](#reading-the-page).
-2. **Decide**: when the snapshot is pasted, `claude -p` gets no tools. Otherwise it runs in the `page/` folder with only the Read and Grep tools and `--restricted`, which keeps them inside that folder. MCP servers and slash commands are always disabled. It gets [`duckwright/prompts/system.md`](https://github.com/locle97/duckwright/blob/main/duckwright/prompts/system.md), the prompt for its reading mode (`snapshot-hybrid.md`, `snapshot-full.md` or `snapshot-grep.md`), and the playwright-cli skill as its system prompt, and must return output that matches the decision schema.
+2. **Decide**: when the snapshot is pasted, `claude -p` gets no tools. Otherwise it runs in the `page/` folder with only the Read and Grep tools and `--restricted`, which keeps them inside that folder. MCP servers and slash commands are always disabled. It gets [`prompts/system.md`](https://github.com/locle97/duckwright/blob/main/prompts/system.md), the prompt for its reading mode (`snapshot-hybrid.md`, `snapshot-full.md` or `snapshot-grep.md`), and the playwright-cli skill as its system prompt, and must return output that matches the decision schema.
 3. **Validate and execute**: each action is checked against the allowed commands (`goto`, `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `tab-new`, `tab-select`, `tab-close`, `go-back`, `screenshot`, `expect`, `done`) and their allowed flags, then run through `playwright-cli`. `expect` is handled by the harness: it gets a locator for the ref with `playwright-cli generate-locator`, reads the element's state, and compares it with the expected value. Actions after a page-changing command are skipped, because element refs may no longer be valid.
 4. **Record**: the step is added to the history as one compact line, together with the Playwright code each action ran. The last 15 lines are included in the next prompt; the code is not.
 
@@ -288,15 +291,17 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 
 | Module | Responsibility |
 | --- | --- |
-| [`loop.py`](https://github.com/locle97/duckwright/blob/main/duckwright/loop.py) | The agent loop, repeat detection, and failure handling |
-| [`brain.py`](https://github.com/locle97/duckwright/blob/main/duckwright/brain.py) | Calls `claude -p`, enforces the decision schema, tracks cost |
-| [`actions.py`](https://github.com/locle97/duckwright/blob/main/duckwright/actions.py) | Command and flag allow-lists, action execution, Playwright code capture |
-| [`export.py`](https://github.com/locle97/duckwright/blob/main/duckwright/export.py) | Renders `history.json` as a `@playwright/test` spec |
-| [`expect.py`](https://github.com/locle97/duckwright/blob/main/duckwright/expect.py) | `expect` checks: verified against the live page and recorded as assertions |
-| [`taskfile.py`](https://github.com/locle97/duckwright/blob/main/duckwright/taskfile.py) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
-| [`observe.py`](https://github.com/locle97/duckwright/blob/main/duckwright/observe.py) | Tab list and page snapshot |
-| [`prompt.py`](https://github.com/locle97/duckwright/blob/main/duckwright/prompt.py) | Prompt sections, history lines, escaping untrusted content |
-| [`pw.py`](https://github.com/locle97/duckwright/blob/main/duckwright/pw.py) | `playwright-cli` wrapper |
+| [`loop.ts`](https://github.com/locle97/duckwright/blob/main/src/loop.ts) | The agent loop, repeat detection, and failure handling |
+| [`brain.ts`](https://github.com/locle97/duckwright/blob/main/src/brain.ts) | Calls `claude -p`, enforces the decision schema, tracks cost |
+| [`actions.ts`](https://github.com/locle97/duckwright/blob/main/src/actions.ts) | Command and flag allow-lists, action execution, Playwright code capture |
+| [`export.ts`](https://github.com/locle97/duckwright/blob/main/src/export.ts) | Renders `history.json` as a `@playwright/test` spec |
+| [`expect.ts`](https://github.com/locle97/duckwright/blob/main/src/expect.ts) | `expect` checks: verified against the live page and recorded as assertions |
+| [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
+| [`observe.ts`](https://github.com/locle97/duckwright/blob/main/src/observe.ts) | Tab list and page snapshot |
+| [`prompt.ts`](https://github.com/locle97/duckwright/blob/main/src/prompt.ts) | Prompt sections, history lines, escaping untrusted content |
+| [`pw.ts`](https://github.com/locle97/duckwright/blob/main/src/pw.ts) | `playwright-cli` wrapper |
+| [`proc.ts`](https://github.com/locle97/duckwright/blob/main/src/proc.ts) | Runs `claude` and `playwright-cli` as child processes, with a timeout and Ctrl-C stopping them |
+| [`cli.ts`](https://github.com/locle97/duckwright/blob/main/src/cli.ts) | The command line: single runs, batches, `export`, and `history.json` |
 
 ### Reading the page
 
@@ -346,24 +351,26 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
 - [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
-- [x] **Packaging**: a console-script entry point, so `duckwright` runs from any directory after a local or GitHub install.
-- [ ] **PyPI release**: publish `duckwright` so `pipx install duckwright` works. The `release.yml` workflow is ready; it needs a PyPI trusted publisher first.
+- [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
+- [ ] **npm release**: publish `duckwright` so `npm install -g duckwright` works. The `release.yml` workflow is ready; it needs npm trusted publishing set up for the package first.
 
 ## Development
 
 ```bash
 git clone https://github.com/locle97/duckwright.git
 cd duckwright
-pip install -e ".[dev]"
-python3 -m pytest                                          # unit tests
-DUCKWRIGHT_E2E=1 python3 -m pytest tests/test_e2e.py -v -s   # live e2e: real claude + headless browser
+npm install
+npm test                                                   # typecheck and unit tests
+DUCKWRIGHT_E2E=1 node --test test/e2e.test.ts              # live e2e: real claude + headless browser
+node src/bin.ts "<task>"                                   # run from source, no build needed
 ```
 
-> [!NOTE]
-> If your clone predates the rename to Duckwright, delete any old `*.egg-info` directory and re-run `pip install -e ".[dev]"` once. Otherwise `duckwright --version` prints `unknown`.
+Node runs the TypeScript sources directly, so tests and `node src/bin.ts` need no build step; `npm run build` writes `dist/` for the installed command.
+
+The original Python version lives, frozen, in [`legacy/`](https://github.com/locle97/duckwright/tree/main/legacy). Its tests still run in CI as a reference until it is removed.
 
 > [!TIP]
-> The e2e test fills in and submits [`tests/fixtures/form.html`](https://github.com/locle97/duckwright/blob/main/tests/fixtures/form.html) using a real model, so each run costs a small amount.
+> The e2e test fills in and submits [`test/fixtures/form.html`](https://github.com/locle97/duckwright/blob/main/test/fixtures/form.html) using a real model, so each run costs a small amount.
 
 ### Benchmark tasks
 
@@ -379,14 +386,14 @@ The `Batch:` summary line gives each run's total cost, and every task line its o
 
 Every file at the top of the folder runs as a task, so keep notes out of it.
 
-CI runs the unit tests on Python 3.11, 3.12, and 3.13 for every push to `main` and every pull request. A `package` job also builds the wheel and smoke-tests it in a fresh venv.
+CI runs the typecheck and unit tests on Node 22 and 24 for every push to `main` and every pull request, then builds the package and smoke-tests it in a temporary install prefix.
 
-Releasing to PyPI (not set up yet): add a trusted publisher on PyPI for `release.yml` with environment `pypi`, bump `version` in `pyproject.toml`, merge, then push tag `vX.Y.Z`. `release.yml` runs the tests and the install check, then publishes.
+Releasing to npm (not set up yet): set up trusted publishing on npm for `release.yml` with environment `npm`, bump `version` in `package.json`, merge, then push tag `vX.Y.Z`. `release.yml` runs the tests and the install check, then publishes.
 
 ## License
 
 [MIT](https://github.com/locle97/duckwright/blob/main/LICENSE).
 
-`duckwright/prompts/playwright-cli.md` and `.claude/skills/playwright-cli/` are adapted from the skill shipped with Microsoft's [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli), which is licensed under Apache-2.0.
+`prompts/playwright-cli.md` and `.claude/skills/playwright-cli/` are adapted from the skill shipped with Microsoft's [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli), which is licensed under Apache-2.0.
 
 Duckwright is not affiliated with Microsoft or the Playwright project.
