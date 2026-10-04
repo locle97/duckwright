@@ -59,12 +59,12 @@ History: runs/20261003-101500-brave-otter/history.json
 
 ### Install
 
-Duckwright is not on npm yet, so install it from GitHub or from a local build. Each option puts a `duckwright` command on your `PATH` that works from any directory.
+Each option puts a `duckwright` command on your `PATH` that works from any directory.
 
-**From GitHub**, without cloning (npm builds it on install):
+**From npm**:
 
 ```bash
-npm install -g github:locle97/duckwright
+npm install -g duckwright
 ```
 
 **From a clone**:
@@ -85,6 +85,8 @@ bash scripts/smoke_install.sh            # optional: install check in a temporar
 npm install -g ./duckwright-0.1.0.tgz
 ```
 
+Installing straight from GitHub (`npm install -g github:locle97/duckwright`) does not work: npm builds git dependencies in a nested install that does not get the package's devDependencies, so the build fails with `tsc: not found`.
+
 Check the install with `duckwright --version`. To pick up a newer version, re-run the same install command. To work on the code instead, see [Development](#development).
 
 > [!NOTE]
@@ -93,7 +95,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 > [!NOTE]
 > **Upgrading from `pw_agent`**: the project was renamed from `pw_agent` / `playwright-agent-loop` to Duckwright. If you installed the old version, replace it with:
 > ```bash
-> pipx uninstall playwright-agent-loop && npm install -g github:locle97/duckwright
+> pipx uninstall playwright-agent-loop && npm install -g duckwright
 > ```
 
 ## Usage
@@ -352,7 +354,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
 - [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
 - [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
-- [ ] **npm release**: publish `duckwright` so `npm install -g duckwright` works. The `release.yml` workflow is ready; it needs npm trusted publishing set up for the package first.
+- [x] **npm release**: `npm install -g duckwright`, published from GitHub releases by `release.yml`.
 
 ## Development
 
@@ -388,7 +390,7 @@ Every file at the top of the folder runs as a task, so keep notes out of it.
 
 CI runs the typecheck and unit tests on Node 22 and 24 for every push to `main` and every pull request, then builds the package and smoke-tests it in a temporary install prefix.
 
-Releasing to npm (not set up yet): set up trusted publishing on npm for `release.yml` with environment `npm`, bump `version` in `package.json`, merge, then push tag `vX.Y.Z`. `release.yml` runs the tests and the install check, then publishes.
+Releasing to npm: create a GitHub release with a new tag `vX.Y.Z` (Releases → Draft a new release → choose a new tag). `release.yml` sets `package.json` to that version, runs the tests and the install check, publishes to npm with provenance, then commits the version bump to `main`. A release marked as pre-release (e.g. `v0.2.0-beta.1`) is published under the `next` dist-tag and does not bump `main`.
 
 ## License
 
