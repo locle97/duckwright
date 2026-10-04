@@ -59,12 +59,12 @@ History: runs/20261003-101500-brave-otter/history.json
 
 ### Install
 
-Duckwright is not on npm yet, so install it from GitHub or from a local build. Each option puts a `duckwright` command on your `PATH` that works from any directory.
+Each option puts a `duckwright` command on your `PATH` that works from any directory.
 
-**From GitHub**, without cloning (npm builds it on install):
+**From npm**:
 
 ```bash
-npm install -g github:locle97/duckwright
+npm install -g duckwright
 ```
 
 **From a clone**:
@@ -85,6 +85,8 @@ bash scripts/smoke_install.sh            # optional: install check in a temporar
 npm install -g ./duckwright-0.1.0.tgz
 ```
 
+Installing straight from GitHub (`npm install -g github:locle97/duckwright`) does not work: npm builds git dependencies in a nested install that does not get the package's devDependencies, so the build fails with `tsc: not found`.
+
 Check the install with `duckwright --version`. To pick up a newer version, re-run the same install command. To work on the code instead, see [Development](#development).
 
 > [!NOTE]
@@ -93,7 +95,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 > [!NOTE]
 > **Upgrading from `pw_agent`**: the project was renamed from `pw_agent` / `playwright-agent-loop` to Duckwright. If you installed the old version, replace it with:
 > ```bash
-> pipx uninstall playwright-agent-loop && npm install -g github:locle97/duckwright
+> pipx uninstall playwright-agent-loop && npm install -g duckwright
 > ```
 
 ## Usage
