@@ -20,7 +20,7 @@ test("run_process_decodes_bad_bytes", async () => {
   const r = await runProcess(
     ["node", "-e", "process.stdout.write(Buffer.from([0x61, 0xff, 0x62]))"], null, 10,
   );
-  assert.equal(r.stdout, "a�b");
+  assert.equal(r.stdout, "a\ufffdb");
 });
 
 test("run_process_passes_cwd", async () => {

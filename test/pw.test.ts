@@ -63,7 +63,7 @@ test("open_allow_file_access_prefixes_env", async () => {
 test("snapshot_reads_utf8_and_replaces_bad_bytes", async () => {
   const p = path.join(tmpDir(), "snap.yml");
   const fake = writing(() => fs.writeFileSync(p, Buffer.concat([Buffer.from("café "), Buffer.from([0xff])])));
-  assert.equal(await new PlaywrightCLI({ runner: fake }).snapshot(p), "café �");
+  assert.equal(await new PlaywrightCLI({ runner: fake }).snapshot(p), "café \ufffd");
 });
 
 test("state_load_builds_argv", async () => {
