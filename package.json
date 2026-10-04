@@ -1,0 +1,34 @@
+{
+  "name": "duckwright",
+  "version": "0.1.0",
+  "description": "Duckwright: a browser agent loop on playwright-cli + claude -p",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/locle97/duckwright",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/locle97/duckwright.git"
+  },
+  "bugs": "https://github.com/locle97/duckwright/issues",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "duckwright": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "prompts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "npm run typecheck && node --test \"test/**/*.test.ts\"",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "ajv": "^8.20.0",
+    "typescript": "^7.0.2"
+  }
+}
