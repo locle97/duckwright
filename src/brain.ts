@@ -201,3 +201,6 @@ export class Brain {
     }
   }
 }
+
+/** What the agent loop needs from a brain. */
+export type DecideFn = Pick<Brain, "decide">;
