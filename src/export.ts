@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { resolvePath } from "./paths.ts";
 import { splitLines } from "./text.ts";
 
 export const SPEC_NAME = "duckwright.spec.ts";
@@ -127,23 +128,12 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   return { spec, warnings };
 }
 
-/** Where a path ends up on disk: symlinks followed as far as they exist, like Python's resolve(). */
-function realish(p: string): string {
-  const abs = path.resolve(p);
-  try {
-    return fs.realpathSync(abs);
-  } catch {
-    const parent = path.dirname(abs);
-    return parent === abs ? abs : path.join(realish(parent), path.basename(abs));
-  }
-}
-
 /** Write the spec for a run. Returns the written path and any warnings. */
 export function exportRun(p: string, out: string | null = null): { path: string; warnings: string[] } {
   const { runDir, data } = loadHistory(p);
   const { spec, warnings } = renderSpec(data);
   const target = out ?? path.join(runDir, SPEC_NAME);
-  if (realish(target) === realish(path.join(runDir, "history.json"))) {
+  if (resolvePath(target) === resolvePath(path.join(runDir, "history.json"))) {
     throw new ExportError(`refusing to overwrite the run's history: ${target}`, 2);
   }
   try {
