@@ -1,0 +1,84 @@
+{
+  "task": "greet",
+  "task_file": null,
+  "success": true,
+  "answer": "",
+  "steps": 3,
+  "cost_usd": 0.0123,
+  "history": [
+    {
+      "step": 1,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "goto",
+          "args": [
+            "https://example.com/form"
+          ],
+          "code": "await page.goto('https://example.com/form');"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 2,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "fill",
+          "args": [
+            "e1",
+            "Linh"
+          ],
+          "code": "await page.getByRole('textbox', { name: 'Name' }).fill('Linh');"
+        },
+        {
+          "cmd": "click",
+          "args": [
+            "e2"
+          ],
+          "code": "await page.getByRole('button', { name: 'Submit' }).click();"
+        }
+      ],
+      "results": [
+        "ok",
+        "ok"
+      ]
+    },
+    {
+      "step": 3,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "expect",
+          "args": [
+            "text",
+            "e3",
+            "Hello, Linh!"
+          ],
+          "code": "await expect(page.getByText('Hello, Linh!')).toHaveText(\"Hello, Linh!\");"
+        },
+        {
+          "cmd": "done",
+          "args": [
+            "success",
+            "Hello, Linh!"
+          ],
+          "code": null
+        }
+      ],
+      "results": [
+        "ok",
+        "done"
+      ]
+    }
+  ]
+}

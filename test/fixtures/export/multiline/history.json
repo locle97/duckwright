@@ -1,0 +1,99 @@
+{
+  "task": "press and shoot",
+  "task_file": null,
+  "success": true,
+  "answer": "",
+  "steps": 5,
+  "cost_usd": 0.0123,
+  "history": [
+    {
+      "step": 1,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "goto",
+          "args": [
+            "u"
+          ],
+          "code": "await page.goto('https://example.com/form');"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 2,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "press",
+          "args": [
+            "Enter"
+          ],
+          "code": "// Press Enter\nawait page.keyboard.press('Enter');"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 3,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "screenshot",
+          "args": [],
+          "code": "await page.screenshot({\n  path: 'p.png'\n});"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 4,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "click",
+          "args": [
+            "e4"
+          ],
+          "code": "await a;\r\nawait b;\u2028await c;"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 5,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "expect",
+          "args": [
+            "visible",
+            "e1"
+          ],
+          "code": "await expect(page.getByText('Hello, Linh!')).toHaveText(\"Hello, Linh!\");"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    }
+  ]
+}

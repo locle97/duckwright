@@ -198,7 +198,7 @@ def test_not_utf8(tmp_path):
 
 
 def test_example_template_parses():
-    tf = load_task_file(ROOT / "examples" / "task.md")
+    tf = load_task_file(ROOT.parent / "examples" / "task.md")
     assert tf.settings == {"model": "sonnet", "max_steps": 25}
     assert tf.task.startswith("Open https://example.com/form.")
 
