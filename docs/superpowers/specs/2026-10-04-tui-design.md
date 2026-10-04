@@ -4,7 +4,7 @@ Status: draft for review, 2026-10-04.
 
 ## Goal
 
-`duckwright --tui` opens a terminal workspace where you add tasks (typed, or picked from task files), start them, and watch every run live: each step's goal, actions, results and running cost, with keys to pause, step through, or stop a run. Several runs can go at once, each in its own browser, with its state shown as a coloured dot in a sidebar.
+`duckwright --tui` opens a terminal workspace where you add tasks (typed, or `@`-mentioned task files), start them, and watch every run live: each step's goal, actions, results and running cost, with keys to pause, step through, or stop a run. Several runs can go at once, each in its own browser, with its state shown as a coloured dot in a sidebar.
 
 It replaces typing `duckwright "task"` or `duckwright -f ...` for interactive use. The plain command line stays exactly as it is for scripts and CI.
 
@@ -18,7 +18,7 @@ duckwright --tui --max-parallel 2         # at most 2 runs at once (default 3)
 
 | Milestone | Scope |
 | --- | --- |
-| **M1: workspace and live runs** | `--tui`; add a typed task (`a`) or task files (`f`, fuzzy picker); per-task overrides (`o`); start the selected task (`⏎`); parallel runs up to `--max-parallel`, each with its own browser session; live timeline per run; pause / step / stop the selected run; sidebar states; header totals; help overlay; summary table and exit code on quit. |
+| **M1: workspace and live runs** | `--tui`; one add box (`a`) for typed tasks and `@` mentions of task files and folders, with inline fuzzy completion; per-task overrides (`o`); start the selected task (`⏎`); parallel runs up to `--max-parallel`, each with its own browser session; live timeline per run; pause / step / stop the selected run; sidebar states; header totals; help overlay; summary table and exit code on quit. |
 | **M2: batch conveniences** | Start all or marked tasks (`R`, respecting the limit); browse earlier runs of a task; save a typed task as a task file (`w`); preload with `duckwright --tui -f tasks/ "task"` (added, not started); export the test of a passed run (`x`). |
 | **M3: polish (optional)** | Load past runs from `runs/`, light/dark and truecolor themes, `NO_COLOR`, mouse, `/` filter, an `events.jsonl` sink as the base for a future `duckwright watch`. |
 
@@ -34,7 +34,7 @@ Out of scope for every milestone: approving each decision before it runs (the *c
 - **Sidebar list plus detail.** The left list holds items with a state icon; the right side shows the selected item.
 - **Semantic palette.** Colours are roles (`text`, `muted`, `surface`, `accent`, plus state colours), so themes and "follow the terminal palette" come for free later.
 - **A small, learnable keymap.** herdr teaches "five keys first"; `?` opens an overlay of every active binding. Footer hints are generated from the active keymap so they never lie.
-- **Fuzzy pickers and inline inputs** for adding things, with `esc` always backing out.
+- **Fuzzy completion inline** for adding things, with `esc` always backing out. (The `@file` mention style itself comes from Claude Code's composer.)
 - **Graceful truncation.** Rows drop optional columns as width shrinks instead of wrapping.
 - **Small signals.** A `●` before status text, braille spinner frames while working, short toasts.
 
@@ -59,8 +59,9 @@ Out of scope for every milestone: approving each decision before it runs (the *c
 │ ■ wiki.md       $0.130  │   └ goal  Add the third item and verify         │
 │ ○ tables.md             │                                                 │
 ├─────────────────────────┴─────────────────────────────────────────────────┤
-│ ⏎ run · a add · f files · o options · p pause · s stop · tab focus · ? help│
+│ › Describe a task, or @ a task file or folder…                            │
 ╰────────────────────────────────────────────────────────────────────────────╯
+ ⏎ run · a add · o options · p pause · s stop · tab focus · ? help
 ```
 
 ### Header
@@ -103,8 +104,7 @@ One row per task, in the order added: state icon, name, cost of its latest run.
 | --- | --- | --- |
 | `list` | default | sidebar focused |
 | `detail` | `tab` | timeline focused |
-| `input` | `a` | one-line task box at the bottom; `alt+⏎` inserts a newline; `⏎` adds; empty input is ignored |
-| `picker` | `f` | fuzzy file picker (below) |
+| `compose` | `a` | the add box at the bottom is focused (see *Add box* below) |
 | `form` | `o` | per-task settings form (below) |
 | `help` | `?` | every binding of the current mode and the global ones |
 | `confirm` | `q` with active runs, `d` | yes / no question |
@@ -114,8 +114,7 @@ One row per task, in the order added: state icon, name, cost of its latest run.
 | Key | Where | Action |
 | --- | --- | --- |
 | `⏎` | list | Start the selected task if it has no active run. On a task with an active run: focus its timeline |
-| `a` | list, detail | Add a typed task |
-| `f` | list, detail | Add task files |
+| `a` | list, detail | Focus the add box (typed tasks and `@` mentions) |
 | `o` | list | Edit the selected task's overrides (only when no run of it is active) |
 | `d` | list | Remove the selected task (only when no run of it is active; confirms) |
 | `p` | list, detail | Pause the selected task's run (takes effect after the current step) |
@@ -125,7 +124,7 @@ One row per task, in the order added: state icon, name, cost of its latest run.
 | `↑↓` `j/k`, `PgUp/PgDn`, `g/G` | list, detail | Move, page, first/last (`G` re-enables follow in the timeline) |
 | `⏎`/`space`, `e`, `c` | detail | Expand/collapse a step, expand all, collapse all |
 | `tab` | list, detail | Switch focus |
-| `?` | list, detail | Help overlay (in `input`, `picker` and `form`, printable keys are text) |
+| `?` | list, detail | Help overlay (in `compose` and `form`, printable keys are text) |
 | `q` | list, detail | Quit; with active runs, confirm "stop N runs and quit?" |
 | `ctrl+c` | anywhere | 1st: same as `q`. In the quit confirm: confirm. 3rd: unmount and exit `130` immediately (browsers may be left open, as with today's double Ctrl-C) |
 
@@ -133,11 +132,32 @@ In M1, `⏎` on a finished task starts a new run of it; the sidebar and detail p
 
 The footer shows only the keys that act in the current mode and on the current selection (for example `r resume · n step` only when the selected run is paused).
 
-### File picker
+### Add box
 
-- Lists `.md` and `.txt` files (any case) and folders under the current directory, as relative paths. Skips hidden entries, `node_modules`, `runs` and `.git`. Stops after 5,000 entries and says so.
-- Typing filters with fuzzy subsequence matching (fzf-style ranking: consecutive matches, matches at word starts and shorter paths score higher). `↑↓` move, `space` marks several, `⏎` adds the marked entries (or the highlighted one).
-- A folder adds its root-level task files exactly as `-f folder/` does today (`taskPaths`). Each file is loaded with `loadTaskFile` when added. Invalid files are not added; each error (`file:line: problem`) is shown as a toast. A file already in the list is not added twice.
+One box, always visible at the bottom of the screen, in the style of Claude Code's composer. It holds typed tasks and `@` mentions of task files in the same line.
+
+```
+ ╭ tasks/sm ────────────────────────────╮
+ │ ▸ tasks/smoke/              folder · 4 │
+ │   tasks/smoke-login.md                 │
+ │   benchmark_tasks/05-saucedemo…md      │
+ ╰────────────────────────────────────────╯
+ › @tasks/login.md @tasks/sm▌
+```
+
+- **Focus.** `a` focuses the box (mode `compose`); the placeholder reads `Describe a task, or @ a task file or folder…`. After a successful submit the focus stays in the box, so several tasks can be added in a row. `esc` with the completion list closed leaves the box, returns focus to the pane that had it before (`list` or `detail`) and keeps the text as a draft. While unfocused the box shows its draft, or the placeholder, dimmed.
+- **Typing.** Plain text, with the usual line-edit keys (`←→`, `home/end`, `ctrl+a/e`, `ctrl+w`, `ctrl+u`, `alt+←/→`). `alt+⏎` inserts a newline for multi-line tasks; the box grows up to 6 lines, then scrolls. Pasted text is inserted as is, line breaks included.
+- **Mentions.** An `@` at the start of the box or after whitespace starts a mention; an `@` inside a word (`me@example.com`) is plain text, and `\@` types a literal `@`. An unquoted mention runs to the next whitespace, punctuation included (`@a.md,` names `a.md,`). A path containing spaces is written `@"my tasks/a.md"`, which completion inserts automatically. Relative paths (including `../`) and absolute paths may be typed by hand; completion only offers entries under the current folder.
+- **Mentions are always derived from the text.** There is no separate token state: the box holds only text and a cursor, and `compose.ts` parses it on every change. A hand-typed mention counts exactly like a completed one. Display: a mention whose path exists is drawn in the accent colour, one that does not is drawn in red. `backspace` right after the end of a mention deletes the whole mention. So `email @john` makes `@john` a mention, which fails at submit with `@john: not found (type \@ for a literal @)`.
+- **Completion.** The list opens when `@` is typed or a character is typed inside a mention, and closes on `esc`, on accepting an entry, when the cursor leaves the mention, or on submit. Moving the cursor into a mention does not open it, so after `esc` or a failed submit the list stays closed until the next keystroke inside that mention. When open, it sits above the box with fuzzy matches for the text after `@`. Candidates are `.md` and `.txt` files (any case) and folders under the current directory, as relative paths. Hidden entries, `node_modules`, `runs` and `.git` are skipped, and the walk stops after 5,000 entries (the list then says so). Ranking is fzf-style: consecutive matches, matches at word or path-segment starts, and shorter paths score higher. A folder row shows how many task files it holds at its root; folders with none are not offered. The list shows at most 8 rows (fewer on short terminals, see *Layout rules*) and scrolls.
+  - `↑↓` move in the list. `tab` completes the highlighted entry; on a folder it inserts `@folder/` and keeps the list open to go deeper. `⏎` accepts the highlighted entry and closes the list (on a folder: the folder itself, which adds all its task files). `esc` closes the list and leaves the text as typed. With no matches the list shows `no matches` and `⏎` submits as if the list were closed.
+- **Submit.** `⏎` with the list closed submits the box:
+  1. Mentions are taken out, in order. Each must resolve, relative to the current folder, to a task file or a folder of task files, expanded exactly as `-f` does today (`taskPaths`), and every file must load (`loadTaskFile`).
+  2. The text left after removing the mentions, trimmed and with runs of spaces where mentions were collapsed, and with each `\@` turned into `@`, becomes one typed task if it is not empty.
+  3. If anything fails (a missing path, a folder with no task files, a bad front matter), **nothing is added**: the errors (`@mention: problem`, or `file:line: problem` for a file inside a folder) are shown under the box, the text stays, and the cursor goes to the start of the first bad mention (the completion list stays closed). This matches `-f`, where one bad file stops the whole batch before anything runs.
+  4. Otherwise the tasks are added in order (files first in mention order, then the typed task), files already in the list are skipped with a toast `already added: <path>`, the box clears (also when everything was a duplicate), and the selection moves to the first added task. Nothing starts.
+- An empty box, or one with only whitespace, does nothing on `⏎`.
+- **History.** With the list closed, `↑` on the first line shows the previous submission of this session and `↓` on the last line the next one, like a shell. The unsent draft is kept as the newest entry, so `↓` past the latest submission brings it back. Elsewhere `↑↓` move between lines.
 
 ### Settings form (`o`)
 
@@ -164,6 +184,7 @@ Fields: model, max steps, headed, export, snapshot mode. Each shows the effectiv
 - At 90 columns or more: sidebar (about 30% width, 24 to 40 columns) and detail side by side.
 - 60 to 89: the sidebar shows icon and a short name, no cost.
 - Under 60: one pane at a time; `tab` switches.
+- The add box (1 to 6 lines) and the footer row are always shown below the panes; the panes get the remaining height. The completion list overlays the panes and is at most 8 rows, or half the pane height if that is less.
 - Under about 40×8: only `terminal too small` and `q quit`.
 - M1 colours are the 16 ANSI colours by role, so the terminal's theme applies.
 
@@ -241,7 +262,7 @@ Anything not listed is a no-op. `gate(signal): Promise<void>` returns at once wh
 
 `RunManager` holds the workspace. It contains no UI code and takes `startRun` and `preflight` as constructor arguments.
 
-- **Tasks.** `TaskItem { id, source: { kind: "typed" } | { kind: "file", path }, text, fileSettings, overrides, error: string | null, runs: RunHandle[] }`. `addTyped(text)`; `addFiles(paths)` expands folders with `taskPaths`, loads files with `loadTaskFile`, skips duplicates by resolved path, and returns the errors; `setOverrides(id, o)`; `remove(id)`.
+- **Tasks.** `TaskItem { id, source: { kind: "typed" } | { kind: "file", path }, text, fileSettings, overrides, error: string | null, runs: RunHandle[] }`. `add({ mentions: string[], typed: string | null })` handles one submission of the add box. It expands each mention on its own with `taskPaths` and loads every resulting file with `loadTaskFile`, so each error stays tied to the mention it came from. Result: `{ ok: false, errors: { mention: number, message: string }[] }` if anything failed, in which case nothing is added; otherwise `{ ok: true, added: TaskId[], duplicates: string[] }`, after adding the files in mention order (a file reached twice in one submission, or already in the list, is skipped and reported in `duplicates`) and then the typed task, if any. `setOverrides(id, o)`; `remove(id)`.
 - **Settings layering**, lowest first: task-file front matter, then flags given on the command line, then the task's overrides. The first two are exactly `parseRunArgs(argv, skill, fileSettings)`, as batch runs do today; overrides are applied on top. `allow-file-access` comes only from the command line.
 - **Start.** `start(id)` refuses with a reason if a run of that task is active, if `maxParallel` runs are active (`3 runs active (limit 3)`), or if `preflight` fails (the message is stored in `error`, shown as the red `!` and a toast). Otherwise it takes a session slot and calls `startRun`.
 - **Sessions.** A pool of `maxParallel` slots named `<session>-1` … `<session>-N`, where `<session>` is the `--session` value (default `duckwright`). A task file's `session:` key is ignored in the TUI (the slot always wins), so two parallel files can never share a browser. A file's `skill:` and `state:` still apply to that task and are checked by its per-start preflight. A slot is taken at start and released when that run's `done` settles, whatever the outcome. Two TUIs at the same time need different `--session` values, as two CLI runs do today (the README note is updated).
@@ -254,13 +275,14 @@ Anything not listed is a no-op. `gate(signal): Promise<void>` returns at once wh
 
 | File | Responsibility |
 | --- | --- |
-| `state.ts` | Pure reducer `(ViewState, ManagerEvent \| UiAction) → ViewState`: task rows, selection, focus, mode, input buffer, picker query and marks, form fields, per-run timeline state (steps, phases, selection, expanded, follow), toasts (auto-expire), header totals. Most UI logic lives here. |
+| `state.ts` | Pure reducer `(ViewState, ManagerEvent \| UiAction) → ViewState`: task rows, selection, focus, mode, add-box text and cursor, the pane focused before the box, completion list open state and highlight, submission history, add errors, form fields, per-run timeline state (steps, phases, selection, expanded, follow), toasts (auto-expire), header totals. Most UI logic lives here. |
 | `keys.ts` | Pure keymap per mode `(key, ViewState) → UiAction \| ManagerCall \| null`, plus `hints(ViewState)` for the footer and help overlay. |
-| `picker.ts` | Pure folder walk (with an injectable `readdir`) and fuzzy ranking. |
+| `compose.ts` | Pure add-box model: parse text into mentions and plain text (the `@` rules, quoting, `\@`), find the mention under the cursor, apply a completion, delete the mention before the cursor. |
+| `candidates.ts` | Pure folder walk for completion (injectable `readdir`; skip rules, 5,000 cap, task-file count per folder) and fuzzy ranking. |
 | `form.ts` | Pure field model and validation for the settings form, reusing the task-file validators. |
 | `sanitize.ts` | Strips control characters and escape sequences on top of `neutralise`/`flat`. |
 | `theme.ts` | Colour roles → ANSI colours; task and step states → icon and colour. |
-| `app.ts`, `header.ts`, `sidebar.ts`, `detail.ts`, `timeline.ts`, `input.ts`, `pickerView.ts`, `formView.ts`, `help.ts`, `confirm.ts`, `toast.ts`, `footer.ts` | Ink components written with `React.createElement` (imported as `h`) in plain `.ts` files, so `node --test` keeps running sources with type stripping and no JSX build step. |
+| `app.ts`, `header.ts`, `sidebar.ts`, `detail.ts`, `timeline.ts`, `addBox.ts`, `completion.ts`, `formView.ts`, `help.ts`, `confirm.ts`, `toast.ts`, `footer.ts` | Ink components written with `React.createElement` (imported as `h`) in plain `.ts` files, so `node --test` keeps running sources with type stripping and no JSX build step. |
 | `index.ts` | `startTui({ manager, deps }) → { done: Promise<void> }`; `done` resolves after quit (and after `stopAll` when confirmed). An error boundary calls `manager.stopAll()` and restores the terminal if rendering throws. |
 
 ### CLI wiring
@@ -276,7 +298,7 @@ Anything not listed is a no-op. `gate(signal): Promise<void>` returns at once wh
 ### Dependencies
 
 - Runtime: `ink` (^8, Node ≥ 22) and `react` (^19.3). Dev: `ink-testing-library`, `@types/react`.
-- README: the "No runtime dependencies" badge and bullet change to "the core loop uses only Node's standard library; `--tui` uses Ink". Add `--tui` and `--max-parallel` to the options table, and an "Interactive TUI" section with the five keys to learn first (`a`, `f`, `⏎`, `p`, `q`) and a pointer to `?`. Tick the TUI roadmap item when M1 lands.
+- README: the "No runtime dependencies" badge and bullet change to "the core loop uses only Node's standard library; `--tui` uses Ink". Add `--tui` and `--max-parallel` to the options table, and an "Interactive TUI" section with the five keys to learn first (`a`, `⏎`, `p`, `s`, `q`), the `@` mention syntax, and a pointer to `?`. Tick the TUI roadmap item when M1 lands.
 
 ## Error handling
 
@@ -285,7 +307,7 @@ Anything not listed is a no-op. `gate(signal): Promise<void>` returns at once wh
 - **Session already in use** (for example a browser left by a forced exit): the run fails at `open` with today's Playwright error, and the toast suggests `playwright-cli -s=<name> close`.
 - **Stop while paused:** the gate rejects with `AbortedError`; the normal interrupted path runs; the task turns `■`.
 - **Paused:** nothing runs and nothing is spent; the browser stays open; the run header shows paused time.
-- **Bad task file or folder:** each error is a toast; valid files from the same folder are still added.
+- **Bad mention or task file:** nothing from that submission is added; the errors show under the add box and the text stays for fixing.
 - **Preflight failure at start:** the task stays `○` with a red `!`; the message shows in the detail pane and as a toast.
 - **Render crash:** the error boundary stops all runs, waits for them, restores the terminal, prints the error, then the summary. Every `history.json` is written and every browser closed.
 - **Terminal always restored** on quit, crash or forced exit: alternate screen left, cursor shown, raw mode off, by Ink's unmount plus the `finally` in `cli.ts`.
@@ -296,11 +318,12 @@ Anything not listed is a no-op. `gate(signal): Promise<void>` returns at once wh
 - `test/loop.test.ts` (extended, fake brain and Playwright): event order for a normal step, a brain-error step and a `done` step; step costs sum to `costUsd`; pause holds before `observe`; stepping runs exactly one step; stop while paused gives `AbortedError`; `onStep` still fires.
 - `test/runs/run.test.ts`: `startRun` writes `history.json`, exports, and settles `done` for pass, fail, crash and stop; `run:start` and `run:end` are each emitted once; two concurrent runs keep separate folders, signals, sessions and costs; the process signal still interrupts a run.
 - `test/report.test.ts` and the existing `test/cli.test.ts`: plain-mode output, batch output and exit codes are unchanged after the `runOne` refactor.
-- `test/runs/manager.test.ts` (fake `startRun` and `preflight`): settings layering; duplicate files skipped; folder errors returned while valid files are added; preflight failure keeps the task idle with `error`; the parallel limit refuses extra starts; slots are taken and released, including after a crash; a second start of an active task is refused; controls forward to the latest run; derived task states; `stopAll` waits for every run; `summary()` rows, total and exit code.
+- `test/runs/manager.test.ts` (fake `startRun` and `preflight`): settings layering; `add` is all-or-nothing (one bad file adds nothing and returns every error); files are added before the typed task; duplicates skipped and reported; preflight failure keeps the task idle with `error`; the parallel limit refuses extra starts; slots are taken and released, including after a crash; a second start of an active task is refused; controls forward to the latest run; derived task states; `stopAll` waits for every run; `summary()` rows, total and exit code.
 - `test/tui/state.test.ts`, `keys.test.ts`: reducer and every mode's keymap; footer hints per mode and selection; follow mode; the quit confirmation and the Ctrl-C sequence.
-- `test/tui/picker.test.ts`: skip rules, the 5,000-entry cap, ranking order, folder expansion.
+- `test/tui/compose.test.ts`: mention parsing (start of box, after whitespace, inside a word, `\@`, quoted paths), leftover text and space collapsing, the mention under the cursor, completing files and folders (`tab` vs `⏎`), whole-mention deletion, when the completion list opens and closes, history with a kept draft.
+- `test/tui/candidates.test.ts`: skip rules, the 5,000-entry cap, folder task-file counts, ranking order.
 - `test/tui/form.test.ts`: validation, override and clear.
 - `test/tui/sanitize.test.ts`: escape sequences and control characters are removed.
-- `test/tui/app.test.ts` (`ink-testing-library` frames, fake manager): empty workspace; adding a typed task; picking files; the settings form; two runs in different states; pausing and stepping the selected run; quitting with active runs; narrow layouts.
+- `test/tui/app.test.ts` (`ink-testing-library` frames, fake manager): empty workspace; adding a typed task; `@` completion of a file and a folder; a mixed submission (mentions plus text); a submission with a bad mention that adds nothing; the settings form; two runs in different states; pausing and stepping the selected run; quitting with active runs; narrow layouts.
 - `test/cli.test.ts` (fake `isTTY` and `loadTui`): `--tui` without a TTY exits `2`; `--tui` with a task or `-f` exits `2`; `--max-parallel` validation, and its use without `--tui`; a failed workspace preflight exits `2` before the TUI loads; the summary and exit code after quit.
 - `test/packaging.test.ts`: the packed tarball installs, imports `ink` and `react`, and `dist/cli.js`'s dynamic import points at `./tui/index.js`.
