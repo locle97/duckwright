@@ -56,7 +56,7 @@ Out of scope for every milestone: approving each decision before it runs (that i
      ├ ✓ expect heading "Example Domain"      → ok
      └ ⠋ done success "Example Domain"         running…
 
- p pause · n step · s stop · ↑↓ select · ⏎ expand · ? help
+ p pause · s stop · ↑↓ select · ⏎ expand · ? help
 ```
 
 ### Header
@@ -162,7 +162,7 @@ Action-level events need `execute` in `actions.ts` to take an optional per-actio
   | `running` | `pause()` | `paused` (takes effect at the next gate; the current step finishes) |
   | `paused` | `resume()` | `running` |
   | `paused` | `step()` | `stepping` |
-  | `stepping` | gate passes | `paused` (the gate lets this one step through, then the next gate waits) |
+  | `stepping` | gate passes | `paused` (the gate lets this one step through, then the next gate waits; emits `control` like every other change) |
   | `stepping` | `pause()` | `paused` (cancels the pending step if the gate has not passed yet) |
   | any but `stopping` | `stop()` | `stopping` |
 
@@ -203,7 +203,7 @@ Today's `stepLine` output, driven by `step:end` events. `cli.ts` uses it when `-
   4. Write `history.json` and run the export exactly as today.
   5. Emit `run:end` with the result (or failure), history path and export outcome. This is the only place `run:end` is emitted.
   6. `await done`, then print the plain summary.
-- **Output while the TUI is up.** `runOne` swaps `deps.stdout`/`deps.stderr` for a recorder for the whole run. Every recorded line is kept in order. `stderr` lines (warnings, `export failed`, error messages) are also shown as toasts; `stdout` lines are not shown in the TUI (the banner is built from `run:end`). After `done`, the recorded lines are written to the real `deps.stdout`/`deps.stderr` in order. This *is* the plain summary, so it is printed exactly once and matches what a run without `--tui` prints, minus the step lines. Ink's `patchConsole` catches stray `console` output.
+- **Output while the TUI is up.** `runOne` swaps `deps.stdout`/`deps.stderr` for a recorder for the whole run. Every recorded line is kept in order. `stderr` lines (warnings, `export failed`) are also shown as toasts, except the failure message `fail()` writes (`interrupted`, `playwright error: …`, `error: …`), which the banner already shows from `run:end`; `stdout` lines are not shown in the TUI (the banner is built from `run:end`). After `done`, the recorded lines are written to the real `deps.stdout`/`deps.stderr` in order. This *is* the plain summary, so it is printed exactly once and matches what a run without `--tui` prints, minus the step lines. Ink's `patchConsole` catches stray `console` output.
 - **Ctrl-C in raw mode** reaches Ink as a key, not SIGINT. The first press calls `control.stop()`. The second unmounts Ink (which restores the terminal), then calls `process.exit(130)`, matching `bin.ts`.
 
 ### Dependencies
