@@ -793,3 +793,20 @@ test("brain error inside a run is not a crash", async () => {
   assert.equal(await main(e.argv, e.deps({ createAgent })), 1);
   assert.equal(history(e.tmp).answer, "error: BrainError: unexpected");
 });
+
+test("a failure after Ctrl-C counts as interrupted", async () => {
+  const e = env();
+  const ac = new AbortController();
+  const createAgent = agentWith(async () => {
+    ac.abort();
+    throw new PlaywrightError("tab-list exited -2");
+  });
+  assert.equal(await main(e.argv, e.deps({ signal: ac.signal, createAgent })), 130);
+  assert.equal(history(e.tmp).answer, "interrupted");
+});
+
+test("costs round like Python", async () => {
+  const e = env();
+  assert.equal(await main(e.argv, e.deps({ createAgent: agentWith(async () => result(true, [], 0.03125)) })), 0);
+  assert.equal(e.out[2], "Steps: 1  Cost: $0.0312");
+});

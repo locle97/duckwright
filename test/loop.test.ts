@@ -280,3 +280,15 @@ test("abort is not counted as a brain failure", async () => {
   await assert.rejects(agent(new FakePW(), brain).run(), AbortedError);
   assert.equal(brain.prompts.length, 1);
 });
+
+test("brain failure after an abort is an interrupt", async () => {
+  const ac = new AbortController();
+  const brain = new FakeBrain([dec([["hover", ["e1"]]])]);
+  brain.decide = async () => {
+    ac.abort();
+    throw new BrainError("claude exited -2", 0.1);
+  };
+  const a = agent(new FakePW(), brain, { signal: ac.signal });
+  await assert.rejects(a.run(), AbortedError);
+  assert.equal(a.costUsd, 0.1);
+});

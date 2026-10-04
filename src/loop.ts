@@ -109,6 +109,8 @@ export class Agent {
       } catch (e) {
         if (!(e instanceof BrainError)) throw e;
         this.costUsd += e.cost;
+        // Ctrl-C reaches claude too, and its exit can arrive before the abort does.
+        if (this.signal?.aborted) throw new AbortedError();
         failures += 1;
         this.record(history, {
           step,

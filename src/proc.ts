@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 
+import { universalNewlines } from "./text.ts";
+
 export interface ProcResult {
   code: number;
   stdout: string;
@@ -62,8 +64,8 @@ export const runProcess: Runner = (argv, stdin, timeoutSec, opts = {}) =>
       else resolve({
         // Killed by a signal: a negative code, as Python's returncode reports it.
         code: code ?? -(sig ? constants.signals[sig] : 1),
-        stdout: Buffer.concat(out).toString("utf8"),
-        stderr: Buffer.concat(err).toString("utf8"),
+        stdout: universalNewlines(Buffer.concat(out).toString("utf8")),
+        stderr: universalNewlines(Buffer.concat(err).toString("utf8")),
       });
     });
     if (stdin !== null) {

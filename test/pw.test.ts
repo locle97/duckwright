@@ -100,3 +100,9 @@ test("close never throws", async () => {
   const runner = async (): Promise<ProcResult> => { throw new Error("spawn failed"); };
   await new PlaywrightCLI({ runner }).close();
 });
+
+test("snapshot_uses_universal_newlines", async () => {
+  const p = path.join(tmpDir(), "snap.yml");
+  const fake = writing(() => fs.writeFileSync(p, "- a\r\n- b\r- c"));
+  assert.equal(await new PlaywrightCLI({ runner: fake }).snapshot(p), "- a\n- b\n- c");
+});

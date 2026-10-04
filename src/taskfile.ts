@@ -5,6 +5,7 @@ import path from "node:path";
 import { SNAPSHOT_MODES } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { resolvePath } from "./paths.ts";
+import { compareCodePoints } from "./text.ts";
 
 export type TaskSettings = Partial<{
   maxSteps: number;
@@ -169,7 +170,7 @@ function is(check: (s: fs.Stats) => boolean, p: string): boolean {
 function taskFilesIn(arg: string): string[] {
   let entries: string[];
   try {
-    entries = fs.readdirSync(arg).sort();
+    entries = fs.readdirSync(arg).sort(compareCodePoints);
   } catch (e) {
     throw new TaskFileError(`${arg}: cannot read: ${(e as Error).message}`);
   }

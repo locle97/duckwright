@@ -21,7 +21,8 @@ export const ALLOWED_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
 const FLAG = /^-{1,2}[A-Za-z]/;
 
 // playwright-cli prints the code it ran as "### Ran Playwright code" + a fenced block.
-const RAN_CODE = /^### Ran Playwright code\n```\w*\n((?:(?!```)[^\n]*\n)*?(?!```)[^\n]+)\n```/m;
+// (?<![^\n]) is Python's MULTILINE ^: JS's /m would also start a line after \r, U+2028 or U+2029.
+const RAN_CODE = /(?<![^\n])### Ran Playwright code\n```\w*\n((?:(?!```)[^\n]*\n)*?(?!```)[^\n]+)\n```/;
 
 export const MAX_ERROR_CHARS = 300;
 export const EARLIER_FAILED = "error: an earlier action failed; verify before finishing";

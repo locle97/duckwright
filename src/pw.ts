@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import { runProcess } from "./proc.ts";
+import { universalNewlines } from "./text.ts";
 import type { ProcResult, Runner } from "./proc.ts";
 
 export class PlaywrightError extends Error {
@@ -66,6 +67,6 @@ export class PlaywrightCLI {
   async snapshot(path: string): Promise<string> {
     const res = await this.run("snapshot", [`--filename=${path}`]);
     if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout);
-    return fs.readFileSync(path).toString("utf8");
+    return universalNewlines(fs.readFileSync(path).toString("utf8"));
   }
 }

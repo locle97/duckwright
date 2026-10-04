@@ -16,6 +16,7 @@ import { stepLine } from "./prompt.ts";
 import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import { makeRunDir } from "./rundir.ts";
+import { fixed4 } from "./text.ts";
 import { TaskFileError, loadTaskFile, taskPaths } from "./taskfile.ts";
 
 export interface PromptPaths {
@@ -202,8 +203,9 @@ async function runOne(
   try {
     result = await agent.run();
   } catch (e) {
+    // Ctrl-C reaches the child too, so its failure can arrive before the abort does.
+    if (e instanceof AbortedError || deps.signal.aborted) return fail("interrupted", 130);
     if (e instanceof PlaywrightError) return fail(`playwright error: ${e.message}`, 1);
-    if (e instanceof AbortedError) return fail("interrupted", 130);
     return fail(e instanceof Error ? `error: ${e.name}: ${e.message}` : `error: ${String(e)}`, 1);
   }
 
@@ -212,7 +214,7 @@ async function runOne(
   ));
   deps.stdout(`Result: ${result.success ? "success" : "failure"}`);
   deps.stdout(`Answer: ${result.answer}`);
-  deps.stdout(`Steps: ${result.steps}  Cost: $${result.costUsd.toFixed(4)}`);
+  deps.stdout(`Steps: ${result.steps}  Cost: $${fixed4(result.costUsd)}`);
   deps.stdout(`History: ${historyPath}`);
   if (args.export) {
     if (!result.success) {
@@ -252,12 +254,12 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
     const [code, history, cost] = await runOne(deps, args, p);
     total += cost;
     interrupted = code === 130;
-    rows.push([code === 0 ? "pass" : interrupted ? "stop" : "fail", p, `$${cost.toFixed(4)}`, history]);
+    rows.push([code === 0 ? "pass" : interrupted ? "stop" : "fail", p, `$${fixed4(cost)}`, history]);
   }
   const count = (s: string) => rows.filter((r) => r[0] === s).length;
   deps.stdout(
     `Batch: ${count("pass")} passed, ${count("fail")} failed, ${count("skip")} not run`
-    + `  Cost: $${total.toFixed(4)}`,
+    + `  Cost: $${fixed4(total)}`,
   );
   for (const row of rows) deps.stdout(row.join("  "));
   if (interrupted) return 130;

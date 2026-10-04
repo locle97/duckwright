@@ -95,7 +95,7 @@ test("long options cannot be abbreviated", () => {
 
 test("unknown option and extra positional", () => {
   assert.throws(() => parse("a", "b"), usage("unrecognized arguments: b"));
-  assert.throws(() => parse("--headed=1", "a"), usage("unrecognized arguments: --headed=1"));
+  assert.throws(() => parse("--nope=1", "a"), usage("unrecognized arguments: --nope=1"));
 });
 
 test("double dash makes the rest positional", () => {
@@ -127,4 +127,33 @@ test("export args", () => {
   assert.throws(() => parseExportArgs([]), usage("the following arguments are required: run"));
   assert.throws(() => parseExportArgs(["a", "b"]), usage("unrecognized arguments: b"));
   assert.throws(() => parseExportArgs(["a", "-o"]), usage("argument -o/--output: expected one argument"));
+});
+
+test("dash arguments with a space are values", () => {
+  assert.equal(parse("- go to example.com").task, "- go to example.com");
+  assert.equal(parse("--model", "-x y", "t").model, "-x y");
+  assert.deepEqual(parse("-f", "-my file.md").file, ["-my file.md"]);
+  assert.equal(args<ExportArgs>(parseExportArgs(["-my run dir"])).run, "-my run dir");
+});
+
+test("short options take an attached value", () => {
+  assert.deepEqual(parse("-fa.md").file, ["a.md"]);
+  assert.deepEqual(parse("-f=a.md").file, ["a.md"]);
+  assert.deepEqual(parse("-fa.md", "b.md").file, ["a.md"]);
+  assert.equal(parse("-fa.md", "b.md").task, "b.md");
+  assert.equal(args<ExportArgs>(parseExportArgs(["r", "-ofoo"])).output, "foo");
+  assert.equal(args<ExportArgs>(parseExportArgs(["r", "-o=foo"])).output, "foo");
+});
+
+test("flags reject an explicit value", () => {
+  assert.throws(() => parse("--export=yes", "x"), usage("argument --export/--no-export: ignored explicit argument 'yes'"));
+  assert.throws(() => parse("--no-headed=1", "x"), usage("argument --headed/--no-headed: ignored explicit argument '1'"));
+  assert.throws(() => parse("--allow-file-access=1", "x"), usage("argument --allow-file-access: ignored explicit argument '1'"));
+  assert.throws(() => parse("--snapshot-full=1", "x"), usage("argument --snapshot-full: ignored explicit argument '1'"));
+  assert.throws(() => parse("--help=x"), usage("argument -h/--help: ignored explicit argument 'x'"));
+});
+
+test("max-steps accepts Python int underscores", () => {
+  assert.equal(parse("--max-steps", "1_000", "x").maxSteps, 1000);
+  assert.throws(() => parse("--max-steps", "1__0", "x"), usage("argument --max-steps: invalid int value: '1__0'"));
 });

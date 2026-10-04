@@ -100,8 +100,41 @@ options:
                         spec path (default: <run>/${SPEC_NAME})
 `;
 
-// argparse treats "-5" and "-" as values, not options, when no option looks like a number.
-const isOption = (a: string) => a.startsWith("-") && a !== "-" && !/^-\d+$|^-\d*\.\d+$/.test(a);
+interface OptionSpec {
+  // Every option string, mapped to the name argparse uses in its messages.
+  names: Readonly<Record<string, string>>;
+  // Short options that may carry their value attached (`-fa.md`).
+  shortWithValue: readonly string[];
+}
+
+interface Opt {
+  name: string; // the option string as matched, or the whole argument if unknown
+  inline: string | null; // a value given with `=` or attached to a short option
+  known: boolean;
+}
+
+/**
+ * argparse's _parse_optional: null when `a` is a value rather than an option. "-", "-5",
+ * and an unknown "-..." containing a space are values; "--opt=v" and "-fv" carry one.
+ */
+function classify(a: string, spec: OptionSpec): Opt | null {
+  if (!a.startsWith("-")) return null;
+  if (Object.hasOwn(spec.names, a)) return { name: a, inline: null, known: true };
+  if (a.length === 1) return null;
+  const eq = a.indexOf("=");
+  if (eq !== -1 && Object.hasOwn(spec.names, a.slice(0, eq))) {
+    return { name: a.slice(0, eq), inline: a.slice(eq + 1), known: true };
+  }
+  if (!a.startsWith("--") && spec.shortWithValue.includes(a.slice(0, 2))) {
+    return { name: a.slice(0, 2), inline: a.slice(2), known: true };
+  }
+  if (/^-\d+$|^-\d*\.\d+$/.test(a)) return null;
+  if (a.includes(" ")) return null;
+  return { name: a, inline: null, known: false };
+}
+
+/** Whether `a` can be consumed as an option's value. */
+const isValue = (a: string | undefined, spec: OptionSpec) => a !== undefined && a !== "--" && classify(a, spec) === null;
 
 const SNAPSHOT_FLAGS: Readonly<Record<string, SnapshotMode>> = {
   "--snapshot-hybrid": "hybrid",
@@ -109,7 +142,25 @@ const SNAPSHOT_FLAGS: Readonly<Record<string, SnapshotMode>> = {
   "--snapshot-grep": "grep",
 };
 
-const VALUE_OPTIONS = ["--max-steps", "--model", "--skill", "--session", "--state"] as const;
+const RUN_SPEC: OptionSpec = {
+  names: {
+    "-h": "-h/--help", "--help": "-h/--help", "--version": "--version",
+    "-f": "-f/--file", "--file": "-f/--file",
+    "--max-steps": "--max-steps", "--model": "--model", "--skill": "--skill",
+    "--session": "--session", "--state": "--state",
+    "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
+    "--export": "--export/--no-export", "--no-export": "--export/--no-export",
+    "--allow-file-access": "--allow-file-access",
+    "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
+    "--snapshot-grep": "--snapshot-grep",
+  },
+  shortWithValue: ["-f"],
+};
+
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state"];
+
+// Python's int(): optional sign, digits with single underscores between them, spaces around.
+const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
 
 /** Built-in defaults < task-file `settings` < flags in `argv`. */
 export function parseRunArgs(argv: string[], defaultSkill: string, settings: TaskSettings = {}): Parsed<RunArgs> {
@@ -126,58 +177,64 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   let positional = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (positional || !isOption(a)) {
+    const opt = positional || a === "--" ? null : classify(a, RUN_SPEC);
+    if (a === "--" && !positional) {
+      positional = true;
+      continue;
+    }
+    if (opt === null) {
       if (args.task === null) args.task = a;
       else extras.push(a);
       continue;
     }
-    if (a === "--") {
-      positional = true;
+    if (!opt.known) {
+      extras.push(a);
       continue;
     }
-    if (a === "-h" || a === "--help") return { kind: "help", text: RUN_HELP };
-    if (a === "--version") return { kind: "version" };
-    const eq = a.indexOf("=");
-    const name = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
-    const inline = name !== a ? a.slice(eq + 1) : null;
+    const { name, inline } = opt;
+    const display = RUN_SPEC.names[name];
     if (name === "-f" || name === "--file") {
       const files = inline !== null ? [inline] : [];
-      while (inline === null && i + 1 < argv.length && !isOption(argv[i + 1])) files.push(argv[++i]);
+      while (inline === null && isValue(argv[i + 1], RUN_SPEC)) files.push(argv[++i]);
       if (!files.length) fail("argument -f/--file: expected at least one argument");
       args.file = [...(args.file ?? []), ...files];
       continue;
     }
-    if ((VALUE_OPTIONS as readonly string[]).includes(name)) {
+    if (VALUE_OPTIONS.includes(name)) {
       let v = inline;
       if (v === null) {
-        if (i + 1 >= argv.length || isOption(argv[i + 1])) fail(`argument ${name}: expected one argument`);
+        if (!isValue(argv[i + 1], RUN_SPEC)) fail(`argument ${display}: expected one argument`);
         v = argv[++i];
       }
       if (name === "--max-steps") {
-        if (!/^\s*[+-]?\d+\s*$/.test(v!)) fail(`argument --max-steps: invalid int value: '${v}'`);
-        args.maxSteps = Number.parseInt(v!.trim(), 10);
+        if (!PY_INT.test(v!)) fail(`argument --max-steps: invalid int value: '${v}'`);
+        args.maxSteps = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
       } else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
       else if (name === "--session") args.session = v!;
       else args.state = v!;
       continue;
     }
-    if (inline !== null) {
-      extras.push(a);
-      continue;
+    if (inline !== null) fail(`argument ${display}: ignored explicit argument '${inline}'`);
+    if (name === "-h" || name === "--help") return { kind: "help", text: RUN_HELP };
+    if (name === "--version") return { kind: "version" };
+    if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
+    else if (name === "--export" || name === "--no-export") args.export = name === "--export";
+    else if (name === "--allow-file-access") args.allowFileAccess = true;
+    else {
+      if (snapshotFlag !== null && snapshotFlag !== name) fail(`argument ${name}: not allowed with argument ${snapshotFlag}`);
+      snapshotFlag = name;
+      args.snapshot = SNAPSHOT_FLAGS[name];
     }
-    if (a === "--headed" || a === "--no-headed") args.headed = a === "--headed";
-    else if (a === "--export" || a === "--no-export") args.export = a === "--export";
-    else if (a === "--allow-file-access") args.allowFileAccess = true;
-    else if (Object.hasOwn(SNAPSHOT_FLAGS, a)) {
-      if (snapshotFlag !== null && snapshotFlag !== a) fail(`argument ${a}: not allowed with argument ${snapshotFlag}`);
-      snapshotFlag = a;
-      args.snapshot = SNAPSHOT_FLAGS[a];
-    } else extras.push(a);
   }
   if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);
   return { kind: "args", args };
 }
+
+const EXPORT_SPEC: OptionSpec = {
+  names: { "-h": "-h/--help", "--help": "-h/--help", "-o": "-o/--output", "--output": "-o/--output" },
+  shortWithValue: ["-o"],
+};
 
 export function parseExportArgs(argv: string[]): Parsed<ExportArgs> {
   const fail = (msg: string): never => {
@@ -189,16 +246,25 @@ export function parseExportArgs(argv: string[]): Parsed<ExportArgs> {
   let positional = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (positional || !isOption(a)) {
+    if (a === "--" && !positional) {
+      positional = true;
+      continue;
+    }
+    const opt = positional ? null : classify(a, EXPORT_SPEC);
+    if (opt === null) {
       if (run === null) run = a;
       else extras.push(a);
-    } else if (a === "--") positional = true;
-    else if (a === "-h" || a === "--help") return { kind: "help", text: EXPORT_HELP };
-    else if (a === "-o" || a === "--output") {
-      if (i + 1 >= argv.length || isOption(argv[i + 1])) fail(`argument -o/--output: expected one argument`);
-      output = argv[++i];
-    } else if (a.startsWith("--output=")) output = a.slice("--output=".length);
-    else extras.push(a);
+    } else if (!opt.known) {
+      extras.push(a);
+    } else if (opt.name === "-o" || opt.name === "--output") {
+      if (opt.inline !== null) output = opt.inline;
+      else if (isValue(argv[i + 1], EXPORT_SPEC)) output = argv[++i];
+      else fail("argument -o/--output: expected one argument");
+    } else if (opt.inline !== null) {
+      fail(`argument -h/--help: ignored explicit argument '${opt.inline}'`);
+    } else {
+      return { kind: "help", text: EXPORT_HELP };
+    }
   }
   if (run === null) fail("the following arguments are required: run");
   if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);

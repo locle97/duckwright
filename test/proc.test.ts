@@ -70,3 +70,11 @@ test("runProcess gives no stdin when stdin is null", async () => {
   );
   assert.equal(r.stdout, "0");
 });
+
+test("run_process_uses_universal_newlines", async () => {
+  const r = await runProcess(
+    ["node", "-e", "process.stdout.write('a\\r\\nb\\rc'); process.stderr.write('x\\r\\n')"], null, 10,
+  );
+  assert.equal(r.stdout, "a\nb\nc");
+  assert.equal(r.stderr, "x\n");
+});
