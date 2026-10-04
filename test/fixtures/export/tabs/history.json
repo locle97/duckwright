@@ -1,0 +1,82 @@
+{
+  "task": "tabs",
+  "task_file": null,
+  "success": true,
+  "answer": "",
+  "steps": 4,
+  "cost_usd": 0.0123,
+  "history": [
+    {
+      "step": 1,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "goto",
+          "args": [
+            "u"
+          ],
+          "code": "await page.goto('https://example.com/form');"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 2,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "tab-new",
+          "args": [
+            "https://x\nawait evil();"
+          ],
+          "code": null
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    },
+    {
+      "step": 3,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "tab-select",
+          "args": [
+            "1"
+          ],
+          "code": null
+        }
+      ],
+      "results": [
+        "error: no tab"
+      ]
+    },
+    {
+      "step": 4,
+      "evaluation_previous_goal": "",
+      "memory": "",
+      "next_goal": "",
+      "actions": [
+        {
+          "cmd": "click",
+          "args": [
+            "e2"
+          ],
+          "code": "await page.getByRole('button', { name: 'Submit' }).click();"
+        }
+      ],
+      "results": [
+        "ok"
+      ]
+    }
+  ]
+}

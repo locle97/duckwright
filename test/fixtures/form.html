@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Greeting form</title></head>
+<body>
+  <label for="name">Name</label>
+  <input id="name" type="text">
+  <button id="submit" type="button">Submit</button>
+  <p id="greeting"></p>
+  <script>
+    document.getElementById("submit").addEventListener("click", function () {
+      var n = document.getElementById("name").value;
+      document.getElementById("greeting").textContent = "Hello, " + n + "!";
+    });
+  </script>
+</body>
+</html>
