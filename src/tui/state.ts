@@ -6,10 +6,11 @@ import { rank } from "./candidates.ts";
 import type { Candidate, CandidateIndex } from "./candidates.ts";
 import { EMPTY_COMPOSE, mentionAt } from "./compose.ts";
 import type { ComposeState } from "./compose.ts";
+import { visibleIndexes } from "./filter.ts";
 import type { FormState } from "./form.ts";
 
 /** `quitting`: a confirmed quit is stopping the runs; the panes stay and only Ctrl-C acts. */
-export type Mode = "list" | "detail" | "compose" | "form" | "help" | "confirm" | "quitting";
+export type Mode = "list" | "detail" | "compose" | "form" | "help" | "confirm" | "filter" | "quitting";
 
 export interface StepView {
   step: number;
@@ -57,6 +58,10 @@ export interface ViewState {
   selected: number;
   focus: "list" | "detail";
   mode: Mode;
+  /** The kept sidebar filter query; "" = none. */
+  filter: string;
+  /** The query being edited (non-null only in filter mode). */
+  filterDraft: string | null;
   compose: ComposeState;
   /** The @ completion list, while open: the folder walk it ranks, and the highlighted row. */
   completion: { index: CandidateIndex; highlight: number } | null;
@@ -77,7 +82,8 @@ export type UiAction =
   | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
   | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" } | { type: "quitting" }
   | { type: "completion"; value: ViewState["completion"] } | { type: "completionMove"; delta: number }
-  | { type: "addFailed"; errors: string[]; cursor: number } | { type: "selectTask"; id: TaskId };
+  | { type: "addFailed"; errors: string[]; cursor: number } | { type: "selectTask"; id: TaskId }
+  | { type: "openFilter" } | { type: "filterEdit"; query: string } | { type: "filterKeep" } | { type: "filterClear" };
 
 const TOAST_MS = 4000;
 
@@ -114,7 +120,7 @@ function replayPast(s: ViewState, task: TaskSnapshot): ViewState {
 
 export function initialState(now: number, tasks: TaskSnapshot[] = [], notices: string[] = []): ViewState {
   let s: ViewState = {
-    now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list",
+    now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list", filter: "", filterDraft: null,
     compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, confirm: null, toasts: [], ctrlC: 0,
   };
   for (const t of tasks) s = replayPast(s, t);
@@ -122,8 +128,24 @@ export function initialState(now: number, tasks: TaskSnapshot[] = [], notices: s
   return s;
 }
 
+/** The query the sidebar filters by right now: the draft while editing, else the kept one. */
+export function activeQuery(s: ViewState): string {
+  return s.filterDraft ?? s.filter;
+}
+
+/** Indexes into `tasks` that pass the active filter. */
+export function visibleTasks(s: ViewState): number[] {
+  return visibleIndexes(s.tasks, activeQuery(s));
+}
+
+/** A hidden selection moves to the first visible task; unchanged when none is visible. */
+function snap(s: ViewState): ViewState {
+  const vis = visibleTasks(s);
+  return vis.length === 0 || vis.includes(s.selected) ? s : { ...s, selected: vis[0]! };
+}
+
 export function selectedTask(s: ViewState): TaskSnapshot | null {
-  return s.tasks[s.selected] ?? null;
+  return visibleTasks(s).includes(s.selected) ? (s.tasks[s.selected] ?? null) : null;
 }
 
 /** The completion rows for the mention under the cursor, best first; empty while the list is closed. */
@@ -262,7 +284,7 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
       return { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
     case "task:removed": {
       const tasks = s.tasks.filter((t) => t.id !== e.taskId);
-      return { ...s, tasks, selected: clamp(s.selected, 0, Math.max(0, tasks.length - 1)) };
+      return snap({ ...s, tasks, selected: clamp(s.selected, 0, Math.max(0, tasks.length - 1)) });
     }
     case "toast":
       return addToast(s, e.level, e.message);
@@ -308,10 +330,25 @@ function apply(s: ViewState, a: UiAction): ViewState {
       return { ...s, now: a.now, toasts: s.toasts.filter((t) => t.until > a.now) };
     case "manager":
       return reduceManager(s, a.event);
-    case "select":
-      return { ...s, selected: clamp(s.selected + a.delta, 0, Math.max(0, s.tasks.length - 1)) };
-    case "selectEdge":
-      return { ...s, selected: a.edge === "first" ? 0 : Math.max(0, s.tasks.length - 1) };
+    case "select": {
+      const vis = visibleTasks(s);
+      if (vis.length === 0) return s;
+      const pos = vis.indexOf(s.selected);
+      return { ...s, selected: vis[clamp((pos === -1 ? 0 : pos) + a.delta, 0, vis.length - 1)]! };
+    }
+    case "selectEdge": {
+      const vis = visibleTasks(s);
+      if (vis.length === 0) return s;
+      return { ...s, selected: a.edge === "first" ? vis[0]! : vis[vis.length - 1]! };
+    }
+    case "openFilter":
+      return { ...s, focus: "list", mode: "filter", filterDraft: s.filter };
+    case "filterEdit":
+      return snap({ ...s, filterDraft: a.query });
+    case "filterKeep":
+      return snap({ ...s, filter: s.filterDraft ?? s.filter, filterDraft: null, mode: "list" });
+    case "filterClear":
+      return snap({ ...s, filter: "", filterDraft: null, mode: "list" });
     case "focus":
       return a.target === "compose" ? { ...s, mode: "compose" } : { ...s, focus: a.target, mode: a.target };
     case "toggleFocus": {
@@ -337,7 +374,9 @@ function apply(s: ViewState, a: UiAction): ViewState {
       return { ...s, addErrors: a.errors, compose: { ...s.compose, cursor: a.cursor }, completion: null };
     case "selectTask": {
       const i = s.tasks.findIndex((t) => t.id === a.id);
-      return i === -1 ? s : { ...s, selected: i };
+      if (i === -1) return s;
+      const hidden = !visibleTasks(s).includes(i);
+      return { ...s, selected: i, ...(hidden ? { filter: "", filterDraft: null } : {}) };
     }
     case "form":
       return a.next ? { ...s, form: a.next, mode: "form" } : { ...s, form: null, mode: baseMode(s) };

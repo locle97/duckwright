@@ -464,3 +464,63 @@ test("state_notices_become_toasts", () => {
   assert.equal(s.toasts[0]?.level, "info");
   assert.equal(s.toasts[0]?.message, "skipped 2 unreadable run folders in runs/");
 });
+
+const many = (n: number): ViewState => initialState(0, Array.from({ length: n }, (_, i) => task(i + 1)));
+const tn = (s: ViewState): string | undefined => selectedTask(s)?.text;
+
+test("state_filter_open_edit_keep_clear", async () => {
+  const { visibleTasks } = await import("../../src/tui/state.ts");
+  let s = initialState(0, [task(1), task(2)]);
+  assert.equal(s.filter, "");
+  assert.equal(s.filterDraft, null);
+  s = reduce(s, { type: "openFilter" });
+  assert.equal(s.mode, "filter");
+  assert.equal(s.focus, "list");
+  assert.equal(s.filterDraft, "");
+  s = reduce(s, { type: "filterEdit", query: "2" });
+  assert.equal(s.filterDraft, "2");
+  assert.deepEqual(visibleTasks(s), [1]);
+  s = reduce(s, { type: "filterKeep" });
+  assert.equal(s.filter, "2");
+  assert.equal(s.filterDraft, null);
+  assert.equal(s.mode, "list");
+  s = reduce(reduce(s, { type: "openFilter" }), { type: "filterEdit", query: "" });
+  assert.equal(s.filterDraft, "");
+  s = reduce(s, { type: "filterKeep" });
+  assert.equal(s.filter, "");
+  s = reduce(reduce(s, { type: "openFilter" }), { type: "filterEdit", query: "1" });
+  s = reduce(s, { type: "filterClear" });
+  assert.equal(s.filter, "");
+  assert.equal(s.filterDraft, null);
+  assert.equal(s.mode, "list");
+});
+
+test("state_filter_selection", () => {
+  let s = many(12);
+  s = reduce(s, { type: "filterEdit", query: "task 1" });
+  assert.equal(s.selected, 0);
+  s = reduce(s, { type: "filterEdit", query: "2" });
+  assert.equal(tn(s), "task 2");
+  s = reduce(s, { type: "select", delta: 1 });
+  assert.equal(tn(s), "task 12");
+  s = reduce(s, { type: "select", delta: 1 });
+  assert.equal(tn(s), "task 12");
+  s = reduce(s, { type: "selectEdge", edge: "first" });
+  assert.equal(tn(s), "task 2");
+  s = reduce(s, { type: "selectEdge", edge: "last" });
+  assert.equal(tn(s), "task 12");
+  s = reduce(s, { type: "filterEdit", query: "zzz" });
+  assert.equal(selectedTask(s), null);
+  assert.equal(selectedRun(s), null);
+});
+
+test("state_select_task_clears_hidden_filter", () => {
+  let s = many(3);
+  s = reduce(reduce(s, { type: "filterEdit", query: "1" }), { type: "filterKeep" });
+  assert.equal(s.filter, "1");
+  s = reduce(s, { type: "selectTask", id: 1 });
+  assert.equal(s.filter, "1");
+  s = reduce(s, { type: "selectTask", id: 2 });
+  assert.equal(s.filter, "");
+  assert.equal(tn(s), "task 2");
+});

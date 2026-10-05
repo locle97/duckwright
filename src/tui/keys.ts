@@ -195,6 +195,8 @@ export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[]
       return named("escape")(k) || char("?")(k) ? [ui({ type: "help", open: false })] : [];
     case "confirm":
       return confirmCommands(k, s);
+    case "filter":
+      return [];
     case "quitting":
       return [];
     case "list":
@@ -238,6 +240,8 @@ export function hints(s: ViewState): Hint[] {
       return [{ key: "esc", label: "close" }];
     case "confirm":
       return [{ key: "y", label: "yes" }, { key: "n", label: "no" }];
+    case "filter":
+      return [];
     case "quitting":
       return [];
     case "list":
