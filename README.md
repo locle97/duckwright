@@ -364,6 +364,13 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [ ] **Two-factor verification**: get past 2FA prompts during a run. TOTP codes are generated from a secret supplied by the user (and never recorded in `history.json`). SMS and email codes, and passkeys, pause the run and ask the user for the code or approval.
 
+**Network and API testing**
+
+- [ ] **Network capture**: record the requests the page makes during each step (method, URL, status, and request and response bodies, via `playwright-cli requests`) into `history.json`, with secrets and auth headers redacted. The agent sees a short summary of the API calls its last actions triggered.
+- [ ] **API assertions**: an `expect-request` action, so the agent can check that a step called the expected endpoint with the expected status or response field. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
+- [ ] **API test export**: `duckwright export --api runs/<id>` turns the captured calls into a `@playwright/test` spec that uses the `request` fixture, so the backend flow can be tested without the UI.
+- [ ] **API steps in the loop**: a `request` action that lets the agent call an endpoint it has already seen on the site directly (same origin, current session cookies), for example to set up test data faster than through the UI.
+
 **Experience**
 
 - [x] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
