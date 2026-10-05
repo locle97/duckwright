@@ -1,7 +1,7 @@
 // Pure view-state reducer: turns manager events and UI actions into the screen state the Ink
 // components render. No ink/react here; labels are raw (sanitising happens at render time).
 import type { ControlState, Phase, RunEvent, RunOutcome } from "../events.ts";
-import type { ManagerEvent, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
+import type { Globals, ManagerEvent, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
 import { rank } from "./candidates.ts";
 import type { Candidate, CandidateIndex } from "./candidates.ts";
 import { EMPTY_COMPOSE, mentionAt } from "./compose.ts";
@@ -69,6 +69,8 @@ export interface ViewState {
   /** Why the last add-box submission was refused; cleared when the text changes. */
   addErrors: string[];
   form: FormState | null;
+  /** The global options; null until the manager reports them. */
+  globals: Globals | null;
   confirm: { kind: "quit"; count: number } | { kind: "remove"; taskId: number } | null;
   toasts: Toast[];
   ctrlC: number;
@@ -119,14 +121,21 @@ function replayPast(s: ViewState, task: TaskSnapshot): ViewState {
   return { ...next, runs: { ...next.runs, [past.runId]: done } };
 }
 
-export function initialState(now: number, tasks: TaskSnapshot[] = [], notices: string[] = []): ViewState {
+export function initialState(
+  now: number, tasks: TaskSnapshot[] = [], notices: string[] = [], globals: Globals | null = null,
+): ViewState {
   let s: ViewState = {
     now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list", filter: "", filterDraft: null,
-    compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, confirm: null, toasts: [], ctrlC: 0,
+    compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, globals, confirm: null, toasts: [], ctrlC: 0,
   };
   for (const t of tasks) s = replayPast(s, t);
   for (const n of notices) s = addToast(s, "info", n);
   return { ...s, selected: visibleTasks(s)[0] ?? 0 };
+}
+
+/** Whether the open form edits the global options (rather than one task's). */
+export function editingGlobals(s: ViewState): boolean {
+  return s.mode === "form" && s.form !== null && s.form.taskId === null;
 }
 
 /** The query the sidebar filters by right now: the draft while editing, else the kept one. */
@@ -305,7 +314,7 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
     case "toast":
       return addToast(s, e.level, e.message);
     case "globals:updated":
-      return s;
+      return { ...s, globals: e.globals };
     case "run": {
       if (e.event.type === "run:start") {
         const view: RunView = {

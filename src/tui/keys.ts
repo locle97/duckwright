@@ -16,6 +16,7 @@ export type Command =
   | { kind: "openCompletion" }
   | { kind: "addSubmission"; mentions: Mention[]; typed: string | null }
   | { kind: "saveOverrides"; id: TaskId; overrides: Overrides }
+  | { kind: "saveGlobals"; overrides: Overrides }
   | { kind: "quit" }
   | { kind: "stopAllAndQuit" } | { kind: "forceExit" };
 
@@ -61,6 +62,11 @@ const SHARED: Binding[] = [
     match: char("o"), when: (c) => hasTask(c) && !isLive(c.t),
     run: (c) => (c.t ? [ui({ type: "form", next: openForm(c.t.id, c.t.effective, c.t.overrides) })] : []),
     hint: { key: "o", label: "options" }, footer: true,
+  },
+  {
+    match: char("O"), when: (c) => c.s.globals !== null,
+    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides) })] : []),
+    hint: { key: "O", label: "global options" }, footer: false,
   },
   {
     match: char("d"), when: (c) => hasTask(c) && !isLive(c.t),
@@ -174,7 +180,11 @@ function formCommands(k: KeyPress, s: ViewState): Command[] {
   if (k.name === "escape") return [ui({ type: "form", next: null })];
   if (k.name === "return") {
     const r = formResult(f);
-    return r.ok ? [{ kind: "saveOverrides", id: f.taskId, overrides: r.overrides }, ui({ type: "form", next: null })] : [];
+    if (!r.ok) return [];
+    const save: Command = f.taskId === null
+      ? { kind: "saveGlobals", overrides: r.overrides }
+      : { kind: "saveOverrides", id: f.taskId, overrides: r.overrides };
+    return [save, ui({ type: "form", next: null })];
   }
   const next = formKey(f, k);
   return next === f ? [] : [ui({ type: "form", next })];

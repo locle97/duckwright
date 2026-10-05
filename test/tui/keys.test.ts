@@ -8,7 +8,7 @@ import { openForm, formKey } from "../../src/tui/form.ts";
 import { helpBindings, hintPrefix, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
 import { key } from "../../src/tui/keypress.ts";
-import { initialState, reduce } from "../../src/tui/state.ts";
+import { editingGlobals, initialState, reduce } from "../../src/tui/state.ts";
 import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle"): TaskSnapshot {
@@ -445,4 +445,22 @@ test("keys_detail_tab_to_list", () => {
   assert.deepEqual(press(detailOf("running"), "tab"), [ui({ type: "focus", target: "list" })]);
   const noRun = reduce(mk("idle"), { type: "focus", target: "detail" });
   assert.deepEqual(press(noRun, "tab"), [ui({ type: "focus", target: "list" })]);
+});
+
+test("keys_global_options", () => {
+  const globals = { base: task(1).effective, overrides: { model: "opus" } };
+  for (const s of [initialState(0, [task(1)], [], globals), initialState(0, [], [], globals), detailOf("running")]) {
+    const g = s.globals === null ? reduce(s, { type: "manager", event: { type: "globals:updated", globals } }) : s;
+    const cmds = press(g, "O");
+    assert.deepEqual(cmds, [ui({ type: "form", next: openForm(null, globals.base, globals.overrides) })]);
+    const open = play(g, cmds);
+    assert.equal(editingGlobals(open), true);
+    assert.deepEqual(press(open, "return"), [
+      { kind: "saveGlobals", overrides: { model: "opus" } }, ui({ type: "form", next: null }),
+    ]);
+    assert.equal(editingGlobals(play(open, press(open, "escape"))), false);
+  }
+  assert.deepEqual(press(mk("idle"), "O"), [], "no globals yet: nothing to edit");
+  assert.ok(helpBindings(mk("idle")).some((h) => h.key === "O" && h.label === "global options"));
+  assert.ok(!hints(initialState(0, [task(1)], [], globals)).some((h) => h.key === "O"), "help only, not the footer");
 });

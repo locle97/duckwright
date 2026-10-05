@@ -6,7 +6,7 @@ import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import type { ManagerEvent, TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
 import type { CandidateIndex } from "../../src/tui/candidates.ts";
 import { EMPTY_COMPOSE } from "../../src/tui/compose.ts";
-import { completionItems, headerCounts, initialState, reduce, selectedRun, selectedTask, visibleTasks } from "../../src/tui/state.ts";
+import { completionItems, editingGlobals, headerCounts, initialState, reduce, selectedRun, selectedTask, visibleTasks } from "../../src/tui/state.ts";
 import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle", runId: string | null = null): TaskSnapshot {
@@ -601,4 +601,18 @@ test("state_focus_list_keeps_compose_text", () => {
   assert.equal(s.mode, "list");
   assert.equal(s.focus, "list");
   assert.equal(s.compose.text, "hello");
+});
+
+test("state_globals", () => {
+  const base = task(1).effective;
+  assert.equal(initialState(0).globals, null);
+  let s = initialState(0, [task(1)], [], { base, overrides: {} });
+  assert.deepEqual(s.globals, { base, overrides: {} });
+  assert.equal(editingGlobals(s), false);
+  s = reduce(s, { type: "manager", event: { type: "globals:updated", globals: { base, overrides: { maxSteps: 3 } } } });
+  assert.deepEqual(s.globals?.overrides, { maxSteps: 3 });
+  s = reduce(s, { type: "form", next: { taskId: null, fields: [], focus: 0 } });
+  assert.equal(editingGlobals(s), true);
+  s = reduce(s, { type: "form", next: { taskId: 1, fields: [], focus: 0 } });
+  assert.equal(editingGlobals(s), false, "a task's form is not the globals");
 });

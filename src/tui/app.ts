@@ -164,6 +164,9 @@ function Workspace(p: AppProps): ReactElement {
       case "saveOverrides":
         manager.setOverrides(c.id, c.overrides);
         return;
+      case "saveGlobals":
+        manager.setGlobals(c.overrides);
+        return;
       case "quit":
         quit(false);
         return;

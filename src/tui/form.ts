@@ -8,7 +8,8 @@ export type FieldKey = "model" | "maxSteps" | "headed" | "export" | "snapshot";
 export interface Field {
   key: FieldKey; label: string; raw: string; overridden: boolean; error: string | null; effective: string;
 }
-export interface FormState { taskId: TaskId; fields: Field[]; focus: number }
+/** `taskId` null: the global options rather than one task's. */
+export interface FormState { taskId: TaskId | null; fields: Field[]; focus: number }
 
 const FRONT_MATTER_KEY = {
   model: "model", maxSteps: "max-steps", headed: "headed", export: "export", snapshot: "snapshot",
@@ -29,7 +30,7 @@ function validate(key: FieldKey, raw: string): string | null {
   }
 }
 
-export function openForm(taskId: TaskId, effective: Effective, overrides: Overrides): FormState {
+export function openForm(taskId: TaskId | null, effective: Effective, overrides: Overrides): FormState {
   const fields = ORDER.map((k): Field => {
     const eff = String(effective[k]);
     const overridden = overrides[k] !== undefined;
