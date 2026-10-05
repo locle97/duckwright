@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { Centered, Dialog } from "./dialog.ts";
 import { sanitize } from "./sanitize.ts";
 import type { ViewState } from "./state.ts";
-import { ROLE } from "./theme.ts";
+import { useTheme } from "./themeContext.ts";
 
 export function question(s: ViewState): string {
   const c = s.confirm;
@@ -17,11 +17,12 @@ export function question(s: ViewState): string {
 }
 
 export function Confirm({ s, width, height }: { s: ViewState; width: number; height: number }): ReactElement {
+  const { role } = useTheme();
   const text = question(s);
   const rows = [
     h(Text, { bold: true, wrap: "truncate-end" }, text),
-    h(Text, { color: ROLE.muted, wrap: "truncate-end" }, "y yes · n no"),
+    h(Text, { color: role.muted, wrap: "truncate-end" }, "y yes · n no"),
   ];
   const dialogWidth = Math.min(width, Math.max(20, [...text].length + 4));
-  return h(Centered, { width, height, child: h(Dialog, { width: dialogWidth, borderColor: ROLE.accent, rows }) });
+  return h(Centered, { width, height, child: h(Dialog, { width: dialogWidth, borderColor: role.accent, rows }) });
 }

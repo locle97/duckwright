@@ -7,7 +7,8 @@ import type { TaskState } from "../runs/manager.ts";
 import { fixed4 } from "../text.ts";
 import { headerCounts } from "./state.ts";
 import type { ViewState } from "./state.ts";
-import { ROLE } from "./theme.ts";
+import { paneBorder } from "./theme.ts";
+import { useTheme } from "./themeContext.ts";
 
 const ORDER: readonly TaskState[] = ["running", "paused", "stopping", "passed", "failed", "stopped", "idle"];
 
@@ -26,7 +27,8 @@ export function headerSummary(s: ViewState): string {
 }
 
 export function Header({ s, width }: { s: ViewState; width: number }): ReactElement {
-  return h(Box, { borderStyle: "round", borderColor: ROLE.border, paddingX: 1, width, flexShrink: 0 },
+  const theme = useTheme();
+  return h(Box, { ...paneBorder(theme, false), paddingX: 1, width, flexShrink: 0 },
     h(Box, { flexShrink: 0, marginRight: 2 }, h(Text, { bold: true, wrap: "truncate-end" }, "🦆 duckwright")),
     h(Box, { flexGrow: 1, flexShrink: 1, justifyContent: "flex-end" }, h(Text, { wrap: "truncate-end" }, headerSummary(s))));
 }

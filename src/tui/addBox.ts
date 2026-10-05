@@ -9,7 +9,8 @@ import type { ReactElement } from "react";
 import { lines, spans } from "./compose.ts";
 import type { ComposeState, SpanKind } from "./compose.ts";
 import { sanitize } from "./sanitize.ts";
-import { ROLE } from "./theme.ts";
+import { DEFAULT_THEME, paneBorder } from "./theme.ts";
+import type { Theme } from "./theme.ts";
 
 export const MAX_LINES = 6;
 const MAX_ERRORS = 3;
@@ -26,7 +27,8 @@ export function addBoxHeight(c: ComposeState, errors: string[] = []): number {
   return Math.min(MAX_LINES, lines(c).lines.length) + errorRows(errors).length + 2;
 }
 
-const COLOR: Record<SpanKind, string | undefined> = { text: undefined, mention: ROLE.accent, missing: ROLE.error };
+const colorOf = (theme: Theme): Record<SpanKind, string | undefined> => (
+  { text: undefined, mention: theme.role.accent, missing: theme.role.error });
 
 interface Piece { text: string; kind: SpanKind }
 
@@ -43,7 +45,8 @@ function linePieces(all: { start: number; text: string; kind: SpanKind }[], offs
 }
 
 /** Pieces of `[from, to)` in line coordinates, as coloured Text. */
-function draw(pieces: Piece[], from: number, to: number, dim: boolean, key: string): ReactElement[] {
+function draw(pieces: Piece[], from: number, to: number, dim: boolean, key: string, theme: Theme): ReactElement[] {
+  const COLOR = colorOf(theme);
   const out: ReactElement[] = [];
   let at = 0;
   pieces.forEach((p, i) => {
@@ -61,9 +64,11 @@ export interface AddBoxProps {
   width: number;
   exists(path: string): boolean;
   errors: string[];
+  /** Default: the dark 16-colour theme. A plain function, so it takes the theme as a prop. */
+  theme?: Theme;
 }
 
-export function AddBox({ compose, focused, width, exists, errors }: AddBoxProps): ReactElement {
+export function AddBox({ compose, focused, width, exists, errors, theme = DEFAULT_THEME }: AddBoxProps): ReactElement {
   const { lines: all, row, col } = lines(compose);
   const first = Math.min(Math.max(0, row - MAX_LINES + 1), Math.max(0, all.length - MAX_LINES));
   const marked = spans(compose.text, exists);
@@ -81,18 +86,18 @@ export function AddBox({ compose, focused, width, exists, errors }: AddBoxProps)
     }
     const pieces = linePieces(marked, offsets[n] ?? 0, line);
     if (!focused || n !== row) {
-      return h(Text, { key: i, wrap: "truncate-end", dimColor: !focused }, prompt, ...draw(pieces, 0, line.length, !focused, "p"));
+      return h(Text, { key: i, wrap: "truncate-end", dimColor: !focused }, prompt, ...draw(pieces, 0, line.length, !focused, "p", theme));
     }
     const from = Math.max(0, col - room + 1);
     const code = line.codePointAt(col);
     const under = code === undefined ? "" : String.fromCodePoint(code);
-    return h(Text, { key: i, wrap: "truncate-end" }, prompt, ...draw(pieces, from, col, false, "a"),
+    return h(Text, { key: i, wrap: "truncate-end" }, prompt, ...draw(pieces, from, col, false, "a", theme),
       h(Text, { key: "cursor", inverse: true }, sanitize(under) || " "),
-      ...draw(pieces, col + under.length, line.length, false, "b"));
+      ...draw(pieces, col + under.length, line.length, false, "b", theme));
   });
-  const problems = errorRows(errors).map((e, i) => h(Text, { key: `e${i}`, color: ROLE.error, wrap: "truncate-end" }, sanitize(e)));
+  const problems = errorRows(errors).map((e, i) => h(Text, { key: `e${i}`, color: theme.role.error, wrap: "truncate-end" }, sanitize(e)));
   return h(Box, {
     flexDirection: "column", width, flexShrink: 0, paddingX: 1,
-    borderStyle: "round", borderColor: focused ? ROLE.accent : ROLE.border,
+    ...paneBorder(theme, focused),
   }, ...shown, ...problems);
 }
