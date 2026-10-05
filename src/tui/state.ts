@@ -41,6 +41,8 @@ export interface RunView {
   selected: number;
   expanded: number[];
   follow: boolean;
+  /** Replayed from a past run folder rather than observed live. */
+  past?: boolean;
 }
 
 export interface Toast { id: number; level: "info" | "error"; message: string; until: number }
@@ -79,11 +81,45 @@ export type UiAction =
 
 const TOAST_MS = 4000;
 
-export function initialState(now: number, tasks: TaskSnapshot[] = []): ViewState {
-  return {
+/** Folds a past task's recorded events into a read-only run view; a malformed event keeps just the outcome. */
+function replayPast(s: ViewState, task: TaskSnapshot): ViewState {
+  const past = task.past;
+  if (!past) return s;
+  let next: ViewState | null = null;
+  try {
+    let cur = s;
+    for (const event of past.events) {
+      cur = reduceManager(cur, { type: "run", taskId: task.id, runId: past.runId, event });
+    }
+    next = cur;
+  } catch {
+    next = null;
+  }
+  let view = next?.runs[past.runId];
+  if (!next || !view) {
+    let outcome: RunOutcome | null = null;
+    for (const e of past.events) if (e.type === "run:end") outcome = e.outcome;
+    view = {
+      runId: past.runId, maxSteps: 0, startedAt: 0, steps: [], control: "running", pausedSince: null, pausedMs: 0,
+      cost: 0, brainFailures: 0, outcome, selected: 0, expanded: [], follow: false,
+    };
+    next = s;
+  }
+  const done: RunView = {
+    ...view, past: true, follow: false, selected: Math.max(0, view.steps.length - 1), expanded: [],
+    cost: view.outcome?.costUsd ?? view.cost,
+  };
+  return { ...next, runs: { ...next.runs, [past.runId]: done } };
+}
+
+export function initialState(now: number, tasks: TaskSnapshot[] = [], notices: string[] = []): ViewState {
+  let s: ViewState = {
     now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list",
     compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, confirm: null, toasts: [], ctrlC: 0,
   };
+  for (const t of tasks) s = replayPast(s, t);
+  for (const n of notices) s = addToast(s, "info", n);
+  return s;
 }
 
 export function selectedTask(s: ViewState): TaskSnapshot | null {
@@ -108,9 +144,12 @@ export function liveCount(s: ViewState): number {
 
 export function headerCounts(s: ViewState): { counts: Partial<Record<TaskState, number>>; cost: number; elapsedMs: number } {
   const counts: Partial<Record<TaskState, number>> = {};
-  for (const t of s.tasks) counts[t.state] = (counts[t.state] ?? 0) + 1;
+  for (const t of s.tasks) {
+    if (t.past !== undefined && t.runCount === 0) continue;
+    counts[t.state] = (counts[t.state] ?? 0) + 1;
+  }
   let cost = 0;
-  for (const r of Object.values(s.runs)) cost += r.cost;
+  for (const r of Object.values(s.runs)) if (!r.past) cost += r.cost;
   return { counts, cost, elapsedMs: s.now - s.openedAt };
 }
 

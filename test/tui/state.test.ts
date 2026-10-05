@@ -406,3 +406,61 @@ test("state_escape_from_compose_closes_completion", () => {
   assert.equal(s.completion, null);
   assert.equal(s.mode, "list");
 });
+
+function pastTask(id: number, runId: string, events: RunEvent[], state: TaskState = "passed", runCount = 0): TaskSnapshot {
+  return { ...task(id, state, runId), runCount, past: { runId, events } };
+}
+const PAST_OUTCOME: RunOutcome = { ...OUTCOME, steps: 2, costUsd: 0.25 };
+const runEnd = (outcome: RunOutcome): RunEvent => ({ type: "run:end", at: 0, outcome });
+
+test("state_replays_past_runs", () => {
+  const d1 = dec("g1", [["click", "1"]]);
+  const d2 = dec("g2", [["done"]]);
+  const events: RunEvent[] = [
+    { ...start(0), maxSteps: 5 } as RunEvent,
+    stepStart(1), decision(1, d1), aResult(1, 0, "ok"), stepEnd(1, d1, ["ok"]),
+    stepStart(2), decision(2, d2), aResult(2, 0, "done"), stepEnd(2, d2, ["done"]),
+    runEnd(PAST_OUTCOME),
+  ];
+  const s = initialState(0, [pastTask(1, "20261001-100000-a", events)]);
+  const v = s.runs["20261001-100000-a"];
+  assert.equal(v?.steps.length, 2);
+  assert.equal(v?.past, true);
+  assert.equal(v?.follow, false);
+  assert.equal(v?.selected, 1);
+  assert.deepEqual(v?.expanded, []);
+  assert.equal(v?.cost, 0.25);
+  assert.deepEqual(v?.outcome, PAST_OUTCOME);
+  assert.equal(selectedRun(s), v);
+});
+
+test("state_replay_crash_keeps_outcome", () => {
+  const events: RunEvent[] = [
+    start(0), stepStart(1), decision(1, null as never), runEnd(PAST_OUTCOME),
+  ];
+  const v = initialState(0, [pastTask(1, "rp", events)]).runs["rp"];
+  assert.deepEqual(v?.steps, []);
+  assert.deepEqual(v?.outcome, PAST_OUTCOME);
+  assert.equal(v?.past, true);
+  assert.equal(v?.cost, 0.25);
+});
+
+test("state_header_skips_past", () => {
+  const events: RunEvent[] = [start(0), runEnd(PAST_OUTCOME)];
+  const past = pastTask(1, "rp", events);
+  let s = initialState(0, [past]);
+  s = play(s, mgr({ type: "task:added", task: task(2, "running", "r2") }), run(start(0), "r2", 2), run(stepStart(1), "r2", 2),
+    run(decision(1, dec("g", [["click", "1"]]), 0.1), "r2", 2));
+  const h = headerCounts(s);
+  assert.deepEqual(h.counts, { running: 1 });
+  assert.equal(h.cost, 0.1);
+  const rerun = initialState(0, [pastTask(1, "rp", events, "failed", 1)]);
+  assert.deepEqual(headerCounts(rerun).counts, { failed: 1 });
+});
+
+test("state_notices_become_toasts", () => {
+  const s = initialState(0, [], ["skipped 2 unreadable run folders in runs/"]);
+  assert.equal(s.toasts.length, 1);
+  assert.equal(s.toasts[0]?.level, "info");
+  assert.equal(s.toasts[0]?.message, "skipped 2 unreadable run folders in runs/");
+});
