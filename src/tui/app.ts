@@ -159,8 +159,6 @@ function Workspace(p: AppProps): ReactElement {
         }
         dispatch({ type: "compose", next: submit((state.current ?? s).compose).state });
         for (const d of r.duplicates) dispatch({ type: "toast", level: "info", message: `already added: ${d}` });
-        const added = r.added[0];
-        if (added !== undefined) dispatch({ type: "selectTask", id: added });
         return;
       }
       case "saveOverrides":

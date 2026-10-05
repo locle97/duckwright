@@ -466,8 +466,29 @@ test("app_mixed_submission", async () => {
   assert.deepEqual(m.log, ["add:a.md|check the price"]);
   const f = t.frame();
   assert.match(f, /› Describe a task, or @/, "the box is empty again");
+  assert.ok(f.indexOf('"check the price"') >= 0 && f.indexOf('"check the price"') < f.indexOf('"older"'), "new task is above older");
+  assert.doesNotMatch(f, /││ check the price/, "the detail pane is not on the new task");
+  assert.match(f, /││ older/, "the detail pane still shows older");
+});
+
+test("app_add_keeps_selection", async () => {
+  const m = new FakeManager([snapshot(1, "First"), snapshot(2, "Second")]);
+  const t = mount(m);
+  await settle();
+  await t.type("j", "a", "x", "\r", "\x1b", "\r");
+  assert.equal(m.log[m.log.length - 1], "start:1");
+  const f = t.frame();
+  assert.ok(f.indexOf('"x"') >= 0 && f.indexOf('"x"') < f.indexOf('"Second"'), "x row comes before Second");
+});
+
+test("app_add_on_empty_list_selects_new", async () => {
+  const m = new FakeManager([]);
+  const t = mount(m);
+  await settle();
+  await t.type("a", "fresh task", "\r", "\x1b");
+  const f = t.frame();
+  assert.match(f, /││ fresh task/);
   assert.match(f, /source: typed/);
-  assert.match(f, /││ check the price/, "the detail pane shows the new task");
 });
 
 test("app_bad_mention_adds_nothing", async () => {
