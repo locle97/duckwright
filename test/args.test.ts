@@ -179,3 +179,31 @@ test("help lists the tui flags", () => {
   assert.ok(text.includes("open the interactive workspace"));
   assert.ok(text.includes("with --tui: most runs at once (default 3)"));
 });
+
+test("past_flag_values", () => {
+  assert.equal(parse("--tui", "--past", "0").past, 0);
+  assert.equal(parse("--tui", "--past", "5").past, 5);
+  assert.equal(parse("--tui", "--past=7").past, 7);
+  const bare = parse("--tui");
+  assert.equal("past" in bare, false);
+  assert.equal("theme" in bare, false);
+  assert.throws(() => parse("--tui", "--past", "-1"), usage("argument --past: must be at least 0"));
+  assert.throws(() => parse("--tui", "--past", "x"), usage("argument --past: invalid int value: 'x'"));
+  assert.throws(() => parse("--tui", "--past"), usage("argument --past: expected one argument"));
+});
+
+test("theme_flag_values", () => {
+  for (const t of ["auto", "dark", "light"]) assert.equal(parse("--tui", "--theme", t).theme, t);
+  assert.equal(parse("--tui", "--theme=light").theme, "light");
+  assert.throws(
+    () => parse("--tui", "--theme", "blue"),
+    usage("argument --theme: invalid choice: 'blue' (choose from 'auto', 'dark', 'light')"),
+  );
+});
+
+test("help_lists_past_and_theme", () => {
+  const text = (parseRunArgs(["--help"], "/s") as { text: string }).text;
+  assert.ok(text.includes("[--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]"));
+  assert.ok(text.includes("with --tui: past runs to show (default 20, 0 = none)"));
+  assert.ok(text.includes("with --tui: auto, dark or light (default auto)"));
+});
