@@ -1,0 +1,188 @@
+// The Ink workspace: holds the view state, feeds it manager events, clock ticks and key presses,
+// runs the keymap's commands, and lays the panes out for the terminal size.
+import { Box, Text, useInput, useWindowSize } from "ink";
+import type { Key as InkKey } from "ink";
+import { Component, createElement as h, useEffect, useReducer, useRef } from "react";
+import type { ReactElement, ReactNode } from "react";
+
+import type { ManagerLike } from "../runs/manager.ts";
+import { AddBox, addBoxHeight } from "./addBox.ts";
+import { Confirm } from "./confirm.ts";
+import { Detail } from "./detail.ts";
+import { Footer } from "./footer.ts";
+import { FormView } from "./formView.ts";
+import { Header } from "./header.ts";
+import { Help } from "./help.ts";
+import type { KeyName, KeyPress } from "./keypress.ts";
+import { keymap } from "./keys.ts";
+import type { Command } from "./keys.ts";
+import { sanitize } from "./sanitize.ts";
+import { Sidebar } from "./sidebar.ts";
+import { initialState, reduce } from "./state.ts";
+import type { ViewState } from "./state.ts";
+import { ROLE } from "./theme.ts";
+import { Toasts } from "./toast.ts";
+
+export type { InkKey };
+
+export interface AppProps {
+  manager: ManagerLike;
+  /** Fixed terminal size, for tests; by default the real size, following resizes. */
+  size?: { columns: number; rows: number };
+  /** Clock tick for spinners, elapsed times and toast expiry. Default 100. */
+  tickMs?: number;
+  /** After quit, after stopAll on a confirmed quit, or after a render crash (with its error). */
+  onQuit(error?: Error): void;
+  onForceExit(): void;
+}
+
+const HEADER_ROWS = 3;
+const FOOTER_ROWS = 1;
+const MIN_COLUMNS = 40;
+const MIN_ROWS = 8;
+
+const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
+
+/** Ink's key flags as a KeyPress. Ink 8 already reads \x7f and \b as backspace, so its `delete` is the Delete key. */
+export function fromInk(input: string, key: InkKey): KeyPress {
+  const flags: [boolean, KeyName][] = [
+    [key.return, "return"], [key.escape, "escape"], [key.tab, "tab"], [key.backspace, "backspace"], [key.delete, "delete"],
+    [key.upArrow, "up"], [key.downArrow, "down"], [key.leftArrow, "left"], [key.rightArrow, "right"],
+    [key.pageUp, "pageUp"], [key.pageDown, "pageDown"], [key.home, "home"], [key.end, "end"],
+  ];
+  const name = flags.find(([on]) => on)?.[1] ?? null;
+  return { input: name === null ? input : "", name, ctrl: key.ctrl, meta: key.meta, shift: key.shift };
+}
+
+function Workspace(p: AppProps): ReactElement {
+  const { manager } = p;
+  const [s, dispatch] = useReducer(reduce, undefined, () => initialState(Date.now(), manager.list()));
+  const state = useRef<ViewState>(s);
+  state.current = s;
+  const toastsSeen = useRef(0);
+  const quitting = useRef(false);
+  const terminal = useWindowSize();
+  const { columns, rows } = p.size ?? terminal;
+
+  useEffect(() => manager.subscribe((event) => {
+    if (event.type === "toast") toastsSeen.current++;
+    dispatch({ type: "manager", event });
+  }), [manager]);
+
+  const tickMs = p.tickMs ?? 100;
+  useEffect(() => {
+    const timer = setInterval(() => dispatch({ type: "tick", now: Date.now() }), tickMs);
+    return () => clearInterval(timer);
+  }, [tickMs]);
+
+  const quit = (stopFirst: boolean): void => {
+    if (quitting.current) return;
+    quitting.current = true;
+    if (!stopFirst) p.onQuit();
+    else void manager.stopAll().then(() => p.onQuit(), (e: unknown) => p.onQuit(e instanceof Error ? e : new Error(String(e))));
+  };
+
+  const run = (c: Command): void => {
+    switch (c.kind) {
+      case "ui":
+        dispatch(c.action);
+        return;
+      case "manager": {
+        if (c.call !== "start") {
+          manager[c.call](c.id);
+          return;
+        }
+        // The manager already toasts preflight and launch failures; toast the other refusals here.
+        const seen = toastsSeen.current;
+        const r = manager.start(c.id);
+        if (!r.ok && toastsSeen.current === seen) dispatch({ type: "toast", level: "error", message: r.reason });
+        return;
+      }
+      case "addTask":
+        manager.addTyped(c.text);
+        dispatch({ type: "selectEdge", edge: "last" });
+        return;
+      case "saveOverrides":
+        manager.setOverrides(c.id, c.overrides);
+        return;
+      case "quit":
+        quit(false);
+        return;
+      case "stopAllAndQuit":
+        quit(true);
+        return;
+      case "forceExit":
+        p.onForceExit();
+        return;
+    }
+  };
+
+  useInput((input, key) => {
+    for (const c of keymap(fromInk(input, key), state.current, manager.activeCount())) run(c);
+  });
+
+  if (columns < MIN_COLUMNS || rows < MIN_ROWS) {
+    return h(Box, { flexDirection: "column" },
+      h(Text, { wrap: "truncate-end" }, "terminal too small"),
+      h(Text, { color: ROLE.muted, wrap: "truncate-end" }, "q quit"));
+  }
+
+  const paneHeight = Math.max(0, rows - HEADER_ROWS - FOOTER_ROWS - addBoxHeight(s.compose));
+  const listFocused = s.focus === "list" && s.mode !== "compose";
+  const detailFocused = s.focus === "detail" && s.mode !== "compose";
+  let panes: ReactElement[];
+  if (columns < 60) {
+    panes = [s.focus === "list"
+      ? h(Sidebar, { key: "list", s, width: columns, height: paneHeight, focused: listFocused, showCost: true })
+      : h(Detail, { key: "detail", s, width: columns, height: paneHeight, focused: detailFocused })];
+  } else {
+    const wide = columns >= 90;
+    const sideWidth = wide ? clamp(Math.round(columns * 0.3), 24, 40) : clamp(Math.round(columns * 0.3), 18, 26);
+    panes = [
+      h(Sidebar, { key: "list", s, width: sideWidth, height: paneHeight, focused: listFocused, showCost: wide }),
+      h(Detail, { key: "detail", s, width: columns - sideWidth, height: paneHeight, focused: detailFocused }),
+    ];
+  }
+  const area = { width: columns, height: paneHeight };
+  const overlay = s.mode === "help" ? h(Help, { key: "help", s, ...area })
+    : s.mode === "form" && s.form !== null ? h(FormView, { key: "form", form: s.form, ...area })
+    : s.mode === "confirm" && s.confirm !== null ? h(Confirm, { key: "confirm", s, ...area })
+    : null;
+
+  return h(Box, { flexDirection: "column", width: columns, height: rows },
+    h(Header, { s, width: columns }),
+    h(Box, { flexDirection: "row", width: columns, height: paneHeight, flexShrink: 0 },
+      ...panes, overlay, h(Toasts, { key: "toasts", toasts: s.toasts, width: columns })),
+    h(AddBox, { compose: s.compose, focused: s.mode === "compose", width: columns }),
+    h(Footer, { s, width: columns }));
+}
+
+interface GuardProps { onError(error: Error): void; children: ReactNode }
+
+/** Catches a render crash: shows the error and reports it once. */
+class CrashGuard extends Component<GuardProps, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { error: Error } {
+    return { error: error instanceof Error ? error : new Error(String(error)) };
+  }
+
+  componentDidCatch(error: unknown): void {
+    this.props.onError(error instanceof Error ? error : new Error(String(error)));
+  }
+
+  render(): ReactNode {
+    const { error } = this.state;
+    if (error === null) return this.props.children;
+    return h(Box, { flexDirection: "column" },
+      h(Text, { color: ROLE.error }, `duckwright crashed: ${sanitize(error.message)}`),
+      h(Text, { color: ROLE.muted }, "stopping runs…"));
+  }
+}
+
+export function App(p: AppProps): ReactElement {
+  const onError = (error: Error): void => {
+    void p.manager.stopAll().then(() => p.onQuit(error), () => p.onQuit(error));
+  };
+  return h(CrashGuard, { onError, children: h(Workspace, p) });
+}

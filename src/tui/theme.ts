@@ -1,11 +1,12 @@
 import type { Phase } from "../events.ts";
 import type { TaskState } from "../runs/manager.ts";
 
-export const ROLE: Record<"text" | "muted" | "accent" | "border", string> = {
-  text: "white",
+// Plain text has no role: it uses the terminal's default foreground, so light themes stay readable.
+export const ROLE: Record<"muted" | "accent" | "border" | "error", string> = {
   muted: "gray",
   accent: "cyan",
   border: "gray",
+  error: "red",
 };
 
 export const TASK_ICON: Record<TaskState, { icon: string; color: string }> = {
