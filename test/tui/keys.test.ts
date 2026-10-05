@@ -37,7 +37,8 @@ function detailOf(state: TaskState): ViewState {
 const footer = (s: ViewState): string => hints(s).map((h) => `${h.key} ${h.label}`).join(" · ");
 
 test("keys_list_bindings", () => {
-  const s = mk("running", "paused", "idle");
+  // Newest first: display order is task 3, 2, 1, so start on the bottom row (task 1).
+  const s = reduce(mk("running", "paused", "idle"), { type: "selectEdge", edge: "last" });
   assert.deepEqual(press(s, "j"), [ui({ type: "select", delta: 1 })]);
   assert.deepEqual(press(s, "down"), [ui({ type: "select", delta: 1 })]);
   assert.deepEqual(press(s, "k"), [ui({ type: "select", delta: -1 })]);
@@ -51,12 +52,12 @@ test("keys_list_bindings", () => {
   assert.deepEqual(press(s, "a"), [ui({ type: "focus", target: "compose" })]);
   assert.deepEqual(press(s, "p"), [{ kind: "manager", call: "pause", id: 1 }]);
   assert.deepEqual(press(s, "s"), [{ kind: "manager", call: "stop", id: 1 }]);
-  const paused = reduce(s, { type: "select", delta: 1 });
+  const paused = reduce(s, { type: "select", delta: -1 });
   assert.deepEqual(press(paused, "r"), [{ kind: "manager", call: "resume", id: 2 }]);
   assert.deepEqual(press(paused, "n"), [{ kind: "manager", call: "step", id: 2 }]);
   assert.deepEqual(press(paused, "."), [{ kind: "manager", call: "step", id: 2 }]);
   assert.deepEqual(press(paused, "s"), [{ kind: "manager", call: "stop", id: 2 }]);
-  const idle = reduce(paused, { type: "select", delta: 1 });
+  const idle = reduce(paused, { type: "select", delta: -1 });
   const form = press(idle, "o");
   assert.equal(form.length, 1);
   assert.equal(form[0]?.kind, "ui");

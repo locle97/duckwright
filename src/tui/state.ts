@@ -7,6 +7,7 @@ import type { Candidate, CandidateIndex } from "./candidates.ts";
 import { EMPTY_COMPOSE, mentionAt } from "./compose.ts";
 import type { ComposeState } from "./compose.ts";
 import { visibleIndexes } from "./filter.ts";
+import { newestFirst } from "./order.ts";
 import type { FormState } from "./form.ts";
 
 /** `quitting`: a confirmed quit is stopping the runs; the panes stay and only Ctrl-C acts. */
@@ -125,7 +126,7 @@ export function initialState(now: number, tasks: TaskSnapshot[] = [], notices: s
   };
   for (const t of tasks) s = replayPast(s, t);
   for (const n of notices) s = addToast(s, "info", n);
-  return s;
+  return { ...s, selected: visibleTasks(s)[0] ?? 0 };
 }
 
 /** The query the sidebar filters by right now: the draft while editing, else the kept one. */
@@ -133,9 +134,10 @@ export function activeQuery(s: ViewState): string {
   return s.filterDraft ?? s.filter;
 }
 
-/** Indexes into `tasks` that pass the active filter. */
+/** Indexes into `tasks` that pass the active filter, in display order (newest first). */
 export function visibleTasks(s: ViewState): number[] {
-  return visibleIndexes(s.tasks, activeQuery(s));
+  const shown = new Set(visibleIndexes(s.tasks, activeQuery(s)));
+  return newestFirst(s.tasks).filter((i) => shown.has(i));
 }
 
 /** A hidden selection moves to the first visible task; unchanged when none is visible. */
@@ -283,8 +285,22 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
     case "task:updated":
       return { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
     case "task:removed": {
+      const vis = visibleTasks(s);
+      const selId = s.tasks[s.selected]?.id;
       const tasks = s.tasks.filter((t) => t.id !== e.taskId);
-      return snap({ ...s, tasks, selected: clamp(s.selected, 0, Math.max(0, tasks.length - 1)) });
+      const indexOf = (id: number | undefined): number => tasks.findIndex((t) => t.id === id);
+      let selected = 0;
+      if (selId !== undefined && selId !== e.taskId && indexOf(selId) !== -1) {
+        selected = indexOf(selId);
+      } else {
+        const pos = vis.indexOf(s.selected);
+        const order = pos === -1 ? [] : [...vis.slice(pos + 1), ...vis.slice(0, pos).reverse()];
+        for (const i of order) {
+          const j = indexOf(s.tasks[i]?.id);
+          if (j !== -1) { selected = j; break; }
+        }
+      }
+      return snap({ ...s, tasks, selected });
     }
     case "toast":
       return addToast(s, e.level, e.message);

@@ -6,7 +6,7 @@ import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import type { ManagerEvent, TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
 import type { CandidateIndex } from "../../src/tui/candidates.ts";
 import { EMPTY_COMPOSE } from "../../src/tui/compose.ts";
-import { completionItems, headerCounts, initialState, reduce, selectedRun, selectedTask } from "../../src/tui/state.ts";
+import { completionItems, headerCounts, initialState, reduce, selectedRun, selectedTask, visibleTasks } from "../../src/tui/state.ts";
 import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle", runId: string | null = null): TaskSnapshot {
@@ -62,17 +62,18 @@ test("state_task_events", () => {
   assert.deepEqual(s.tasks.map((t) => t.id), [1, 2]);
   s = reduce(s, mgr({ type: "task:updated", task: task(2, "running", "r9") }));
   assert.equal(s.tasks[1]?.state, "running");
-  assert.equal(selectedTask(reduce(s, { type: "select", delta: 1 }))?.id, 2);
+  assert.equal(selectedTask(reduce(s, { type: "select", delta: -1 }))?.id, 2, "newest (id 2) is above id 1");
   s = reduce(s, mgr({ type: "task:removed", taskId: 1 }));
   assert.deepEqual(s.tasks.map((t) => t.id), [2]);
   assert.equal(initialState(0, [task(5)]).tasks.length, 1);
 });
 
 test("state_selection_clamps_after_remove", () => {
+  // Display order is 3, 2, 1; the bottom row is task 1 (index 0).
   let s = play(initialState(0, [task(1), task(2), task(3)]), { type: "selectEdge", edge: "last" });
-  assert.equal(s.selected, 2);
+  assert.equal(s.selected, 0);
   s = reduce(s, mgr({ type: "task:removed", taskId: 3 }));
-  assert.equal(s.selected, 1);
+  assert.equal(selectedTask(s)?.id, 1);
   s = reduce(s, mgr({ type: "task:removed", taskId: 2 }));
   assert.equal(s.selected, 0);
   s = reduce(s, mgr({ type: "task:removed", taskId: 1 }));
@@ -80,12 +81,14 @@ test("state_selection_clamps_after_remove", () => {
   assert.equal(selectedTask(s), null);
   // removing an earlier task keeps selection in range
   let t = play(initialState(0, [task(1), task(2), task(3)]), { type: "select", delta: 1 });
+  assert.equal(selectedTask(t)?.id, 2);
   t = reduce(t, mgr({ type: "task:removed", taskId: 1 }));
-  assert.equal(t.selected, 1);
+  assert.equal(t.selected, 0, "index shifts down; the selected id stays");
+  assert.equal(selectedTask(t)?.id, 2);
   t = reduce(t, { type: "select", delta: 5 });
-  assert.equal(t.selected, 1);
+  assert.equal(selectedTask(t)?.id, 2);
   t = reduce(t, { type: "select", delta: -5 });
-  assert.equal(t.selected, 0);
+  assert.equal(selectedTask(t)?.id, 3);
   assert.equal(reduce(initialState(0), mgr({ type: "task:removed", taskId: 9 })).selected, 0);
 });
 
@@ -388,7 +391,7 @@ test("state_completion_move_clamps", () => {
 test("state_select_task_by_id", () => {
   const s = initialState(0, [task(4), task(7), task(9)]);
   assert.equal(reduce(s, { type: "selectTask", id: 9 }).selected, 2);
-  assert.equal(reduce(s, { type: "selectTask", id: 5 }).selected, 0);
+  assert.equal(reduce(s, { type: "selectTask", id: 5 }).selected, 2, "unknown id: unchanged (newest is selected)");
 });
 
 test("state_completion_items_rank_query", () => {
@@ -469,7 +472,6 @@ const many = (n: number): ViewState => initialState(0, Array.from({ length: n },
 const tn = (s: ViewState): string | undefined => selectedTask(s)?.text;
 
 test("state_filter_open_edit_keep_clear", async () => {
-  const { visibleTasks } = await import("../../src/tui/state.ts");
   let s = initialState(0, [task(1), task(2)]);
   assert.equal(s.filter, "");
   assert.equal(s.filterDraft, null);
@@ -498,17 +500,17 @@ test("state_filter_open_edit_keep_clear", async () => {
 test("state_filter_selection", () => {
   let s = many(12);
   s = reduce(s, { type: "filterEdit", query: "task 1" });
-  assert.equal(s.selected, 0);
+  assert.equal(tn(s), "task 12", "the newest task stays selected while it is visible");
   s = reduce(s, { type: "filterEdit", query: "2" });
+  assert.equal(tn(s), "task 12");
+  s = reduce(s, { type: "select", delta: 1 });
   assert.equal(tn(s), "task 2");
   s = reduce(s, { type: "select", delta: 1 });
-  assert.equal(tn(s), "task 12");
-  s = reduce(s, { type: "select", delta: 1 });
-  assert.equal(tn(s), "task 12");
+  assert.equal(tn(s), "task 2");
   s = reduce(s, { type: "selectEdge", edge: "first" });
-  assert.equal(tn(s), "task 2");
-  s = reduce(s, { type: "selectEdge", edge: "last" });
   assert.equal(tn(s), "task 12");
+  s = reduce(s, { type: "selectEdge", edge: "last" });
+  assert.equal(tn(s), "task 2");
   s = reduce(s, { type: "filterEdit", query: "zzz" });
   assert.equal(selectedTask(s), null);
   assert.equal(selectedRun(s), null);
@@ -523,4 +525,80 @@ test("state_select_task_clears_hidden_filter", () => {
   s = reduce(s, { type: "selectTask", id: 2 });
   assert.equal(s.filter, "");
   assert.equal(tn(s), "task 2");
+});
+
+const at = (id: number, createdAt: number): TaskSnapshot => ({ ...task(id), createdAt });
+const ids = (s: ViewState): number[] => visibleTasks(s).map((i) => s.tasks[i]!.id);
+
+test("state_sidebar_newest_first", () => {
+  let s = initialState(0);
+  s = play(s, mgr({ type: "task:added", task: at(1, 1) }), mgr({ type: "task:added", task: at(2, 2) }), mgr({ type: "task:added", task: at(3, 3) }));
+  assert.deepEqual(ids(s), [3, 2, 1]);
+  assert.deepEqual(ids(initialState(0, [at(1, 5), at(2, 4)])), [1, 2]);
+});
+
+test("state_initial_selects_newest", () => {
+  assert.equal(selectedTask(initialState(0, [at(1, 1), at(2, 3), at(3, 2)]))?.id, 2);
+});
+
+test("state_add_keeps_selection", () => {
+  let s = initialState(0, [at(1, 1), at(2, 2)]);
+  s = reduce(s, { type: "selectTask", id: 2 });
+  s = reduce(s, mgr({ type: "task:added", task: at(3, 3) }));
+  assert.equal(selectedTask(s)?.id, 2);
+  assert.equal(s.tasks[visibleTasks(s)[0]!]?.id, 3);
+});
+
+test("state_update_keeps_selection_and_order", () => {
+  let s = initialState(0, [at(1, 1), at(2, 2), at(3, 3)]);
+  s = reduce(s, { type: "selectTask", id: 2 });
+  const before = ids(s);
+  s = reduce(s, mgr({ type: "task:updated", task: { ...at(2, 2), state: "running", runId: "r2", runCount: 1 } }));
+  assert.equal(selectedTask(s)?.id, 2);
+  assert.deepEqual(ids(s), before);
+});
+
+test("state_remove_keeps_selected_id", () => {
+  let s = initialState(0, [at(1, 1), at(2, 2), at(3, 3)]);
+  s = reduce(s, { type: "selectTask", id: 1 });
+  s = reduce(s, mgr({ type: "task:removed", taskId: 3 }));
+  assert.equal(selectedTask(s)?.id, 1);
+});
+
+test("state_remove_selected_picks_neighbour", () => {
+  const fresh = (): ViewState => initialState(0, [at(1, 1), at(2, 2), at(3, 3)]);
+  let s = reduce(fresh(), { type: "selectTask", id: 2 });
+  s = reduce(s, mgr({ type: "task:removed", taskId: 2 }));
+  assert.equal(selectedTask(s)?.id, 1, "the row below");
+  s = reduce(fresh(), { type: "selectTask", id: 1 });
+  s = reduce(s, mgr({ type: "task:removed", taskId: 1 }));
+  assert.equal(selectedTask(s)?.id, 2, "no row below: the row above");
+});
+
+test("state_remove_only_visible_falls_back_to_zero", () => {
+  const a = { ...task(1), text: "apple", name: '"apple"' };
+  const b = { ...task(2), text: "pear", name: '"pear"' };
+  let s = initialState(0, [a, b]);
+  s = reduce(reduce(s, { type: "openFilter" }), { type: "filterEdit", query: "apple" });
+  s = reduce(s, { type: "filterKeep" });
+  assert.equal(selectedTask(s)?.id, 1);
+  s = reduce(s, mgr({ type: "task:removed", taskId: 1 }));
+  assert.equal(s.selected, 0);
+  assert.equal(selectedTask(s), null);
+});
+
+test("state_filter_keeps_newest_first", () => {
+  let s = initialState(0, [at(1, 1), at(2, 4), at(3, 2), at(4, 3)]);
+  s = { ...s, tasks: s.tasks.map((t) => (t.id === 1 || t.id === 3 ? { ...t, text: `x${t.id}`, name: `"x${t.id}"` } : t)) };
+  assert.deepEqual(ids(reduce(s, { type: "filterEdit", query: "task" })), [2, 4]);
+  assert.deepEqual(ids(reduce(s, { type: "filterEdit", query: "x" })), [3, 1]);
+});
+
+test("state_focus_list_keeps_compose_text", () => {
+  let s = reduce(initialState(0), { type: "focus", target: "compose" });
+  s = withText(s, "hello");
+  s = reduce(s, { type: "focus", target: "list" });
+  assert.equal(s.mode, "list");
+  assert.equal(s.focus, "list");
+  assert.equal(s.compose.text, "hello");
 });

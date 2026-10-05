@@ -134,7 +134,7 @@ test("app_pause_and_step_selected", async () => {
   ]);
   const t = mount(m);
   await settle();
-  await t.type("j", "p");
+  await t.type("p"); // newest first: task 2 is selected
   m.update(2, { state: "paused" });
   await settle();
   await t.type("n", "s");
@@ -228,6 +228,7 @@ test("app_narrow_layouts", async () => {
     const m = withCosts();
     const t = mount(m, { columns, rows });
     await settle();
+    await t.type("j"); // newest first: move from "Busy one" down to "Idle one"
     m.run(2, "r2", [ev.start(), ev.step(1), ev.decision(1, decision("a", [["click", "e1"]]), 0.041)]);
     await settle();
     check(t.frame());
