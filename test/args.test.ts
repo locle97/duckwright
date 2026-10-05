@@ -16,6 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
+    tui: false, maxParallel: null,
   });
 });
 
@@ -30,6 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
+    tui: false, maxParallel: null,
   });
 });
 
@@ -156,4 +158,24 @@ test("flags reject an explicit value", () => {
 test("max-steps accepts Python int underscores", () => {
   assert.equal(parse("--max-steps", "1_000", "x").maxSteps, 1000);
   assert.throws(() => parse("--max-steps", "1__0", "x"), usage("argument --max-steps: invalid int value: '1__0'"));
+});
+
+test("tui flag and max-parallel", () => {
+  assert.equal(parse("--tui").tui, true);
+  assert.equal(parse("--tui").maxParallel, null);
+  assert.equal(parse("--tui", "--max-parallel", "2").maxParallel, 2);
+  assert.equal(parse("--max-parallel=4").maxParallel, 4);
+});
+
+test("max-parallel rejects bad values", () => {
+  assert.throws(() => parse("--tui", "--max-parallel", "0"), usage("argument --max-parallel: must be at least 1"));
+  assert.throws(() => parse("--tui", "--max-parallel", "x"), usage("argument --max-parallel: invalid int value: 'x'"));
+  assert.throws(() => parse("--tui", "--max-parallel"), usage("argument --max-parallel: expected one argument"));
+});
+
+test("help lists the tui flags", () => {
+  const text = (parseRunArgs(["--help"], "/s") as { text: string }).text;
+  assert.ok(text.includes("[--tui] [--max-parallel N]"));
+  assert.ok(text.includes("open the interactive workspace"));
+  assert.ok(text.includes("with --tui: most runs at once (default 3)"));
 });

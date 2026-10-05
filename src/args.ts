@@ -16,6 +16,8 @@ export interface RunArgs {
   allowFileAccess: boolean;
   export: boolean;
   snapshot: SnapshotMode;
+  tui: boolean;
+  maxParallel: number | null;
 }
 
 export interface ExportArgs {
@@ -43,6 +45,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-f FILE [FILE ...]
   + "                  [--state FILE] [--allow-file-access]\n"
   + "                  [--export | --no-export]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
+  + "                  [--tui] [--max-parallel N]\n"
   + "                  [task]";
 
 export const RUN_HELP = `${RUN_USAGE}
@@ -80,6 +83,8 @@ options:
                         into the prompt
   --snapshot-grep       never paste the page snapshot; Claude always greps the
                         saved file
+  --tui                 open the interactive workspace
+  --max-parallel N      with --tui: most runs at once (default 3)
 
 Run a task file: duckwright -f tasks/login.md. To turn an earlier run into a
 test: duckwright export runs/<id>
@@ -152,12 +157,12 @@ const RUN_SPEC: OptionSpec = {
     "--export": "--export/--no-export", "--no-export": "--export/--no-export",
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
-    "--snapshot-grep": "--snapshot-grep",
+    "--snapshot-grep": "--snapshot-grep", "--tui": "--tui", "--max-parallel": "--max-parallel",
   },
   shortWithValue: ["-f"],
 };
 
-const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state"];
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel"];
 
 // Python's int(): optional sign, digits with single underscores between them, spaces around.
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
@@ -170,6 +175,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
+    tui: false, maxParallel: null,
     ...settings,
   };
   const extras: string[] = [];
@@ -209,6 +215,11 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
       if (name === "--max-steps") {
         if (!PY_INT.test(v!)) fail(`argument --max-steps: invalid int value: '${v}'`);
         args.maxSteps = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
+      } else if (name === "--max-parallel") {
+        if (!PY_INT.test(v!)) fail(`argument --max-parallel: invalid int value: '${v}'`);
+        const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
+        if (n < 1) fail("argument --max-parallel: must be at least 1");
+        args.maxParallel = n;
       } else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
       else if (name === "--session") args.session = v!;
@@ -221,6 +232,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
     else if (name === "--export" || name === "--no-export") args.export = name === "--export";
     else if (name === "--allow-file-access") args.allowFileAccess = true;
+    else if (name === "--tui") args.tui = true;
     else {
       if (snapshotFlag !== null && snapshotFlag !== name) fail(`argument ${name}: not allowed with argument ${snapshotFlag}`);
       snapshotFlag = name;

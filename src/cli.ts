@@ -8,6 +8,8 @@ import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
 import { attachPlain, printOutcome } from "./report/plain.ts";
+import { RunManager } from "./runs/manager.ts";
+import type { ManagerLike } from "./runs/manager.ts";
 import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
 import type { AgentLike, PromptPaths } from "./runs/run.ts";
 import { fixed4 } from "./text.ts";
@@ -25,6 +27,9 @@ export function version(): string {
   }
 }
 
+export interface TuiHandle { done: Promise<void>; restoreTerminal(): void }
+export interface TuiModule { startTui(o: { manager: ManagerLike }): TuiHandle }
+
 export interface CliDeps {
   which(name: string): string | null;
   createAgent(opts: AgentOptions): AgentLike;
@@ -32,6 +37,8 @@ export interface CliDeps {
   stdout(line: string): void;
   stderr(line: string): void;
   signal: AbortSignal;
+  isTTY(): boolean;
+  loadTui(): Promise<TuiModule>;
 }
 
 /** The first executable called `name` on PATH, like shutil.which. */
@@ -56,6 +63,8 @@ const DEFAULT_DEPS: CliDeps = {
   stdout: (line) => console.log(line),
   stderr: (line) => console.error(line),
   signal: new AbortController().signal,
+  isTTY: () => !!process.stdin.isTTY && !!process.stdout.isTTY,
+  loadTui: () => import("./tui/index.ts"),
 };
 
 function isFile(p: string): boolean {
@@ -155,6 +164,36 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
   return count("pass") === rows.length ? 0 : 1;
 }
 
+async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
+  if (args.task !== null || args.file !== null) throw usage("give tasks inside the TUI, not with --tui");
+  if (!deps.isTTY()) {
+    deps.stderr("--tui needs an interactive terminal");
+    return 2;
+  }
+  const err = preflightArgs(deps, args);
+  if (err) {
+    deps.stderr(err);
+    return 2;
+  }
+  const manager = new RunManager({
+    argv,
+    defaultSkill: deps.prompts.defaultSkill,
+    maxParallel: args.maxParallel ?? 3,
+    startRun: (s) => startRun(s, { prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent }),
+    preflight: (a) => preflightArgs(deps, a),
+  });
+  const tui = await deps.loadTui();
+  const handle = tui.startTui({ manager });
+  try {
+    await handle.done;
+  } finally {
+    handle.restoreTerminal();
+  }
+  const { lines, exitCode } = manager.summary();
+  for (const line of lines) deps.stdout(line);
+  return exitCode;
+}
+
 function usageError(deps: CliDeps, e: UsageError): number {
   deps.stderr(e.usage);
   deps.stderr(`${e.prog}: error: ${e.message}`);
@@ -183,6 +222,8 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     return 0;
   }
   const { args } = parsed;
+  if (args.tui) return tuiMain(deps, argv, args);
+  if (args.maxParallel !== null) throw usage("--max-parallel needs --tui");
   if (args.task !== null && args.file !== null) throw usage("give a task or --file, not both");
   if (args.task === null && args.file === null) throw usage("give a task or --file");
   if (args.file === null) {

@@ -6,7 +6,8 @@ import { afterEach, test } from "node:test";
 import { Brain, BrainError } from "../src/brain.ts";
 import type { Action } from "../src/brain.ts";
 import { PROMPTS, historyJson, main, version } from "../src/cli.ts";
-import type { AgentLike, CliDeps } from "../src/cli.ts";
+import type { AgentLike, CliDeps, TuiHandle, TuiModule } from "../src/cli.ts";
+import type { ManagerLike } from "../src/runs/manager.ts";
 import type { AgentOptions, RunResult } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
@@ -810,4 +811,112 @@ test("costs round like Python", async () => {
   const e = env();
   assert.equal(await main(e.argv, e.deps({ createAgent: agentWith(async () => result(true, [], 0.03125)) })), 0);
   assert.equal(e.out[2], "Steps: 1  Cost: $0.0312");
+});
+
+interface FakeTui {
+  load: () => Promise<TuiModule>;
+  loads: number;
+  restores: number;
+  manager: ManagerLike | null;
+}
+
+/** A TUI that adds one task, starts it, and finishes when the run ends (or rejects `done`). */
+function fakeTui(rejectWith: Error | null = null): FakeTui {
+  const fake: FakeTui = { loads: 0, restores: 0, manager: null, load: null as never };
+  fake.load = async () => {
+    fake.loads++;
+    return {
+      startTui({ manager }): TuiHandle {
+        fake.manager = manager;
+        const id = manager.addTyped("do it");
+        const done = new Promise<void>((resolve, reject) => {
+          const off = manager.subscribe((e) => {
+            if (e.type === "task:updated" && e.task.state === "passed") {
+              off();
+              // The manager records the outcome a tick after the state flips.
+              setImmediate(() => (rejectWith ? reject(rejectWith) : resolve()));
+            }
+          });
+        });
+        manager.start(id);
+        return { done, restoreTerminal: () => void fake.restores++ };
+      },
+    };
+  };
+  return fake;
+}
+
+const tuiAgent = agentWith(async () => result(true, [], 0.5));
+
+test("tui_needs_tty", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--tui", "--skill", e.argv[2]], e.deps({ isTTY: () => false, loadTui: fake.load }));
+  assert.equal(code, 2);
+  assert.deepEqual(e.err, ["--tui needs an interactive terminal"]);
+  assert.equal(fake.loads, 0);
+});
+
+test("tui_rejects_task_and_file", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const over = e.deps({ isTTY: () => true, loadTui: fake.load });
+  assert.equal(await main(["--tui", "task"], over), 2);
+  assert.ok(e.err.some((l) => l.includes("give tasks inside the TUI, not with --tui")));
+  e.err.length = 0;
+  assert.equal(await main(["--tui", "-f", "a.md"], over), 2);
+  assert.ok(e.err.some((l) => l.includes("give tasks inside the TUI, not with --tui")));
+  assert.equal(fake.loads, 0);
+});
+
+test("tui_max_parallel_needs_tui", async () => {
+  const e = env();
+  assert.equal(await main([...e.argv, "--max-parallel", "2"], e.deps()), 2);
+  assert.ok(e.err.some((l) => l.includes("--max-parallel needs --tui")));
+});
+
+test("tui_preflight_fails_before_load", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--tui", "--skill", path.join(e.tmp, "missing.md")],
+    e.deps({ isTTY: () => true, loadTui: fake.load }));
+  assert.equal(code, 2);
+  assert.ok(e.err[0].startsWith("playwright-cli skill not found"));
+  assert.equal(fake.loads, 0);
+});
+
+test("tui_prints_summary_and_exit_code", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--tui", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
+  assert.equal(code, 0);
+  assert.equal(fake.restores, 1);
+  assert.ok(e.out[0].startsWith("Batch: 1 passed, 0 failed, 0 stopped"));
+  assert.ok(e.out[1].startsWith('pass  "do it"'));
+});
+
+test("tui_restores_terminal_when_done_rejects", async () => {
+  const e = env();
+  const fake = fakeTui(new Error("boom"));
+  await assert.rejects(
+    main(["--tui", "--skill", e.argv[2]],
+      e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent })),
+    /boom/,
+  );
+  assert.equal(fake.restores, 1);
+});
+
+test("tui_max_parallel_reaches_manager", async () => {
+  const e = env();
+  const fake = fakeTui();
+  await main(["--tui", "--max-parallel", "1", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
+  const m = fake.manager!;
+  const a = m.addTyped("a");
+  const b = m.addTyped("b");
+  assert.equal(m.start(a).ok, true);
+  const second = m.start(b);
+  assert.equal(second.ok, false);
+  await m.stopAll();
 });
