@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { key } from "../../src/tui/keypress.ts";
-import { composeKey, EMPTY_COMPOSE, insertText, lines, submit } from "../../src/tui/compose.ts";
+import {
+  applyCompletion, composeKey, deleteMentionBefore, EMPTY_COMPOSE, insertText, lines, mentionAt, parseMentions, spans,
+  submission, submit,
+} from "../../src/tui/compose.ts";
 import type { ComposeState } from "../../src/tui/compose.ts";
 
 function press(s: ComposeState, ...specs: string[]): ComposeState {
@@ -147,4 +150,63 @@ test("compose_leading_newline_cursor_at_start", () => {
   assert.equal(press(base, "ctrl+a").cursor, 0);
   const recalled = press(base, "up");
   assert.deepEqual([recalled.text, recalled.historyIndex, recalled.draft], ["old", 0, "\nabc"]);
+});
+
+const pick = (s: ComposeState | null): [string, number] | null => (s ? [s.text, s.cursor] : null);
+
+test("compose_parse_mention_positions", () => {
+  assert.deepEqual(parseMentions("@a.md x @b/ me@ex.com \\@c"), [
+    { start: 0, end: 5, path: "a.md", quoted: false },
+    { start: 8, end: 11, path: "b/", quoted: false },
+  ]);
+  assert.deepEqual(parseMentions('go @"my tasks/a.md" now')[0], { start: 3, end: 19, path: "my tasks/a.md", quoted: true });
+  assert.deepEqual(parseMentions("@a.md,"), [{ start: 0, end: 6, path: "a.md,", quoted: false }]);
+  assert.equal(parseMentions("x\n@a.md\nmore")[0]?.path, "a.md");
+  assert.deepEqual(parseMentions('@"open quo'), [{ start: 0, end: 10, path: "open quo", quoted: true }]);
+});
+
+test("compose_mention_at_cursor", () => {
+  assert.equal(mentionAt("x @tasks/sm", 11)?.path, "tasks/sm");
+  assert.equal(mentionAt("x @tasks/sm", 2), null);
+  assert.equal(mentionAt("x @", 3)?.path, "");
+  assert.equal(mentionAt("@a.md b", 6), null);
+});
+
+test("compose_submission_split", () => {
+  assert.equal(submission("@a.md Check the price").typed, "Check the price");
+  assert.equal(submission("Check @a.md   the price").typed, "Check the price");
+  assert.equal(submission("a  b @x.md  c").typed, "a  b c");
+  assert.equal(submission("@a.md @b.md").typed, null);
+  assert.equal(submission("mail \\@john and @ 5pm").typed, "mail @john and @ 5pm");
+  assert.deepEqual(submission("@a.md x @b.md").mentions.map((m) => m.path), ["a.md", "b.md"]);
+});
+
+test("compose_backspace_deletes_whole_mention", () => {
+  const s = { ...EMPTY_COMPOSE, text: "go @tasks/a.md", cursor: 14 };
+  assert.deepEqual(pick(deleteMentionBefore(s)), ["go ", 3]);
+  assert.equal(deleteMentionBefore({ ...s, cursor: 13 }), null);
+  assert.equal(deleteMentionBefore({ ...s, text: "go @", cursor: 4 }), null);
+});
+
+test("compose_apply_completion", () => {
+  const s = { ...EMPTY_COMPOSE, text: "@tasks/sm x", cursor: 9 };
+  assert.deepEqual(pick(applyCompletion(s, "tasks/smoke/", "descend")), ["@tasks/smoke/ x", 13]);
+  assert.deepEqual(pick(applyCompletion(s, "tasks/smoke.md", "accept")), ["@tasks/smoke.md x", 16]);
+  const end = { ...EMPTY_COMPOSE, text: "@sm", cursor: 3 };
+  assert.deepEqual(pick(applyCompletion(end, "smoke.md", "accept")), ["@smoke.md ", 10]);
+  assert.deepEqual(pick(applyCompletion(end, "my tasks/", "descend")), ['@"my tasks/"', 11]);
+  assert.deepEqual(pick(applyCompletion(end, "my tasks/a.md", "accept")), ['@"my tasks/a.md" ', 17]);
+  const quoted = { ...EMPTY_COMPOSE, text: '@"my tasks/"', cursor: 11 };
+  assert.deepEqual(pick(applyCompletion(quoted, "my tasks/a.md", "accept")), ['@"my tasks/a.md" ', 17]);
+  const none = { ...EMPTY_COMPOSE, text: "plain", cursor: 5 };
+  assert.equal(applyCompletion(none, "a.md", "accept"), none);
+});
+
+test("compose_spans_mark_missing", () => {
+  const exists = (p: string) => p === "a.md" || p === "../up.md";
+  assert.deepEqual(spans("x @a.md @no.md @../up.md @", exists).map((s) => [s.text, s.kind]), [
+    ["x ", "text"], ["@a.md", "mention"], [" ", "text"], ["@no.md", "missing"], [" ", "text"],
+    ["@../up.md", "mention"], [" @", "text"],
+  ]);
+  assert.deepEqual(spans("", exists), []);
 });
