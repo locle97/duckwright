@@ -304,6 +304,8 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
     }
     case "toast":
       return addToast(s, e.level, e.message);
+    case "globals:updated":
+      return s;
     case "run": {
       if (e.event.type === "run:start") {
         const view: RunView = {
