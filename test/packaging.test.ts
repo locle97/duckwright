@@ -41,3 +41,10 @@ test("package_runtime_deps_are_ink_and_react", () => {
 test("package_declares_mit_license", () => {
   assert.equal(pkg.license, "MIT");
 });
+
+test("dist_loads_tui_lazily", () => {
+  const cli = fs.readFileSync(path.join(ROOT, "dist", "cli.js"), "utf8");
+  assert.match(cli, /import\("\.\/tui\/index\.js"\)/);
+  assert.doesNotMatch(cli, /^\s*import\b[^;\n]*from\s+["'](ink|react)["']/m);
+  assert.ok(files.includes("dist/tui/index.js"));
+});
