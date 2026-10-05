@@ -201,7 +201,14 @@ export function submission(text: string): { mentions: Mention[]; typed: string |
     pos = m.end;
   }
   marked += text.slice(pos);
-  const typed = marked.replace(/[ \t]*(?:\u0000[ \t]*)+/g, " ").replaceAll("\\@", "@").trim();
+  // A gap between words becomes one space; at a line's start or end it leaves nothing.
+  const typed = marked
+    .replace(/[ \t]*(?:\u0000[ \t]*)+/g, (gap, at: number, all: string) => {
+      const before = all[at - 1];
+      const after = all[at + gap.length];
+      return before === undefined || before === "\n" || after === undefined || after === "\n" ? "" : " ";
+    })
+    .replaceAll("\\@", "@").trim();
   return { mentions, typed: typed === "" ? null : typed };
 }
 
@@ -225,6 +232,8 @@ export function applyCompletion(s: ComposeState, path: string, how: "descend" | 
     const quoted = token.endsWith('"');
     return withText(s, before + token + after, m.start + token.length - (quoted ? 1 : 0));
   }
+  // Step past a following space, or add one; before a line break, stop at the mention's end.
+  if (after.startsWith("\n")) return withText(s, before + token + after, m.start + token.length);
   if (!/^[ \t]/.test(after)) after = " " + after;
   return withText(s, before + token + after, m.start + token.length + 1);
 }

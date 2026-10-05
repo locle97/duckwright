@@ -80,3 +80,9 @@ test("candidates_node_readdir_survives_loops_and_errors", () => {
   assert.ok(!got.includes("broken.md"));
   assert.deepEqual(nodeReadDir(dir)("missing"), []);
 });
+
+test("candidates_rank_exact_and_substring_first", () => {
+  assert.deepEqual(paths(rank(index(["a/b.md", "ab.md"]), "ab.md")), ["ab.md", "a/b.md"]);
+  assert.deepEqual(paths(rank(index(["tasks/log/in.md", "tasks/login.md"]), "tasks/login.md")), ["tasks/login.md", "tasks/log/in.md"]);
+  assert.deepEqual(paths(rank(index(["x/l/o/g/i/n.md", "xxlogin.md"]), "login")), ["xxlogin.md", "x/l/o/g/i/n.md"]);
+});

@@ -359,3 +359,9 @@ test("keys_compose_hints_with_completion", () => {
   assert.equal(footer(composing("x")), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · esc back");
   assert.equal(footer(composing("@t", true)), "↑↓ move · tab complete · ⏎ accept · esc close");
 });
+
+test("keys_completion_closes_when_cursor_jumps_to_another_mention", () => {
+  let s = reduce(composing("@ta @ta", true), { type: "compose", next: { ...EMPTY_COMPOSE, text: "@ta @ta", cursor: 3 } });
+  s = reduce(s, { type: "completion", value: { index: IDX, highlight: 0 } });
+  assert.equal(typeKeys(s, "end").s.completion, null);
+});

@@ -85,12 +85,17 @@ export function rank(index: CandidateIndex, query: string): Candidate[] {
     return [...index.items].sort((a, b) => depth(a.path) - depth(b.path) || compareCodePoints(a.path, b.path));
   }
   const q = query.toLowerCase();
-  const scored: { c: Candidate; s: number }[] = [];
+  // An exact path first, then paths holding the query as one run, then the fuzzy matches, so ⏎
+  // never swaps a fully typed path for a different file.
+  const tier = (p: string): number => (p === q ? 0 : p.includes(q) ? 1 : 2);
+  const scored: { c: Candidate; t: number; s: number }[] = [];
   for (const c of index.items) {
-    const s = score(c.path.toLowerCase(), q);
-    if (s !== null) scored.push({ c, s });
+    const p = c.path.toLowerCase();
+    const s = score(p, q);
+    if (s !== null) scored.push({ c, t: tier(p), s });
   }
-  scored.sort((a, b) => b.s - a.s || a.c.path.length - b.c.path.length || compareCodePoints(a.c.path, b.c.path));
+  scored.sort((a, b) =>
+    a.t - b.t || b.s - a.s || a.c.path.length - b.c.path.length || compareCodePoints(a.c.path, b.c.path));
   return scored.map((x) => x.c);
 }
 

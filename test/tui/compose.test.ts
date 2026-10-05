@@ -178,6 +178,8 @@ test("compose_submission_split", () => {
   assert.equal(submission("a  b @x.md  c").typed, "a  b c");
   assert.equal(submission("@a.md @b.md").typed, null);
   assert.equal(submission("mail \\@john and @ 5pm").typed, "mail @john and @ 5pm");
+  assert.equal(submission("line1\n@a.md\nline3").typed, "line1\n\nline3");
+  assert.equal(submission("one @a.md\ntwo").typed, "one\ntwo");
   assert.deepEqual(submission("@a.md x @b.md").mentions.map((m) => m.path), ["a.md", "b.md"]);
 });
 
@@ -198,6 +200,8 @@ test("compose_apply_completion", () => {
   assert.deepEqual(pick(applyCompletion(end, "my tasks/a.md", "accept")), ['@"my tasks/a.md" ', 17]);
   const quoted = { ...EMPTY_COMPOSE, text: '@"my tasks/"', cursor: 11 };
   assert.deepEqual(pick(applyCompletion(quoted, "my tasks/a.md", "accept")), ['@"my tasks/a.md" ', 17]);
+  const eol = { ...EMPTY_COMPOSE, text: "@sm\nnext", cursor: 3 };
+  assert.deepEqual(pick(applyCompletion(eol, "smoke.md", "accept")), ["@smoke.md\nnext", 9]);
   const none = { ...EMPTY_COMPOSE, text: "plain", cursor: 5 };
   assert.equal(applyCompletion(none, "a.md", "accept"), none);
 });

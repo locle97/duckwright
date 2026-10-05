@@ -153,8 +153,8 @@ function composeCommands(k: KeyPress, s: ViewState): Command[] {
   const mention = mentionAt(next.text, next.cursor);
   if (open) {
     const before = mentionAt(s.compose.text, s.compose.cursor);
-    if (mention === null) cmds.push(closeList);
-    else if (mention.path !== before?.path) cmds.push(reopen());
+    if (mention === null || mention.start !== before?.start) cmds.push(closeList);
+    else if (mention.path !== before.path) cmds.push(reopen());
   } else if (mention !== null && k.name === null && !k.ctrl && !k.meta) {
     // Only typing opens the list: moving the cursor into a mention, or a paste that ends past it, does not.
     cmds.push({ kind: "openCompletion" });
