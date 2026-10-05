@@ -26,6 +26,8 @@ export type AddResult =
 export interface TaskSnapshot {
   id: TaskId; text: string; name: string; source: TaskSource; state: TaskState; overrides: Overrides; effective: Effective;
   error: string | null; runId: string | null; runCount: number;
+  /** Epoch ms the task was created (past runs: the run's start). Never changes. */
+  createdAt: number;
   /** Set for tasks that came from a past run folder. */
   past?: { runId: string; events: RunEvent[] };
 }
@@ -63,6 +65,8 @@ export interface ManagerOptions {
   cwd?: string;
   /** Past runs, oldest first: each becomes a task (with its final state) ahead of any added task. */
   past?: PastRun[];
+  /** Clock for task creation times (epoch ms). Default: `Date.now`. */
+  now?: () => number;
 }
 
 /** `"<first line>"`, cut with … so it holds at most `max` code points. */
@@ -94,6 +98,7 @@ interface Task {
   runs: RunRecord[];
   /** The run folder this task was loaded from; null for tasks added in this session. */
   past: PastRun | null;
+  createdAt: number;
 }
 
 const CONTROL_TO_STATE: Record<ControlState, TaskState> = {
@@ -105,6 +110,7 @@ const OUTCOME_TO_STATE: Record<RunOutcome["status"], TaskState> = {
 
 export class RunManager implements ManagerLike {
   #o: ManagerOptions;
+  #now: () => number;
   #tasks: Task[] = [];
   /** Removed tasks that ran: out of the list, but their runs stay in the quit summary. */
   #retired: Task[] = [];
@@ -115,11 +121,12 @@ export class RunManager implements ManagerLike {
 
   constructor(o: ManagerOptions) {
     this.#o = o;
+    this.#now = o.now ?? Date.now;
     for (const p of o.past ?? []) {
       const name = p.source.kind === "file" ? this.#fileName(p.source.path) : taskName(p.text);
       this.#tasks.push({
         id: this.#nextId++, text: p.text, name, source: { ...p.source }, fileSettings: p.fileSettings,
-        overrides: {}, state: OUTCOME_TO_STATE[p.outcome.status], error: null, runs: [], past: p,
+        overrides: {}, state: OUTCOME_TO_STATE[p.outcome.status], error: null, runs: [], past: p, createdAt: p.startedAt,
       });
     }
   }
@@ -363,6 +370,7 @@ export class RunManager implements ManagerLike {
       overrides: { ...task.overrides },
       effective: { model: a.model, maxSteps: a.maxSteps, headed: a.headed, export: a.export, snapshot: a.snapshot },
       error: task.error, runId: latest ? latest.handle.id : (task.past?.id ?? null), runCount: task.runs.length,
+      createdAt: task.createdAt,
     };
     // runId is the latest session run's id after a re-run (else the folder id), like the snapshot's runId; the UI only replays at mount.
     if (task.past) snap.past = { runId: snap.runId ?? task.past.id, events: task.past.events };
@@ -371,7 +379,7 @@ export class RunManager implements ManagerLike {
 
   #addTask(source: TaskSource, text: string, fileSettings: TaskSettings, name: string): TaskId {
     const task: Task = {
-      id: this.#nextId++, text, name, source, fileSettings, overrides: {}, state: "idle", error: null, runs: [], past: null,
+      id: this.#nextId++, text, name, source, fileSettings, overrides: {}, state: "idle", error: null, runs: [], past: null, createdAt: this.#now(),
     };
     this.#tasks.push(task);
     this.#emit({ type: "task:added", task: this.#snapshot(task) });

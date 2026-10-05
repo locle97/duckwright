@@ -490,6 +490,35 @@ test("manager_past_tasks_first", () => {
   assert.deepEqual(events.map((e) => e.type), ["task:added"]);
 });
 
+test("manager_created_at_stamped_and_stable", async () => {
+  let t = 0;
+  const now = () => (t += 100);
+  const { mgr, fakes, events } = setup({ now });
+  const id1 = mgr.addTyped("a");
+  mgr.addTyped("b");
+  assert.deepEqual(mgr.list().map((x) => x.createdAt), [100, 200]);
+  const added = events.flatMap((e) => (e.type === "task:added" ? [e.task.createdAt] : []));
+  assert.deepEqual(added, [100, 200]);
+  mgr.start(id1);
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  assert.equal(mgr.list()[0].createdAt, 100);
+  assert.deepEqual(mgr.list().map((x) => x.id), [1, 2]);
+});
+
+test("manager_created_at_file_task", () => {
+  const dir = tree({ "a.md": "A" });
+  const { mgr, events } = setup({ cwd: dir, now: () => 300 });
+  mgr.add({ mentions: [`${dir}/a.md`], typed: null });
+  const added = events.flatMap((e) => (e.type === "task:added" ? [e.task.createdAt] : []));
+  assert.deepEqual(added, [300]);
+});
+
+test("manager_past_created_at_is_started_at", () => {
+  const { mgr } = setup({ past: [pastRun("20260101-000000-a", "pass", { startedAt: 42 })] });
+  assert.equal(mgr.list()[0].createdAt, 42);
+});
+
 test("manager_past_excluded_from_summary", () => {
   const { mgr } = setup({ past: [pastRun("20260101-000000-a", "fail")] });
   assert.deepEqual(mgr.summary(), { lines: [], exitCode: 0 });

@@ -16,7 +16,7 @@ function task(id: number, state: TaskState = "idle"): TaskSnapshot {
   return {
     id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, export: false, snapshot: "hybrid" },
-    error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0,
+    error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0, createdAt: 0,
   };
 }
 
