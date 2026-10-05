@@ -1,4 +1,7 @@
 {
+  "extraKnownMarketplaces": {
+    "duckor": { "source": { "source": "github", "repo": "locel97/duckor" } }
+  },
   "enabledPlugins": {
     "duckor-flow@duckor": true
   }
