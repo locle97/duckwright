@@ -6,6 +6,7 @@ import { applyCompletion, composeKey, deleteMentionBefore, mentionAt, submission
 import type { ComposeState, Mention } from "./compose.ts";
 import { formKey, formResult, openForm } from "./form.ts";
 import type { KeyPress } from "./keypress.ts";
+import { filterKey } from "./filter.ts";
 import { completionItems, selectedRun, selectedTask } from "./state.ts";
 import type { UiAction, ViewState } from "./state.ts";
 
@@ -67,12 +68,14 @@ const SHARED: Binding[] = [
     hint: { key: "d", label: "remove" }, footer: true,
   },
   { match: named("tab"), when: (c) => hasTask(c) && (c.s.focus === "detail" || c.t?.runId != null), run: () => [ui({ type: "toggleFocus" })], hint: { key: "tab", label: "focus" }, footer: true },
+  { match: char("/"), when: () => true, run: () => [ui({ type: "openFilter" })], hint: { key: "/", label: "filter" }, footer: false },
   { match: char("?"), when: () => true, run: () => [ui({ type: "help", open: true })], hint: { key: "?", label: "help" }, footer: true },
   { match: char("q"), when: () => true, run: (c) => quitCommands(c.s, c.activeRuns), hint: { key: "q", label: "quit" }, footer: false },
 ];
 
 const move = (delta: number) => (): Command[] => [ui({ type: "select", delta })];
 const LIST_ONLY: Binding[] = [
+  { match: named("escape"), when: (c) => c.s.filter !== "", run: () => [ui({ type: "filterClear" })], hint: { key: "esc", label: "clear filter" }, footer: true },
   {
     match: named("return"), when: hasTask,
     run: (c) => (c.t ? (isLive(c.t) ? [ui({ type: "focus", target: "detail" })] : [{ kind: "manager", call: "start", id: c.t.id }]) : []),
@@ -195,8 +198,13 @@ export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[]
       return named("escape")(k) || char("?")(k) ? [ui({ type: "help", open: false })] : [];
     case "confirm":
       return confirmCommands(k, s);
-    case "filter":
-      return [];
+    case "filter": {
+      if (named("return")(k)) return [ui({ type: "filterKeep" })];
+      if (named("escape")(k)) return [ui({ type: "filterClear" })];
+      const draft = s.filterDraft ?? "";
+      const next = filterKey(draft, k);
+      return next !== null && next !== draft ? [ui({ type: "filterEdit", query: next })] : [];
+    }
     case "quitting":
       return [];
     case "list":
@@ -241,7 +249,7 @@ export function hints(s: ViewState): Hint[] {
     case "confirm":
       return [{ key: "y", label: "yes" }, { key: "n", label: "no" }];
     case "filter":
-      return [];
+      return [{ key: "⏎", label: "keep" }, { key: "esc", label: "clear" }];
     case "quitting":
       return [];
     case "list":
@@ -261,4 +269,11 @@ export function helpBindings(s: ViewState): Hint[] {
   const rows = table(mode).map((b) => b.hint);
   const extra: Hint[] = mode === "list" ? [{ key: "⏎", label: "open run (live task)" }] : [];
   return dedupe([...rows, ...extra]);
+}
+
+/** Raw text placed before the footer hints: the filter being typed, or the active filter. */
+export function hintPrefix(s: ViewState): string {
+  if (s.mode === "filter") return `/${s.filterDraft ?? ""}▌  `;
+  if ((s.mode === "list" || s.mode === "detail") && s.filter !== "") return `filter "${s.filter}" · `;
+  return "";
 }

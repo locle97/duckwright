@@ -5,7 +5,7 @@ import type { TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
 import type { CandidateIndex } from "../../src/tui/candidates.ts";
 import { EMPTY_COMPOSE, insertText } from "../../src/tui/compose.ts";
 import { openForm, formKey } from "../../src/tui/form.ts";
-import { helpBindings, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
+import { helpBindings, hintPrefix, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
 import { key } from "../../src/tui/keypress.ts";
 import { initialState, reduce } from "../../src/tui/state.ts";
@@ -364,4 +364,51 @@ test("keys_completion_closes_when_cursor_jumps_to_another_mention", () => {
   let s = reduce(composing("@ta @ta", true), { type: "compose", next: { ...EMPTY_COMPOSE, text: "@ta @ta", cursor: 3 } });
   s = reduce(s, { type: "completion", value: { index: IDX, highlight: 0 } });
   assert.equal(typeKeys(s, "end").s.completion, null);
+});
+
+const inFilter = (s: ViewState, draft: string): ViewState =>
+  reduce(reduce(s, { type: "openFilter" }), { type: "filterEdit", query: draft });
+const withFilter = (s: ViewState, q: string): ViewState => reduce(inFilter(s, q), { type: "filterKeep" });
+
+test("keys_slash_opens_filter", () => {
+  assert.deepEqual(press(mk("idle"), "/"), [ui({ type: "openFilter" })]);
+  assert.deepEqual(press(detailOf("running"), "/"), [ui({ type: "openFilter" })]);
+});
+
+test("keys_filter_mode", () => {
+  const s = inFilter(mk("idle"), "ab");
+  assert.deepEqual(press(s, "c"), [ui({ type: "filterEdit", query: "abc" })]);
+  assert.deepEqual(press(s, "backspace"), [ui({ type: "filterEdit", query: "a" })]);
+  assert.deepEqual(press(s, "ctrl+u"), [ui({ type: "filterEdit", query: "" })]);
+  assert.deepEqual(press(s, "return"), [ui({ type: "filterKeep" })]);
+  assert.deepEqual(press(s, "escape"), [ui({ type: "filterClear" })]);
+  assert.deepEqual(press(s, "up"), []);
+  assert.deepEqual(press(s, "ctrl+c"), [{ kind: "quit" }, ui({ type: "ctrlC" })]);
+});
+
+test("keys_esc_clears_active_filter", () => {
+  const s = withFilter(mk("idle"), "task");
+  assert.deepEqual(press(s, "escape"), [ui({ type: "filterClear" })]);
+  assert.deepEqual(press(mk("idle"), "escape"), []);
+});
+
+test("keys_filter_no_visible_task_noop", () => {
+  const s = withFilter(mk("idle", "idle"), "zzz");
+  for (const k of ["return", "d", "o", "j"]) assert.deepEqual(press(s, k), [], k);
+});
+
+test("keys_filter_hints", () => {
+  const f = inFilter(mk("idle"), "ab");
+  assert.deepEqual(hints(f), [{ key: "⏎", label: "keep" }, { key: "esc", label: "clear" }]);
+  assert.equal(hintPrefix(f), "/ab▌  ");
+  const list = withFilter(mk("idle"), "x");
+  assert.equal(hintPrefix(list), 'filter "x" · ');
+  assert.ok(hints(list).some((h) => h.key === "esc" && h.label === "clear filter"));
+  const detail = reduce(withFilter(detailOf("running"), "t"), { type: "focus", target: "detail" });
+  assert.equal(hintPrefix(detail), 'filter "t" · ');
+  assert.ok(!hints(detail).some((h) => h.label === "clear filter"));
+  const none = mk("idle");
+  assert.equal(hintPrefix(none), "");
+  assert.ok(!hints(none).some((h) => h.key === "/"));
+  assert.ok(helpBindings(none).some((h) => h.key === "/" && h.label === "filter"));
 });
