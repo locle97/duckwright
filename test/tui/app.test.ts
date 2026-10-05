@@ -79,7 +79,7 @@ test("app_empty_workspace", async () => {
   const f = t.frame();
   assert.match(f, /🦆 duckwright/);
   assert.match(f, /Describe a task, or @ a task file or folder…/);
-  assert.match(f, /a add/);
+  assert.match(f, /tab add/);
 });
 
 test("app_add_tasks_in_a_row", async () => {
@@ -455,7 +455,7 @@ test("app_completion_folder", async () => {
   assert.doesNotMatch(t.frame(), /tasks\/login\.md/);
   assert.match(t.frame(), /esc back/, "still in the add box");
   await t.type("\x1b");
-  assert.match(t.frame(), /a add/);
+  assert.match(t.frame(), /tab add/);
 });
 
 test("app_mixed_submission", async () => {

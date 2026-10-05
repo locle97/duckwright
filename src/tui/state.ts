@@ -77,7 +77,7 @@ export interface ViewState {
 export type UiAction =
   | { type: "tick"; now: number } | { type: "manager"; event: ManagerEvent }
   | { type: "select"; delta: number } | { type: "selectEdge"; edge: "first" | "last" }
-  | { type: "focus"; target: "list" | "detail" | "compose" } | { type: "toggleFocus" } | { type: "escape" }
+  | { type: "focus"; target: "list" | "detail" | "compose" } | { type: "escape" }
   | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
   | { type: "help"; open: boolean } | { type: "confirm"; value: ViewState["confirm"] }
   | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
@@ -367,10 +367,6 @@ function apply(s: ViewState, a: UiAction): ViewState {
       return snap({ ...s, filter: "", filterDraft: null, mode: "list" });
     case "focus":
       return a.target === "compose" ? { ...s, mode: "compose" } : { ...s, focus: a.target, mode: a.target };
-    case "toggleFocus": {
-      const focus = s.focus === "list" ? "detail" : "list";
-      return { ...s, focus, mode: focus };
-    }
     case "escape":
       if (s.mode === "list" || s.mode === "detail") return { ...s, focus: "list", mode: "list" };
       return {

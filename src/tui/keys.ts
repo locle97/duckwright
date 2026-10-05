@@ -52,7 +52,7 @@ function quitCommands(s: ViewState, activeRuns: number): Command[] {
 
 /** Bindings that mean the same in the list and the detail view. */
 const SHARED: Binding[] = [
-  { match: char("a"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "a", label: "add" }, footer: true },
+  { match: char("a"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "a", label: "add" }, footer: false },
   { match: char("p"), when: (c) => c.t?.state === "running", run: manager("pause"), hint: { key: "p", label: "pause" }, footer: true },
   { match: char("r"), when: (c) => c.t?.state === "paused", run: manager("resume"), hint: { key: "r", label: "resume" }, footer: true },
   { match: char("n", "."), when: (c) => c.t?.state === "paused", run: manager("step"), hint: { key: "n", label: "step" }, footer: true },
@@ -67,7 +67,6 @@ const SHARED: Binding[] = [
     run: (c) => (c.t ? [ui({ type: "confirm", value: { kind: "remove", taskId: c.t.id } })] : []),
     hint: { key: "d", label: "remove" }, footer: true,
   },
-  { match: named("tab"), when: (c) => hasTask(c) && (c.s.focus === "detail" || c.t?.runId != null), run: () => [ui({ type: "toggleFocus" })], hint: { key: "tab", label: "focus" }, footer: true },
   { match: char("/"), when: () => true, run: () => [ui({ type: "openFilter" })], hint: { key: "/", label: "filter" }, footer: false },
   { match: char("?"), when: () => true, run: () => [ui({ type: "help", open: true })], hint: { key: "?", label: "help" }, footer: true },
   { match: char("q"), when: () => true, run: (c) => quitCommands(c.s, c.activeRuns), hint: { key: "q", label: "quit" }, footer: false },
@@ -81,6 +80,8 @@ const LIST_ONLY: Binding[] = [
     run: (c) => (c.t ? (isLive(c.t) ? [ui({ type: "focus", target: "detail" })] : [{ kind: "manager", call: "start", id: c.t.id }]) : []),
     hint: { key: "⏎", label: "run" }, footer: true,
   },
+  { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "tab", label: "add" }, footer: true },
+  { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: true },
   { match: anyOf(named("up"), char("k")), when: hasTask, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: anyOf(named("down"), char("j")), when: hasTask, run: move(1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: named("pageUp"), when: hasTask, run: move(-PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
@@ -102,6 +103,7 @@ const DETAIL_ONLY: Binding[] = [
   { match: anyOf(char("G"), named("end")), when: hasRun, run: tl("last"), hint: { key: "G", label: "last step" }, footer: true },
   { match: char("e"), when: hasRun, run: tl("expandAll"), hint: { key: "e", label: "expand all" }, footer: false },
   { match: char("c"), when: hasRun, run: tl("collapseAll"), hint: { key: "c", label: "collapse all" }, footer: false },
+  { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "tab", label: "tasks" }, footer: true },
   { match: named("escape"), when: () => true, run: () => [ui({ type: "escape" })], hint: { key: "esc", label: "back" }, footer: false },
 ];
 
@@ -145,6 +147,7 @@ function composeCommands(k: KeyPress, s: ViewState): Command[] {
       return [ui({ type: "compose", next: applyCompletion(s.compose, item.path, "accept") }), closeList];
     }
   }
+  if (k.name === "tab" && !open && !k.ctrl && !k.meta) return [ui({ type: "focus", target: "list" })];
   if (k.name === "return" && !k.meta) {
     if (s.compose.text.trim() === "") return [];
     const { mentions, typed } = submission(s.compose.text);
@@ -238,7 +241,7 @@ export function hints(s: ViewState): Hint[] {
       }
       return [
         { key: "⏎", label: "add" }, { key: "@", label: "file" }, { key: "alt+⏎", label: "newline" },
-        { key: "↑↓", label: "history" }, { key: "esc", label: "back" },
+        { key: "↑↓", label: "history" }, { key: "tab", label: "tasks" }, { key: "esc", label: "back" },
       ];
     case "form": {
       const save: Hint[] = s.form !== null && formResult(s.form).ok ? [{ key: "⏎", label: "save" }] : [];

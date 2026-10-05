@@ -283,7 +283,7 @@ test("state_escape_restores_previous_focus", () => {
   const typed = { ...EMPTY_COMPOSE, text: "hello", cursor: 5 };
   let s = initialState(0, [task(1)]);
   assert.equal(s.mode, "list");
-  s = reduce(s, { type: "toggleFocus" });
+  s = reduce(s, { type: "focus", target: "detail" });
   assert.equal(s.focus, "detail");
   assert.equal(s.mode, "detail");
   s = reduce(s, { type: "focus", target: "compose" });
