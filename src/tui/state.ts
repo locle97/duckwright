@@ -8,10 +8,11 @@ import { EMPTY_COMPOSE, mentionAt } from "./compose.ts";
 import type { ComposeState } from "./compose.ts";
 import { visibleIndexes } from "./filter.ts";
 import { newestFirst } from "./order.ts";
+import { FIELD_COUNT } from "./form.ts";
 import type { FormState } from "./form.ts";
 
 /** `quitting`: a confirmed quit is stopping the runs; the panes stay and only Ctrl-C acts. */
-export type Mode = "list" | "detail" | "compose" | "form" | "help" | "confirm" | "filter" | "quitting";
+export type Mode = "list" | "detail" | "options" | "compose" | "form" | "help" | "confirm" | "filter" | "quitting";
 
 export interface StepView {
   step: number;
@@ -57,7 +58,9 @@ export interface ViewState {
   runs: Record<string, RunView>;
   /** Index into `tasks`. */
   selected: number;
-  focus: "list" | "detail";
+  focus: "list" | "detail" | "options";
+  /** The highlighted row of the options pane while it has the focus. */
+  optionsSelected: number;
   mode: Mode;
   /** The kept sidebar filter query; "" = none. */
   filter: string;
@@ -79,7 +82,8 @@ export interface ViewState {
 export type UiAction =
   | { type: "tick"; now: number } | { type: "manager"; event: ManagerEvent }
   | { type: "select"; delta: number } | { type: "selectEdge"; edge: "first" | "last" }
-  | { type: "focus"; target: "list" | "detail" | "compose" } | { type: "escape" }
+  | { type: "focus"; target: "list" | "detail" | "options" | "compose" } | { type: "escape" }
+  | { type: "optionsMove"; delta: number }
   | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
   | { type: "help"; open: boolean } | { type: "confirm"; value: ViewState["confirm"] }
   | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
@@ -125,7 +129,7 @@ export function initialState(
   now: number, tasks: TaskSnapshot[] = [], notices: string[] = [], globals: Globals | null = null,
 ): ViewState {
   let s: ViewState = {
-    now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list", filter: "", filterDraft: null,
+    now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", optionsSelected: 0, mode: "list", filter: "", filterDraft: null,
     compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, globals, confirm: null, toasts: [], ctrlC: 0,
   };
   for (const t of tasks) s = replayPast(s, t);
@@ -188,7 +192,7 @@ export function headerCounts(s: ViewState): { counts: Partial<Record<TaskState, 
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
 
-/** The base mode a focus shows when no overlay (compose, help, form, confirm) is open. */
+/** The base mode a focus shows when no overlay (compose, help, form, confirm, filter) is open. */
 const baseMode = (s: ViewState): Mode => s.focus;
 
 function addToast(s: ViewState, level: "info" | "error", message: string): ViewState {
@@ -379,7 +383,7 @@ function apply(s: ViewState, a: UiAction): ViewState {
     case "focus":
       return a.target === "compose" ? { ...s, mode: "compose" } : { ...s, focus: a.target, mode: a.target };
     case "escape":
-      if (s.mode === "list" || s.mode === "detail") return { ...s, focus: "list", mode: "list" };
+      if (s.mode === "list" || s.mode === "detail" || s.mode === "options") return { ...s, focus: "list", mode: "list" };
       return {
         ...s, mode: baseMode(s), form: s.mode === "form" ? null : s.form, confirm: s.mode === "confirm" ? null : s.confirm,
         completion: s.mode === "compose" ? null : s.completion,
@@ -401,8 +405,14 @@ function apply(s: ViewState, a: UiAction): ViewState {
       const hidden = !visibleTasks(s).includes(i);
       return { ...s, selected: i, ...(hidden ? { filter: "", filterDraft: null } : {}) };
     }
-    case "form":
-      return a.next ? { ...s, form: a.next, mode: "form" } : { ...s, form: null, mode: baseMode(s) };
+    case "form": {
+      if (a.next) return { ...s, form: a.next, mode: "form" };
+      // Closing the global options keeps the options pane on the field the form was on.
+      const optionsSelected = s.form?.taskId === null ? s.form.focus : s.optionsSelected;
+      return { ...s, form: null, mode: baseMode(s), optionsSelected };
+    }
+    case "optionsMove":
+      return { ...s, optionsSelected: clamp(s.optionsSelected + a.delta, 0, FIELD_COUNT - 1) };
     case "help":
       return { ...s, mode: a.open ? "help" : baseMode(s) };
     case "confirm":

@@ -20,6 +20,7 @@ import { FormView } from "./formView.ts";
 import { Header } from "./header.ts";
 import { Help } from "./help.ts";
 import type { KeyName, KeyPress } from "./keypress.ts";
+import { openForm } from "./form.ts";
 import { keymap, tooSmallKeymap } from "./keys.ts";
 import type { Command } from "./keys.ts";
 import { OptionsPane, optionsHeight } from "./optionsPane.ts";
@@ -223,6 +224,9 @@ function Workspace(p: AppProps): ReactElement {
   const overlay = s.mode === "help" ? h(Help, { key: "help", s, ...area })
     : s.mode === "form" && s.form !== null && s.form.taskId !== null ? h(FormView, { key: "form", form: s.form, title: "Settings", ...area })
     : s.mode === "form" && s.form !== null && oh === 0 ? h(FormView, { key: "form", form: s.form, title: "Global options", ...area })
+    : s.mode === "options" && s.globals !== null && oh === 0 ? h(FormView, {
+      key: "form", form: openForm(null, s.globals.base, s.globals.overrides, s.optionsSelected), title: "Global options", note: "⏎ edit", ...area,
+    })
     : s.mode === "confirm" && s.confirm !== null ? h(Confirm, { key: "confirm", s, ...area })
     : null;
 

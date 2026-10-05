@@ -95,7 +95,7 @@ test("keys_noop_without_live_run", () => {
   assert.deepEqual(press(mk("running"), "n"), []);
   // Every task-directed key on an empty list does nothing.
   const empty = initialState(0);
-  for (const spec of ["return", "space", "h", "l", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
+  for (const spec of ["return", "space", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
     assert.deepEqual(press(empty, spec), [], `${spec} on empty list`);
   }
   const emptyDetail = reduce(empty, { type: "focus", target: "detail" });
@@ -116,16 +116,36 @@ test("keys_space_starts_return_shows_details", () => {
   }
 });
 
-test("keys_h_l_cycle_panes", () => {
-  const toDetail = [ui({ type: "focus", target: "detail" })];
-  const toList = [ui({ type: "focus", target: "list" })];
+test("keys_h_l_switch_tasks_and_options", () => {
+  const globals = { base: task(1).effective, overrides: {} };
+  const list = initialState(0, [task(1)], [], globals);
   for (const k of ["h", "l"]) {
-    assert.deepEqual(press(mk("idle"), k), toDetail, `${k} from the list`);
-    assert.deepEqual(press(detailOf("running"), k), toList, `${k} from the details`);
+    assert.deepEqual(press(list, k), [ui({ type: "focus", target: "options" })], `${k} from the tasks`);
+    assert.deepEqual(press(initialState(0, [], [], globals), k), [ui({ type: "focus", target: "options" })], `${k} with no tasks`);
+    assert.deepEqual(press(mk("idle"), k), [], `${k}: no globals yet`);
   }
-  assert.deepEqual(play(detailOf("running"), press(detailOf("running"), "h")).mode, "list");
+  const opts = play(list, press(list, "l"));
+  assert.equal(opts.mode, "options");
+  for (const k of ["h", "l", "escape", "tab"]) assert.deepEqual(press(opts, k), [ui({ type: "focus", target: "list" })], `${k} from the options`);
+  assert.deepEqual(press(detailOf("running"), "l"), [], "the detail pane is not in the h/l cycle");
+  // j/k pick a field; return edits it in place, starting on that field.
+  assert.deepEqual(press(opts, "j"), [ui({ type: "optionsMove", delta: 1 })]);
+  assert.deepEqual(press(opts, "up"), [ui({ type: "optionsMove", delta: -1 })]);
+  const second = play(opts, press(opts, "down"));
+  assert.equal(second.optionsSelected, 1);
+  const editing = play(second, press(second, "return"));
+  assert.equal(editingGlobals(editing), true);
+  assert.equal(editing.form?.focus, 1);
+  // h is text while editing (a model name can hold one).
+  assert.notDeepEqual(press(editing, "h"), [ui({ type: "focus", target: "list" })]);
+  // Leaving the form goes back to the options pane, on the field it was on.
+  const back = play(editing, press(editing, "escape"));
+  assert.equal(back.mode, "options");
+  assert.equal(back.optionsSelected, 1);
+  assert.equal(footer(opts), "↑↓ j/k move · ⏎ edit · h/l tasks · ? help");
+  assert.ok(helpBindings(opts).some((h) => h.key === "h/l" && h.label === "tasks"));
+  assert.ok(helpBindings(list).some((h) => h.key === "h/l" && h.label === "options"));
 });
-
 test("keys_compose_submit_and_escape", () => {
   let s = reduce(mk("idle"), { type: "focus", target: "compose" });
   assert.equal(s.mode, "compose");
@@ -254,14 +274,13 @@ test("hints_per_mode_and_state", () => {
 
 test("help_lists_mode_bindings", () => {
   const list = helpBindings(mk("idle")).map((h) => `${h.key} ${h.label}`);
-  for (const want of ["space run", "⏎ details", "h/l switch pane", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
+  for (const want of ["space run", "⏎ details", "h/l options", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
     assert.ok(list.some((l) => l.startsWith(want)), `list help has ${want}: ${list.join("|")}`);
   }
   const detail = helpBindings(reduce(mk("idle"), { type: "focus", target: "detail" })).map((h) => `${h.key} ${h.label}`);
   assert.ok(detail.some((l) => l.includes("expand all")));
   assert.ok(detail.some((l) => l.includes("collapse all")));
   assert.ok(!detail.some((l) => l.startsWith("space run")));
-  assert.ok(detail.some((l) => l.startsWith("h/l switch pane")));
   assert.ok(detail.some((l) => l.startsWith("tab tasks")));
 });
 

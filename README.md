@@ -143,7 +143,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 
 `duckwright --tui` opens a workspace in the terminal. You queue tasks, start several at once, and watch each step's goal, actions, results, and running cost live. Pass the usual options (`--model`, `--max-steps`, ...) as defaults for every task, and `--max-parallel N` to cap concurrent runs.
 
-**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, export, snapshot mode), and `O` edits them. They apply to every task's next run, above the command-line flags and below a task's own `o` options.
+**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, export, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
 
 **Past runs.** Runs saved in `runs/` appear in the sidebar with a muted name, newest `--past N` of them (default 20). They are read-only: select one to see its timeline, and press `space` to run it again with the current flags.
 
@@ -157,7 +157,7 @@ Six keys to learn first:
 | --- | --- |
 | `a` | Add a task |
 | `space` | Start the selected task |
-| `⏎` | Show the selected task's details (`h`/`l` switch between the list and the details) |
+| `⏎` | Show the selected task's details |
 | `p` | Pause or resume it |
 | `s` | Stop it |
 | `q` | Quit (asks first if runs are active) |

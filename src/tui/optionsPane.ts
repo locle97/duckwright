@@ -1,5 +1,5 @@
 // The global options pane under the task list: the options every task's next run starts from,
-// set values in the accent colour, edited in place after `O`.
+// set values in the accent colour. h/l focus it, ⏎ (or `O` from anywhere) edits it in place.
 import { Box, Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
@@ -41,17 +41,19 @@ export function OptionsPane({ s, width, height }: { s: ViewState; width: number;
   const g = s.globals;
   if (g === null) return h(Box, { width, height, flexShrink: 0 });
   const editing = editingGlobals(s);
+  // Navigating: the pane has the focus and a highlighted row, but nothing is being edited.
+  const navigating = !editing && s.focus === "options" && s.mode !== "compose";
   const form = editing && s.form !== null ? s.form : openForm(null, g.base, g.overrides);
   const labelWidth = Math.max(...form.fields.map((f) => f.label.length)) + 2;
   const rows: ReactElement[] = [];
   let focusedRow = 0;
   form.fields.forEach((f, i) => {
-    const focused = editing && i === form.focus;
+    const focused = (editing && i === form.focus) || (navigating && i === s.optionsSelected);
     if (focused) focusedRow = rows.length;
     rows.push(h(Text, { key: f.key, wrap: "truncate-end" },
       focused ? h(Text, { color: role.accent }, "› ") : "  ",
       h(Text, { color: role.muted }, f.label.padEnd(labelWidth)),
-      h(Text, { color: f.overridden ? role.accent : undefined, inverse: focused }, sanitize(f.raw) || " ")));
+      h(Text, { color: f.overridden ? role.accent : undefined, inverse: focused && editing }, sanitize(f.raw) || " ")));
     if (editing && f.error !== null) {
       // The column is narrow: the error wraps over as many rows as it needs, so it can be read.
       wrapWords(sanitize(f.error), Math.max(1, width - 8)).forEach((line, j) => {
@@ -63,7 +65,7 @@ export function OptionsPane({ s, width, height }: { s: ViewState; width: number;
   const start = scrollStart(focusedRow, rows.length, size);
   return h(Box, {
     flexDirection: "column", width, height, flexShrink: 0, overflow: "hidden", paddingX: 1,
-    ...paneBorder(theme, editing),
+    ...paneBorder(theme, editing || navigating),
   },
   h(Text, { color: role.muted, bold: true, wrap: "truncate-end" }, "OPTIONS"),
   ...rows.slice(start, start + size));

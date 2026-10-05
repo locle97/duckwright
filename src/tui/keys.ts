@@ -85,8 +85,7 @@ const LIST_ONLY: Binding[] = [
   { match: named("return"), when: hasTask, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "⏎", label: "details" }, footer: true },
   { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "tab", label: "add" }, footer: true },
   { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: false },
-  // h and l both cycle between the two panes.
-  { match: char("h", "l"), when: hasTask, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "h/l", label: "switch pane" }, footer: false },
+  { match: char("h", "l"), when: (c) => c.s.globals !== null, run: () => [ui({ type: "focus", target: "options" })], hint: { key: "h/l", label: "options" }, footer: false },
   { match: anyOf(named("up"), char("k")), when: hasTask, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: anyOf(named("down"), char("j")), when: hasTask, run: move(1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: named("pageUp"), when: hasTask, run: move(-PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
@@ -109,12 +108,27 @@ const DETAIL_ONLY: Binding[] = [
   { match: char("e"), when: hasRun, run: tl("expandAll"), hint: { key: "e", label: "expand all" }, footer: false },
   { match: char("c"), when: hasRun, run: tl("collapseAll"), hint: { key: "c", label: "collapse all" }, footer: false },
   { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "tab", label: "tasks" }, footer: true },
-  { match: char("h", "l"), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "h/l", label: "switch pane" }, footer: false },
   { match: named("escape"), when: () => true, run: () => [ui({ type: "escape" })], hint: { key: "esc", label: "back" }, footer: false },
 ];
 
-/** The binding table for a list or detail screen: mode-specific bindings first, then the shared ones. */
-function table(mode: "list" | "detail"): Binding[] {
+/** The options pane: pick a field, edit it in place; h/l go back to the tasks. */
+const OPTIONS: Binding[] = [
+  { match: anyOf(named("up"), char("k")), when: () => true, run: () => [ui({ type: "optionsMove", delta: -1 })], hint: { key: "↑↓ j/k", label: "move" }, footer: true },
+  { match: anyOf(named("down"), char("j")), when: () => true, run: () => [ui({ type: "optionsMove", delta: 1 })], hint: { key: "↑↓ j/k", label: "move" }, footer: true },
+  {
+    match: anyOf(named("return"), char("O")), when: (c) => c.s.globals !== null,
+    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides, c.s.optionsSelected) })] : []),
+    hint: { key: "⏎", label: "edit" }, footer: true,
+  },
+  { match: anyOf(char("h", "l"), named("escape"), named("tab")), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "h/l", label: "tasks" }, footer: true },
+  { match: char("a"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "a", label: "add" }, footer: false },
+  { match: char("?"), when: () => true, run: () => [ui({ type: "help", open: true })], hint: { key: "?", label: "help" }, footer: true },
+  { match: char("q"), when: () => true, run: (c) => quitCommands(c.s, c.activeRuns), hint: { key: "q", label: "quit" }, footer: false },
+];
+
+/** The binding table for a list, detail or options screen: mode-specific bindings first, then the shared ones. */
+function table(mode: "list" | "detail" | "options"): Binding[] {
+  if (mode === "options") return OPTIONS;
   return mode === "list" ? [...LIST_ONLY, ...SHARED] : [...DETAIL_ONLY, ...SHARED];
 }
 
@@ -221,7 +235,8 @@ export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[]
     case "quitting":
       return [];
     case "list":
-    case "detail": {
+    case "detail":
+    case "options": {
       const c = ctx(s, activeRuns);
       const b = table(s.mode).find((x) => x.match(k) && x.when(c));
       return b ? b.run(c) : [];
@@ -266,7 +281,8 @@ export function hints(s: ViewState): Hint[] {
     case "quitting":
       return [];
     case "list":
-    case "detail": {
+    case "detail":
+    case "options": {
       const c = ctx(s, 0);
       return dedupe(table(s.mode).filter((b) => b.footer && b.when(c)).map((b) => b.hint));
     }
@@ -282,6 +298,6 @@ export function helpBindings(s: ViewState): Hint[] {
 /** Raw text placed before the footer hints: the filter being typed, or the active filter. */
 export function hintPrefix(s: ViewState): string {
   if (s.mode === "filter") return `/${s.filterDraft ?? ""}▌  `;
-  if ((s.mode === "list" || s.mode === "detail") && s.filter !== "") return `filter "${s.filter}" · `;
+  if ((s.mode === "list" || s.mode === "detail" || s.mode === "options") && s.filter !== "") return `filter "${s.filter}" · `;
   return "";
 }

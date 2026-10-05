@@ -18,6 +18,7 @@ const LABELS: Record<FieldKey, string> = {
   model: "model", maxSteps: "max steps", headed: "headed", export: "export", snapshot: "snapshot mode",
 };
 const ORDER: readonly FieldKey[] = ["model", "maxSteps", "headed", "export", "snapshot"];
+export const FIELD_COUNT = ORDER.length;
 const SNAPSHOT_CYCLE: readonly SnapshotMode[] = ["hybrid", "full", "grep"];
 
 function validate(key: FieldKey, raw: string): string | null {
@@ -30,14 +31,15 @@ function validate(key: FieldKey, raw: string): string | null {
   }
 }
 
-export function openForm(taskId: TaskId | null, effective: Effective, overrides: Overrides): FormState {
+/** `focus`: the field the form starts on. */
+export function openForm(taskId: TaskId | null, effective: Effective, overrides: Overrides, focus = 0): FormState {
   const fields = ORDER.map((k): Field => {
     const eff = String(effective[k]);
     const overridden = overrides[k] !== undefined;
     const raw = overridden ? String(overrides[k]) : eff;
     return { key: k, label: LABELS[k], raw, overridden, error: overridden ? validate(k, raw) : null, effective: eff };
   });
-  return { taskId, fields, focus: 0 };
+  return { taskId, fields, focus };
 }
 
 function edit(f: FormState, raw: string): FormState {

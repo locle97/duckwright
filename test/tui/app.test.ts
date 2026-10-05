@@ -676,3 +676,28 @@ test("app_global_options_dialog_when_no_room", async () => {
     cleanup();
   }
 });
+
+test("app_h_l_focus_options_pane", async () => {
+  const m = new FakeManager([snapshot(1, "First")]);
+  const t = mount(m, { columns: 100, rows: 40 });
+  await settle();
+  await t.type("l", "j");
+  assert.match(t.frame(), /› max steps +25/, "the options pane has the focus marker");
+  assert.match(t.frame(), /h\/l tasks/);
+  await t.type("\r", "\x7f", "\x7f", "6", "\r");
+  assert.deepEqual(m.globalsSaved, [{ maxSteps: 6 }]);
+  assert.match(t.frame(), /› max steps +6/, "back on the options pane after saving");
+  await t.type("h");
+  assert.doesNotMatch(t.frame(), /›  ?(model|max steps)/, "the tasks pane has the focus again");
+  assert.match(t.frame(), /space run/);
+});
+
+test("app_options_focus_without_room_shows_dialog", async () => {
+  const t = mount(new FakeManager([snapshot(1, "First")]), { columns: 59, rows: 24 });
+  await settle();
+  await t.type("l");
+  assert.match(t.frame(), /Global options/);
+  assert.match(t.frame(), /› model +sonnet/);
+  await t.type("h");
+  assert.doesNotMatch(t.frame(), /Global options/);
+});

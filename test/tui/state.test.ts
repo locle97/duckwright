@@ -616,3 +616,16 @@ test("state_globals", () => {
   s = reduce(s, { type: "form", next: { taskId: 1, fields: [], focus: 0 } });
   assert.equal(editingGlobals(s), false, "a task's form is not the globals");
 });
+
+test("state_options_focus", () => {
+  let s = initialState(0, [task(1)], [], { base: task(1).effective, overrides: {} });
+  assert.equal(s.optionsSelected, 0);
+  s = reduce(s, { type: "focus", target: "options" });
+  assert.deepEqual([s.focus, s.mode], ["options", "options"]);
+  s = reduce(s, { type: "optionsMove", delta: -1 });
+  assert.equal(s.optionsSelected, 0, "clamped at the first field");
+  s = reduce(s, { type: "optionsMove", delta: 9 });
+  assert.equal(s.optionsSelected, 4, "clamped at the last field");
+  s = reduce(s, { type: "escape" });
+  assert.deepEqual([s.focus, s.mode], ["list", "list"]);
+});
