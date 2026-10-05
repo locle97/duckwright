@@ -475,7 +475,7 @@ test("app_add_keeps_selection", async () => {
   const m = new FakeManager([snapshot(1, "First"), snapshot(2, "Second")]);
   const t = mount(m);
   await settle();
-  await t.type("j", "a", "x", "\r", "\x1b", "\r");
+  await t.type("j", "a", "x", "\r", "\x1b", " ");
   assert.equal(m.log[m.log.length - 1], "start:1");
   const f = t.frame();
   assert.ok(f.indexOf('"x"') >= 0 && f.indexOf('"x"') < f.indexOf('"Second"'), "x row comes before Second");

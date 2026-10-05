@@ -95,7 +95,7 @@ test("keys_noop_without_live_run", () => {
   assert.deepEqual(press(mk("running"), "n"), []);
   // Every task-directed key on an empty list does nothing.
   const empty = initialState(0);
-  for (const spec of ["return", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
+  for (const spec of ["return", "space", "h", "l", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
     assert.deepEqual(press(empty, spec), [], `${spec} on empty list`);
   }
   const emptyDetail = reduce(empty, { type: "focus", target: "detail" });
@@ -104,13 +104,26 @@ test("keys_noop_without_live_run", () => {
   }
 });
 
-test("keys_return_starts_or_focuses", () => {
+test("keys_space_starts_return_shows_details", () => {
   for (const state of ["idle", "passed", "failed", "stopped"] as const) {
-    assert.deepEqual(press(mk(state), "return"), [{ kind: "manager", call: "start", id: 1 }], state);
+    assert.deepEqual(press(mk(state), "space"), [{ kind: "manager", call: "start", id: 1 }], state);
   }
   for (const state of ["running", "paused", "stopping"] as const) {
+    assert.deepEqual(press(mk(state), "space"), [], `${state}: already live`);
+  }
+  for (const state of ["idle", "running", "passed"] as const) {
     assert.deepEqual(press(mk(state), "return"), [ui({ type: "focus", target: "detail" })], state);
   }
+});
+
+test("keys_h_l_cycle_panes", () => {
+  const toDetail = [ui({ type: "focus", target: "detail" })];
+  const toList = [ui({ type: "focus", target: "list" })];
+  for (const k of ["h", "l"]) {
+    assert.deepEqual(press(mk("idle"), k), toDetail, `${k} from the list`);
+    assert.deepEqual(press(detailOf("running"), k), toList, `${k} from the details`);
+  }
+  assert.deepEqual(play(detailOf("running"), press(detailOf("running"), "h")).mode, "list");
 });
 
 test("keys_compose_submit_and_escape", () => {
@@ -223,10 +236,10 @@ test("keys_too_small_screen", () => {
 });
 
 test("hints_per_mode_and_state", () => {
-  assert.equal(footer(mk("running")), "⏎ open · tab add · → details · p pause · s stop · ? help");
-  assert.equal(footer(mk("paused")), "⏎ open · tab add · → details · r resume · n step · s stop · ? help");
-  assert.equal(footer(mk("idle")), "⏎ run · tab add · o options · d remove · ? help");
-  assert.equal(footer(mk("stopping")), "⏎ open · tab add · → details · ? help");
+  assert.equal(footer(mk("running")), "⏎ details · tab add · p pause · s stop · ? help");
+  assert.equal(footer(mk("paused")), "⏎ details · tab add · r resume · n step · s stop · ? help");
+  assert.equal(footer(mk("idle")), "space run · ⏎ details · tab add · o options · d remove · ? help");
+  assert.equal(footer(mk("stopping")), "⏎ details · tab add · ? help");
   assert.equal(footer(initialState(0)), "tab add · ? help");
   assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back");
   const t = task(1);
@@ -241,13 +254,14 @@ test("hints_per_mode_and_state", () => {
 
 test("help_lists_mode_bindings", () => {
   const list = helpBindings(mk("idle")).map((h) => `${h.key} ${h.label}`);
-  for (const want of ["⏎ run", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
+  for (const want of ["space run", "⏎ details", "h/l switch pane", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
     assert.ok(list.some((l) => l.startsWith(want)), `list help has ${want}: ${list.join("|")}`);
   }
   const detail = helpBindings(reduce(mk("idle"), { type: "focus", target: "detail" })).map((h) => `${h.key} ${h.label}`);
   assert.ok(detail.some((l) => l.includes("expand all")));
   assert.ok(detail.some((l) => l.includes("collapse all")));
-  assert.ok(!detail.some((l) => l.startsWith("⏎ run")));
+  assert.ok(!detail.some((l) => l.startsWith("space run")));
+  assert.ok(detail.some((l) => l.startsWith("h/l switch pane")));
   assert.ok(detail.some((l) => l.startsWith("tab tasks")));
 });
 

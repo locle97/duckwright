@@ -81,13 +81,12 @@ const SHARED: Binding[] = [
 const move = (delta: number) => (): Command[] => [ui({ type: "select", delta })];
 const LIST_ONLY: Binding[] = [
   { match: named("escape"), when: (c) => c.s.filter !== "", run: () => [ui({ type: "filterClear" })], hint: { key: "esc", label: "clear filter" }, footer: true },
-  {
-    match: named("return"), when: hasTask,
-    run: (c) => (c.t ? (isLive(c.t) ? [ui({ type: "focus", target: "detail" })] : [{ kind: "manager", call: "start", id: c.t.id }]) : []),
-    hint: { key: "⏎", label: "run" }, footer: true,
-  },
+  { match: char(" "), when: (c) => hasTask(c) && !isLive(c.t), run: manager("start"), hint: { key: "space", label: "run" }, footer: true },
+  { match: named("return"), when: hasTask, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "⏎", label: "details" }, footer: true },
   { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "tab", label: "add" }, footer: true },
-  { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: true },
+  { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: false },
+  // h and l both cycle between the two panes.
+  { match: char("h", "l"), when: hasTask, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "h/l", label: "switch pane" }, footer: false },
   { match: anyOf(named("up"), char("k")), when: hasTask, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: anyOf(named("down"), char("j")), when: hasTask, run: move(1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: named("pageUp"), when: hasTask, run: move(-PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
@@ -110,6 +109,7 @@ const DETAIL_ONLY: Binding[] = [
   { match: char("e"), when: hasRun, run: tl("expandAll"), hint: { key: "e", label: "expand all" }, footer: false },
   { match: char("c"), when: hasRun, run: tl("collapseAll"), hint: { key: "c", label: "collapse all" }, footer: false },
   { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "tab", label: "tasks" }, footer: true },
+  { match: char("h", "l"), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "h/l", label: "switch pane" }, footer: false },
   { match: named("escape"), when: () => true, run: () => [ui({ type: "escape" })], hint: { key: "esc", label: "back" }, footer: false },
 ];
 
@@ -268,10 +268,7 @@ export function hints(s: ViewState): Hint[] {
     case "list":
     case "detail": {
       const c = ctx(s, 0);
-      const live = table(s.mode).filter((b) => b.footer && b.when(c)).map((b) => b.hint);
-      // Return opens a live run but starts anything else; the table's hint says "run".
-      const open = s.mode === "list" && isLive(c.t);
-      return dedupe(live.map((h) => (open && h.key === "⏎" ? { key: "⏎", label: "open" } : h)));
+      return dedupe(table(s.mode).filter((b) => b.footer && b.when(c)).map((b) => b.hint));
     }
   }
 }
@@ -279,9 +276,7 @@ export function hints(s: ViewState): Hint[] {
 /** Every binding of the screen the help overlay was opened from, regardless of the current task. */
 export function helpBindings(s: ViewState): Hint[] {
   const mode = s.focus;
-  const rows = table(mode).map((b) => b.hint);
-  const extra: Hint[] = mode === "list" ? [{ key: "⏎", label: "open run (live task)" }] : [];
-  return dedupe([...rows, ...extra]);
+  return dedupe(table(mode).map((b) => b.hint));
 }
 
 /** Raw text placed before the footer hints: the filter being typed, or the active filter. */
