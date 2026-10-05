@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, mock, test } from "node:test";
 
-import { TaskFileError, expandTaskPaths, loadTaskFile, taskPaths } from "../src/taskfile.ts";
+import { TaskFileError, expandTaskPaths, loadTaskFile, settingValue, taskPaths } from "../src/taskfile.ts";
 import { ROOT, tmpDir } from "./helpers.ts";
 
 function w(dir: string, text: string | Buffer, name = "t.md"): string {
@@ -291,4 +291,26 @@ test("task_paths_keeps_every_folder_error_in_order", () => {
   assert.deepEqual(out.map((p) => (p instanceof TaskFileError ? p.message : p)), [
     "empty: no task files (.md or .txt)", "x.md", "nope", "tasks/a.md",
   ]);
+});
+
+test("settingvalue_messages_match_front_matter", () => {
+  const tmp = tmpDir();
+  const cases: [string, string, string][] = [
+    ["max-steps", "0", "max-steps must be a whole number of at least 1, got \"0\""],
+    ["headed", "yes", "headed must be true or false, got \"yes\""],
+    ["export", "1", "export must be true or false, got \"1\""],
+    ["snapshot", "tree", "snapshot must be full, grep or hybrid, got \"tree\""],
+  ];
+  for (const [key, raw, message] of cases) {
+    assert.equal(err(w(tmp, `---\n${key}: ${raw}\n---\ntask\n`)), `${path.join(tmp, "t.md")}:2: ${message}`);
+    assert.throws(
+      () => settingValue(key as "max-steps", raw),
+      (e: unknown) => e instanceof TaskFileError && e.message === message,
+    );
+  }
+  assert.equal(settingValue("max-steps", "12"), 12);
+  assert.equal(settingValue("headed", "true"), true);
+  assert.equal(settingValue("snapshot", "grep"), "grep");
+  assert.equal(settingValue("model", "m1"), "m1");
+  assert.throws(() => settingValue("model", ""), /"model" has no value/);
 });

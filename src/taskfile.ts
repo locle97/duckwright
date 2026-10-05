@@ -101,6 +101,22 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
   return v;
 }
 
+/**
+ * Validate one value for a front-matter key outside a file (the TUI settings form).
+ * Throws TaskFileError with the front-matter message, minus the file and line prefix.
+ */
+export function settingValue(
+  key: "max-steps" | "model" | "headed" | "export" | "snapshot", raw: string,
+): string | number | boolean {
+  try {
+    if (!raw) throw new LineError(`"${key}" has no value`);
+    return convert(key, KEYS[key][1], raw, "");
+  } catch (e) {
+    if (e instanceof LineError) throw new TaskFileError(e.message);
+    throw e;
+  }
+}
+
 function parseSettings(lines: [number, string][], baseDir: string, where: string): TaskSettings {
   const settings: Record<string, unknown> = {};
   for (const [n, line] of lines) {
