@@ -9,6 +9,7 @@ import { RunEvents } from "../../src/events.ts";
 import type { RunOutcome } from "../../src/events.ts";
 import { RunManager, taskName } from "../../src/runs/manager.ts";
 import type { ManagerEvent, ManagerOptions } from "../../src/runs/manager.ts";
+import type { PastRun } from "../../src/runs/past.ts";
 import type { RunHandle, RunSpec } from "../../src/runs/run.ts";
 import { resolvePath } from "../../src/paths.ts";
 import { tmpDir } from "../helpers.ts";
@@ -459,4 +460,100 @@ test("manager_summary_names_file_tasks", async () => {
   fakes[0].finish(outcome("pass"));
   await tick();
   assert.match(mgr.summary().lines[1] ?? "", /^pass  a\.md  /);
+});
+
+function pastRun(id: string, status: "pass" | "fail" | "stop", over: Partial<PastRun> = {}): PastRun {
+  const out = outcome(status);
+  return {
+    id, workdir: `/runs/${id}`, text: `text of ${id}`, source: { kind: "typed" }, fileSettings: {},
+    events: [{ type: "run:end", at: 1, outcome: out }], outcome: out, startedAt: 0, ...over,
+  };
+}
+
+test("manager_past_tasks_first", () => {
+  const dir = tree({ "a.md": "A" });
+  const file = `${dir}/a.md`;
+  const p1 = pastRun("20260101-000000-a", "fail");
+  const p2 = pastRun("20260101-000001-b", "pass", { source: { kind: "file", path: file } });
+  const { mgr, events } = setup({ cwd: dir, past: [p1, p2] });
+  mgr.addTyped("new");
+  const list = mgr.list();
+  assert.deepEqual(list.map((t) => t.id), [1, 2, 3]);
+  assert.equal(list[0].state, "failed");
+  assert.equal(list[0].runId, p1.id);
+  assert.equal(list[0].runCount, 0);
+  assert.deepEqual(list[0].past, { runId: p1.id, events: p1.events });
+  assert.equal(list[1].state, "passed");
+  assert.deepEqual(list[1].source, { kind: "file", path: file });
+  assert.equal(list[1].name, "a.md");
+  assert.equal("past" in list[2], false);
+  assert.deepEqual(events.map((e) => e.type), ["task:added"]);
+});
+
+test("manager_created_at_stamped_and_stable", async () => {
+  let t = 0;
+  const now = () => (t += 100);
+  const { mgr, fakes, events } = setup({ now });
+  const id1 = mgr.addTyped("a");
+  mgr.addTyped("b");
+  assert.deepEqual(mgr.list().map((x) => x.createdAt), [100, 200]);
+  const added = events.flatMap((e) => (e.type === "task:added" ? [e.task.createdAt] : []));
+  assert.deepEqual(added, [100, 200]);
+  mgr.start(id1);
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  assert.equal(mgr.list()[0].createdAt, 100);
+  assert.deepEqual(mgr.list().map((x) => x.id), [1, 2]);
+});
+
+test("manager_created_at_file_task", () => {
+  const dir = tree({ "a.md": "A" });
+  const { mgr, events } = setup({ cwd: dir, now: () => 300 });
+  mgr.add({ mentions: [`${dir}/a.md`], typed: null });
+  const added = events.flatMap((e) => (e.type === "task:added" ? [e.task.createdAt] : []));
+  assert.deepEqual(added, [300]);
+});
+
+test("manager_past_created_at_is_started_at", () => {
+  const { mgr } = setup({ past: [pastRun("20260101-000000-a", "pass", { startedAt: 42 })] });
+  assert.equal(mgr.list()[0].createdAt, 42);
+});
+
+test("manager_past_excluded_from_summary", () => {
+  const { mgr } = setup({ past: [pastRun("20260101-000000-a", "fail")] });
+  assert.deepEqual(mgr.summary(), { lines: [], exitCode: 0 });
+});
+
+test("manager_rerun_past_task", async () => {
+  const dir = tree({ "a.md": "A" });
+  const file = `${dir}/a.md`;
+  const p = pastRun("20260101-000000-a", "fail", { source: { kind: "file", path: file }, text: "past text" });
+  const { mgr, fakes } = setup({ cwd: dir, past: [p] });
+  assert.equal(mgr.start(1).ok, true);
+  assert.equal(fakes[0].spec.task, "past text");
+  assert.equal(fakes[0].spec.taskFile, file);
+  const t = mgr.list()[0];
+  assert.equal(t.runId, "run-1");
+  assert.equal(t.past?.runId, "run-1");
+  assert.equal(t.runCount, 1);
+  assert.equal(t.state, "running");
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  assert.equal(mgr.list()[0].state, "passed");
+  assert.match(mgr.summary().lines[1] ?? "", /^pass  a\.md  /);
+});
+
+test("manager_past_file_duplicate", () => {
+  const dir = tree({ "a.md": "A" });
+  const file = `${dir}/a.md`;
+  const { mgr } = setup({ cwd: dir, past: [pastRun("20260101-000000-a", "pass", { source: { kind: "file", path: file } })] });
+  const r = mgr.add({ mentions: [file], typed: null });
+  assert.deepEqual(r, { ok: true, added: [], duplicates: ["a.md"] });
+  assert.equal(mgr.list().length, 1);
+});
+
+test("manager_notify_emits_toast", () => {
+  const { mgr, events } = setup();
+  mgr.notify("error", "x");
+  assert.deepEqual(events[events.length - 1], { type: "toast", level: "error", message: "x" });
 });

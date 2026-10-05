@@ -6,6 +6,8 @@ import { createElement as h } from "react";
 import type { TuiHandle } from "../cli.ts";
 import type { ManagerLike } from "../runs/manager.ts";
 import { App } from "./app.ts";
+import { resolveTheme } from "./theme.ts";
+import type { ThemeName } from "./theme.ts";
 
 /** Leave the alternate screen and show the cursor. */
 const RESTORE = "\x1b[?1049l\x1b[?25h";
@@ -16,6 +18,10 @@ export interface StartTuiOptions {
   stdout?: NodeJS.WriteStream;
   stderr?: NodeJS.WriteStream;
   exit?: (code: number) => never;
+  theme?: ThemeName;
+  notices?: string[];
+  /** Default `process.env`. */
+  env?: Record<string, string | undefined>;
 }
 
 export function startTui(o: StartTuiOptions): TuiHandle {
@@ -24,6 +30,7 @@ export function startTui(o: StartTuiOptions): TuiHandle {
   const stderr = o.stderr ?? process.stderr;
   const exit = o.exit ?? ((code: number): never => process.exit(code));
 
+  const theme = resolveTheme(o.theme ?? "auto", o.env ?? process.env);
   let restored = false;
   const restoreTerminal = (): void => {
     if (restored) return;
@@ -81,8 +88,9 @@ export function startTui(o: StartTuiOptions): TuiHandle {
   const quitRequest = new AbortController();
   try {
     process.on("SIGINT", onSigint);
-    instance = render(h(App, { manager: o.manager, quitSignal: quitRequest.signal, onQuit, onForceExit: forceExit }), {
-      stdin, stdout, stderr, exitOnCtrlC: false, patchConsole: true, alternateScreen: true,
+    instance = render(h(App, { manager: o.manager, theme, notices: o.notices, quitSignal: quitRequest.signal, onQuit, onForceExit: forceExit }), {
+      // The CLI only starts the TUI on a TTY: don't let Ink's CI detection turn off live frames.
+      stdin, stdout, stderr, exitOnCtrlC: false, patchConsole: true, alternateScreen: true, interactive: true,
     });
   } catch (e) {
     stopWatchingSigint();

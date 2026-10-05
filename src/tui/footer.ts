@@ -3,7 +3,8 @@ import { Box, Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
 
-import { hints } from "./keys.ts";
+import { hintPrefix, hints } from "./keys.ts";
+import { sanitize } from "./sanitize.ts";
 import { liveCount } from "./state.ts";
 import type { ViewState } from "./state.ts";
 
@@ -14,6 +15,6 @@ export function quittingText(s: ViewState): string {
 }
 
 export function Footer({ s, width }: { s: ViewState; width: number }): ReactElement {
-  const text = s.mode === "quitting" ? quittingText(s) : hints(s).map((x) => `${x.key} ${x.label}`).join(" · ");
+  const text = s.mode === "quitting" ? quittingText(s) : sanitize(hintPrefix(s)) + hints(s).map((x) => `${x.key} ${x.label}`).join(" · ");
   return h(Box, { width, paddingX: 1, flexShrink: 0 }, h(Text, { wrap: "truncate-end" }, text));
 }

@@ -5,7 +5,7 @@ import type { TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
 import type { CandidateIndex } from "../../src/tui/candidates.ts";
 import { EMPTY_COMPOSE, insertText } from "../../src/tui/compose.ts";
 import { openForm, formKey } from "../../src/tui/form.ts";
-import { helpBindings, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
+import { helpBindings, hintPrefix, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
 import { key } from "../../src/tui/keypress.ts";
 import { initialState, reduce } from "../../src/tui/state.ts";
@@ -16,7 +16,7 @@ function task(id: number, state: TaskState = "idle"): TaskSnapshot {
   return {
     id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, export: false, snapshot: "hybrid" },
-    error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0,
+    error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0, createdAt: 0,
   };
 }
 
@@ -37,7 +37,8 @@ function detailOf(state: TaskState): ViewState {
 const footer = (s: ViewState): string => hints(s).map((h) => `${h.key} ${h.label}`).join(" · ");
 
 test("keys_list_bindings", () => {
-  const s = mk("running", "paused", "idle");
+  // Newest first: display order is task 3, 2, 1, so start on the bottom row (task 1).
+  const s = reduce(mk("running", "paused", "idle"), { type: "selectEdge", edge: "last" });
   assert.deepEqual(press(s, "j"), [ui({ type: "select", delta: 1 })]);
   assert.deepEqual(press(s, "down"), [ui({ type: "select", delta: 1 })]);
   assert.deepEqual(press(s, "k"), [ui({ type: "select", delta: -1 })]);
@@ -46,17 +47,17 @@ test("keys_list_bindings", () => {
   assert.deepEqual(press(s, "pageUp"), [ui({ type: "select", delta: -10 })]);
   assert.deepEqual(press(s, "g"), [ui({ type: "selectEdge", edge: "first" })]);
   assert.deepEqual(press(s, "G"), [ui({ type: "selectEdge", edge: "last" })]);
-  assert.deepEqual(press(s, "tab"), [ui({ type: "toggleFocus" })]);
+  assert.deepEqual(press(s, "tab"), [ui({ type: "focus", target: "compose" })]);
   assert.deepEqual(press(s, "?"), [ui({ type: "help", open: true })]);
   assert.deepEqual(press(s, "a"), [ui({ type: "focus", target: "compose" })]);
   assert.deepEqual(press(s, "p"), [{ kind: "manager", call: "pause", id: 1 }]);
   assert.deepEqual(press(s, "s"), [{ kind: "manager", call: "stop", id: 1 }]);
-  const paused = reduce(s, { type: "select", delta: 1 });
+  const paused = reduce(s, { type: "select", delta: -1 });
   assert.deepEqual(press(paused, "r"), [{ kind: "manager", call: "resume", id: 2 }]);
   assert.deepEqual(press(paused, "n"), [{ kind: "manager", call: "step", id: 2 }]);
   assert.deepEqual(press(paused, "."), [{ kind: "manager", call: "step", id: 2 }]);
   assert.deepEqual(press(paused, "s"), [{ kind: "manager", call: "stop", id: 2 }]);
-  const idle = reduce(paused, { type: "select", delta: 1 });
+  const idle = reduce(paused, { type: "select", delta: -1 });
   const form = press(idle, "o");
   assert.equal(form.length, 1);
   assert.equal(form[0]?.kind, "ui");
@@ -94,7 +95,7 @@ test("keys_noop_without_live_run", () => {
   assert.deepEqual(press(mk("running"), "n"), []);
   // Every task-directed key on an empty list does nothing.
   const empty = initialState(0);
-  for (const spec of ["return", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G", "tab"]) {
+  for (const spec of ["return", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
     assert.deepEqual(press(empty, spec), [], `${spec} on empty list`);
   }
   const emptyDetail = reduce(empty, { type: "focus", target: "detail" });
@@ -222,12 +223,12 @@ test("keys_too_small_screen", () => {
 });
 
 test("hints_per_mode_and_state", () => {
-  assert.equal(footer(mk("running")), "⏎ open · a add · p pause · s stop · tab focus · ? help");
-  assert.equal(footer(mk("paused")), "⏎ open · a add · r resume · n step · s stop · tab focus · ? help");
-  assert.equal(footer(mk("idle")), "⏎ run · a add · o options · d remove · ? help");
-  assert.equal(footer(mk("stopping")), "⏎ open · a add · tab focus · ? help");
-  assert.equal(footer(initialState(0)), "a add · ? help");
-  assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · esc back");
+  assert.equal(footer(mk("running")), "⏎ open · tab add · → details · p pause · s stop · ? help");
+  assert.equal(footer(mk("paused")), "⏎ open · tab add · → details · r resume · n step · s stop · ? help");
+  assert.equal(footer(mk("idle")), "⏎ run · tab add · o options · d remove · ? help");
+  assert.equal(footer(mk("stopping")), "⏎ open · tab add · → details · ? help");
+  assert.equal(footer(initialState(0)), "tab add · ? help");
+  assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back");
   const t = task(1);
   assert.equal(footer(reduce(initialState(0, [t]), { type: "form", next: openForm(1, t.effective, {}) })), "⏎ save · ctrl+r reset · esc cancel");
   assert.equal(footer(reduce(mk("idle"), { type: "confirm", value: { kind: "remove", taskId: 1 } })), "y yes · n no");
@@ -235,17 +236,19 @@ test("hints_per_mode_and_state", () => {
   const detail = footer(detailOf("running"));
   assert.match(detail, /^↑↓ move · ⏎ expand · /);
   assert.match(detail, /p pause/);
+  assert.match(detail, /tab tasks/);
 });
 
 test("help_lists_mode_bindings", () => {
   const list = helpBindings(mk("idle")).map((h) => `${h.key} ${h.label}`);
-  for (const want of ["⏎ run", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab focus", "q quit"]) {
+  for (const want of ["⏎ run", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
     assert.ok(list.some((l) => l.startsWith(want)), `list help has ${want}: ${list.join("|")}`);
   }
   const detail = helpBindings(reduce(mk("idle"), { type: "focus", target: "detail" })).map((h) => `${h.key} ${h.label}`);
   assert.ok(detail.some((l) => l.includes("expand all")));
   assert.ok(detail.some((l) => l.includes("collapse all")));
   assert.ok(!detail.some((l) => l.startsWith("⏎ run")));
+  assert.ok(detail.some((l) => l.startsWith("tab tasks")));
 });
 
 const IDX: CandidateIndex = {
@@ -356,7 +359,7 @@ test("keys_paste_with_mention_does_not_open_list", () => {
 });
 
 test("keys_compose_hints_with_completion", () => {
-  assert.equal(footer(composing("x")), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · esc back");
+  assert.equal(footer(composing("x")), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back");
   assert.equal(footer(composing("@t", true)), "↑↓ move · tab complete · ⏎ accept · esc close");
 });
 
@@ -364,4 +367,82 @@ test("keys_completion_closes_when_cursor_jumps_to_another_mention", () => {
   let s = reduce(composing("@ta @ta", true), { type: "compose", next: { ...EMPTY_COMPOSE, text: "@ta @ta", cursor: 3 } });
   s = reduce(s, { type: "completion", value: { index: IDX, highlight: 0 } });
   assert.equal(typeKeys(s, "end").s.completion, null);
+});
+
+const inFilter = (s: ViewState, draft: string): ViewState =>
+  reduce(reduce(s, { type: "openFilter" }), { type: "filterEdit", query: draft });
+const withFilter = (s: ViewState, q: string): ViewState => reduce(inFilter(s, q), { type: "filterKeep" });
+
+test("keys_slash_opens_filter", () => {
+  assert.deepEqual(press(mk("idle"), "/"), [ui({ type: "openFilter" })]);
+  assert.deepEqual(press(detailOf("running"), "/"), [ui({ type: "openFilter" })]);
+});
+
+test("keys_filter_mode", () => {
+  const s = inFilter(mk("idle"), "ab");
+  assert.deepEqual(press(s, "c"), [ui({ type: "filterEdit", query: "abc" })]);
+  assert.deepEqual(press(s, "backspace"), [ui({ type: "filterEdit", query: "a" })]);
+  assert.deepEqual(press(s, "ctrl+u"), [ui({ type: "filterEdit", query: "" })]);
+  assert.deepEqual(press(s, "return"), [ui({ type: "filterKeep" })]);
+  assert.deepEqual(press(s, "escape"), [ui({ type: "filterClear" })]);
+  assert.deepEqual(press(s, "up"), []);
+  assert.deepEqual(press(s, "ctrl+c"), [{ kind: "quit" }, ui({ type: "ctrlC" })]);
+});
+
+test("keys_esc_clears_active_filter", () => {
+  const s = withFilter(mk("idle"), "task");
+  assert.deepEqual(press(s, "escape"), [ui({ type: "filterClear" })]);
+  assert.deepEqual(press(mk("idle"), "escape"), []);
+});
+
+test("keys_filter_no_visible_task_noop", () => {
+  const s = withFilter(mk("idle", "idle"), "zzz");
+  for (const k of ["return", "d", "o", "j"]) assert.deepEqual(press(s, k), [], k);
+});
+
+test("keys_filter_hints", () => {
+  const f = inFilter(mk("idle"), "ab");
+  assert.deepEqual(hints(f), [{ key: "⏎", label: "keep" }, { key: "esc", label: "clear" }]);
+  assert.equal(hintPrefix(f), "/ab▌  ");
+  const list = withFilter(mk("idle"), "x");
+  assert.equal(hintPrefix(list), 'filter "x" · ');
+  assert.ok(hints(list).some((h) => h.key === "esc" && h.label === "clear filter"));
+  const detail = reduce(withFilter(detailOf("running"), "t"), { type: "focus", target: "detail" });
+  assert.equal(hintPrefix(detail), 'filter "t" · ');
+  assert.ok(!hints(detail).some((h) => h.label === "clear filter"));
+  const none = mk("idle");
+  assert.equal(hintPrefix(none), "");
+  assert.ok(!hints(none).some((h) => h.key === "/"));
+  assert.ok(helpBindings(none).some((h) => h.key === "/" && h.label === "filter"));
+});
+
+test("keys_list_tab_opens_add_box", () => {
+  const compose = [ui({ type: "focus", target: "compose" })];
+  assert.deepEqual(press(mk("idle"), "tab"), compose);
+  assert.deepEqual(press(mk(), "tab"), compose);
+  assert.deepEqual(press(mk("idle"), "shift+tab"), compose);
+});
+
+test("keys_list_right_opens_details", () => {
+  const s = reduce(detailOf("passed"), { type: "focus", target: "list" });
+  assert.deepEqual(press(s, "right"), [ui({ type: "focus", target: "detail" })]);
+  assert.deepEqual(press(mk("idle"), "right"), []);
+});
+
+test("keys_compose_tab_to_list_keeps_draft", () => {
+  const s = composing("hello");
+  assert.deepEqual(press(s, "tab"), [ui({ type: "focus", target: "list" })]);
+  const after = play(s, press(s, "tab"));
+  assert.equal(after.mode, "list");
+  assert.equal(after.focus, "list");
+  assert.equal(after.compose.text, "hello");
+  for (const spec of ["ctrl+tab", "alt+tab"]) {
+    assert.ok(!press(s, spec).some((c) => c.kind === "ui" && c.action.type === "focus"), spec);
+  }
+});
+
+test("keys_detail_tab_to_list", () => {
+  assert.deepEqual(press(detailOf("running"), "tab"), [ui({ type: "focus", target: "list" })]);
+  const noRun = reduce(mk("idle"), { type: "focus", target: "detail" });
+  assert.deepEqual(press(noRun, "tab"), [ui({ type: "focus", target: "list" })]);
 });

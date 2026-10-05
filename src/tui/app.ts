@@ -26,7 +26,9 @@ import { sanitize } from "./sanitize.ts";
 import { Sidebar } from "./sidebar.ts";
 import { initialState, reduce } from "./state.ts";
 import type { UiAction, ViewState } from "./state.ts";
-import { ROLE } from "./theme.ts";
+import { DEFAULT_THEME } from "./theme.ts";
+import type { Theme } from "./theme.ts";
+import { ThemeContext } from "./themeContext.ts";
 import { Toasts } from "./toast.ts";
 
 export type { InkKey };
@@ -44,6 +46,10 @@ export interface AppProps {
   tickMs?: number;
   /** Aborting it quits as a confirmed quit does: stop every run, then leave. */
   quitSignal?: AbortSignal;
+  /** Colours; default the dark 16-colour theme. */
+  theme?: Theme;
+  /** Shown as info toasts at start. */
+  notices?: string[];
   /** After quit, after stopAll on a confirmed quit, or after a render crash (with its error). */
   onQuit(error?: Error): void;
   onForceExit(): void;
@@ -76,7 +82,7 @@ function Workspace(p: AppProps): ReactElement {
   // The view state lives in a ref that `dispatch` updates at once, so a key that arrives before
   // React re-renders (held keys, split pastes) is mapped against the state the previous key left.
   const state = useRef<ViewState | null>(null);
-  if (state.current === null) state.current = initialState(Date.now(), manager.list());
+  if (state.current === null) state.current = initialState(Date.now(), manager.list(), p.notices ?? []);
   const s = state.current;
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const dispatch = (a: UiAction): void => {
@@ -153,8 +159,6 @@ function Workspace(p: AppProps): ReactElement {
         }
         dispatch({ type: "compose", next: submit((state.current ?? s).compose).state });
         for (const d of r.duplicates) dispatch({ type: "toast", level: "info", message: `already added: ${d}` });
-        const added = r.added[0];
-        if (added !== undefined) dispatch({ type: "selectTask", id: added });
         return;
       }
       case "saveOverrides":
@@ -189,7 +193,7 @@ function Workspace(p: AppProps): ReactElement {
       : ["q quit"];
     return h(Box, { flexDirection: "column" },
       h(Text, { wrap: "truncate-end" }, "terminal too small"),
-      ...lines.map((line, i) => h(Text, { key: i, color: ROLE.muted, wrap: "truncate-end" }, line)));
+      ...lines.map((line, i) => h(Text, { key: i, color: (p.theme ?? DEFAULT_THEME).role.muted, wrap: "truncate-end" }, line)));
   }
 
   const paneHeight = Math.max(0, rows - HEADER_ROWS - FOOTER_ROWS - addBoxHeight(s.compose, s.addErrors));
@@ -222,12 +226,12 @@ function Workspace(p: AppProps): ReactElement {
       h(Toasts, { key: "toasts", toasts: s.toasts, width: columns })),
     h(AddBox, {
       compose: s.compose, focused: s.mode === "compose", width: columns,
-      exists: files.current.exists, errors: s.addErrors,
+      exists: files.current.exists, errors: s.addErrors, theme: p.theme,
     }),
     h(Footer, { s, width: columns }));
 }
 
-interface GuardProps { onError(error: Error): void; children: ReactNode }
+interface GuardProps { onError(error: Error): void; theme: Theme; children: ReactNode }
 
 /** Catches a render crash: shows the error and reports it once. */
 class CrashGuard extends Component<GuardProps, { error: Error | null }> {
@@ -245,8 +249,8 @@ class CrashGuard extends Component<GuardProps, { error: Error | null }> {
     const { error } = this.state;
     if (error === null) return this.props.children;
     return h(Box, { flexDirection: "column" },
-      h(Text, { color: ROLE.error }, `duckwright crashed: ${sanitize(error.message)}`),
-      h(Text, { color: ROLE.muted }, "stopping runs…"));
+      h(Text, { color: this.props.theme.role.error }, `duckwright crashed: ${sanitize(error.message)}`),
+      h(Text, { color: this.props.theme.role.muted }, "stopping runs…"));
   }
 }
 
@@ -254,5 +258,7 @@ export function App(p: AppProps): ReactElement {
   const onError = (error: Error): void => {
     void p.manager.stopAll().then(() => p.onQuit(error), () => p.onQuit(error));
   };
-  return h(CrashGuard, { onError, children: h(Workspace, p) });
+  const theme = p.theme ?? DEFAULT_THEME;
+  return h(ThemeContext.Provider, { value: theme },
+    h(CrashGuard, { onError, theme, children: h(Workspace, p) }));
 }

@@ -10,7 +10,8 @@ import { App, fromInk } from "../../src/tui/app.ts";
 import type { TuiFiles } from "../../src/tui/app.ts";
 import { AddBox } from "../../src/tui/addBox.ts";
 import { EMPTY_COMPOSE } from "../../src/tui/compose.ts";
-import { ROLE } from "../../src/tui/theme.ts";
+import { DEFAULT_THEME, resolveTheme, ROLE } from "../../src/tui/theme.ts";
+import type { Theme } from "../../src/tui/theme.ts";
 import { decision, ev, FakeManager, snapshot } from "./fake-manager.ts";
 
 afterEach(() => cleanup());
@@ -40,7 +41,8 @@ function fakeFiles(tree: Record<string, string[]>): TuiFiles {
 }
 const FILES = fakeFiles({ "": ["tasks/", "a.md"], tasks: ["login.md", "smoke.md"] });
 
-function mount(manager: FakeManager, size = { columns: 100, rows: 24 }, files: TuiFiles = FILES): Harness {
+function mount(manager: FakeManager, size = { columns: 100, rows: 24 }, files: TuiFiles = FILES,
+  opts: { theme?: Theme; notices?: string[] } = {}): Harness {
   const quits: Array<Error | undefined> = [];
   const harness: Harness = {
     quits, forced: 0, log: manager.log,
@@ -54,7 +56,7 @@ function mount(manager: FakeManager, size = { columns: 100, rows: 24 }, files: T
     },
   };
   const r = render(h(App, {
-    manager, size, tickMs: 10, files,
+    manager, size, tickMs: 10, files, theme: opts.theme, notices: opts.notices,
     onQuit: (e?: Error) => {
       manager.log.push("onQuit");
       quits.push(e);
@@ -77,7 +79,7 @@ test("app_empty_workspace", async () => {
   const f = t.frame();
   assert.match(f, /🦆 duckwright/);
   assert.match(f, /Describe a task, or @ a task file or folder…/);
-  assert.match(f, /a add/);
+  assert.match(f, /tab add/);
 });
 
 test("app_add_tasks_in_a_row", async () => {
@@ -132,7 +134,7 @@ test("app_pause_and_step_selected", async () => {
   ]);
   const t = mount(m);
   await settle();
-  await t.type("j", "p");
+  await t.type("p"); // newest first: task 2 is selected
   m.update(2, { state: "paused" });
   await settle();
   await t.type("n", "s");
@@ -226,6 +228,7 @@ test("app_narrow_layouts", async () => {
     const m = withCosts();
     const t = mount(m, { columns, rows });
     await settle();
+    await t.type("j"); // newest first: move from "Busy one" down to "Idle one"
     m.run(2, "r2", [ev.start(), ev.step(1), ev.decision(1, decision("a", [["click", "e1"]]), 0.041)]);
     await settle();
     check(t.frame());
@@ -452,7 +455,7 @@ test("app_completion_folder", async () => {
   assert.doesNotMatch(t.frame(), /tasks\/login\.md/);
   assert.match(t.frame(), /esc back/, "still in the add box");
   await t.type("\x1b");
-  assert.match(t.frame(), /a add/);
+  assert.match(t.frame(), /tab add/);
 });
 
 test("app_mixed_submission", async () => {
@@ -463,8 +466,29 @@ test("app_mixed_submission", async () => {
   assert.deepEqual(m.log, ["add:a.md|check the price"]);
   const f = t.frame();
   assert.match(f, /› Describe a task, or @/, "the box is empty again");
+  assert.ok(f.indexOf('"check the price"') >= 0 && f.indexOf('"check the price"') < f.indexOf('"older"'), "new task is above older");
+  assert.doesNotMatch(f, /││ check the price/, "the detail pane is not on the new task");
+  assert.match(f, /││ older/, "the detail pane still shows older");
+});
+
+test("app_add_keeps_selection", async () => {
+  const m = new FakeManager([snapshot(1, "First"), snapshot(2, "Second")]);
+  const t = mount(m);
+  await settle();
+  await t.type("j", "a", "x", "\r", "\x1b", "\r");
+  assert.equal(m.log[m.log.length - 1], "start:1");
+  const f = t.frame();
+  assert.ok(f.indexOf('"x"') >= 0 && f.indexOf('"x"') < f.indexOf('"Second"'), "x row comes before Second");
+});
+
+test("app_add_on_empty_list_selects_new", async () => {
+  const m = new FakeManager([]);
+  const t = mount(m);
+  await settle();
+  await t.type("a", "fresh task", "\r", "\x1b");
+  const f = t.frame();
+  assert.match(f, /││ fresh task/);
   assert.match(f, /source: typed/);
-  assert.match(f, /││ check the price/, "the detail pane shows the new task");
 });
 
 test("app_bad_mention_adds_nothing", async () => {
@@ -520,4 +544,85 @@ test("app_missing_mention_is_red", () => {
     // While focused the cursor cell ("m") is drawn inverse; the rest of "@a.md" stays accent.
     assert.equal(coloured.filter(([, c]) => c === ROLE.accent).map(([t]) => t).join(""), focused ? "@a.d" : "@a.md");
   }
+});
+
+test("app_past_task_shows_timeline", async () => {
+  const d = decision("open the page", [["goto", "https://x.test"]]);
+  const outcome: RunOutcome = { ...OUTCOME, steps: 1, costUsd: 0.25 };
+  const events = [ev.start(), ev.step(1), ev.decision(1, d, 0.25), ev.stepEnd(1, d, ["ok"]), ev.end(outcome)];
+  const m = new FakeManager([snapshot(1, "Past one", {
+    runId: "20261001-100000-a", past: { runId: "20261001-100000-a", events },
+  })]);
+  const t = mount(m);
+  await settle();
+  const f = t.frame();
+  assert.match(f, /past run 20261001-100000-a/);
+  assert.match(f, /open the page/);
+  assert.match(f, /✓ success/);
+  assert.match(f, /\$0\.250/);
+  assert.doesNotMatch(f, /step 1\//);
+  assert.doesNotMatch(f, /running/);
+});
+
+test("app_past_run_id_is_sanitized", async () => {
+  const d = decision("open the page", [["goto", "https://x.test"]]);
+  const events = [ev.start(), ev.step(1), ev.decision(1, d, 0.25), ev.stepEnd(1, d, ["ok"]), ev.end({ ...OUTCOME, steps: 1 })];
+  const id = "20261001-100000-b\x1b[31mX";
+  const m = new FakeManager([snapshot(1, "Past one", { runId: id, past: { runId: id, events } })]);
+  const t = mount(m);
+  await settle();
+  assert.doesNotMatch(t.frame(), /\x1b/);
+  assert.match(t.frame(), /past run 20261001-100000-b/);
+});
+
+test("app_filter_narrows_sidebar", async () => {
+  const m = new FakeManager([snapshot(1, "alpha"), snapshot(2, "beta"), snapshot(3, "gamma")]);
+  const t = mount(m);
+  await settle();
+  await t.type("/", "e", "t");
+  let f = t.frame();
+  assert.match(f, /TASKS \/et 1\/3/);
+  assert.match(f, /"beta"/);
+  assert.match(f, /\/et▌/);
+  assert.doesNotMatch(f, /"alpha"/);
+  await t.type("\r");
+  assert.match(t.frame().split("\n").filter((l) => l.trim() !== "").pop() ?? "", /^\s*filter "et" · /);
+  await t.type("\x1b");
+  f = t.frame();
+  assert.match(f, /TASKS(?! \/)/);
+  for (const n of ["alpha", "beta", "gamma"]) assert.match(f, new RegExp(`"${n}"`));
+});
+
+test("app_no_color_theme", async () => {
+  const m = new FakeManager([snapshot(1, "alpha")]);
+  const plain = mount(m, undefined, undefined, { theme: resolveTheme("dark", { NO_COLOR: "1" }) });
+  await settle();
+  assert.match(plain.frame(), /┏/);
+  assert.doesNotMatch(plain.raw(), /\x1b\[(3[0-9]|9[0-7]|38;)/);
+  cleanup();
+  const colour = mount(new FakeManager([snapshot(1, "alpha")]), undefined, undefined, { theme: DEFAULT_THEME });
+  await settle();
+  assert.doesNotMatch(colour.frame(), /┏/);
+});
+
+test("app_notices_toast", async () => {
+  const t = mount(new FakeManager(), undefined, undefined, { notices: ["skipped 1 unreadable run folder in runs/"] });
+  await settle();
+  assert.match(t.frame(), /skipped 1 unreadable run folder in runs\//);
+});
+
+test("addbox_no_color_mentions", () => {
+  const compose = { ...EMPTY_COMPOSE, text: "@a.md @zz.md x", cursor: 3 };
+  const found: unknown[] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (node === null || typeof node !== "object" || !("props" in node)) return;
+    const props = (node as { props: { color?: unknown; borderColor?: unknown; children?: unknown } }).props;
+    if (props.color !== undefined) found.push(props.color);
+    visit(props.children);
+  };
+  for (const focused of [false, true]) {
+    visit(AddBox({ compose, focused, width: 80, exists: FILES.exists, errors: [], theme: resolveTheme("dark", { NO_COLOR: "1" }) }));
+  }
+  assert.deepEqual(found, []);
 });

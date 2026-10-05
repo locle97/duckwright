@@ -10,7 +10,7 @@ export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> =
   return {
     id, text, name: taskName(text), source: { kind: "typed" }, state: "idle", overrides: {},
     effective: { model: "sonnet", maxSteps: 25, headed: false, export: false, snapshot: "hybrid" },
-    error: null, runId: null, runCount: 0, ...over,
+    error: null, runId: null, runCount: 0, createdAt: 0, ...over,
   };
 }
 

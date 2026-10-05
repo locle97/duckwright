@@ -106,7 +106,7 @@ duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--allow-file-access] [--[no-]export]
 duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export RUN [-o FILE]
-duckwright --tui [--max-parallel N] [options]
+duckwright --tui [--max-parallel N] [--past N] [--theme NAME] [options]
 ```
 
 Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
@@ -124,6 +124,8 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 | `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed or `@`-mentioned inside it, so it takes no task or `--file`, and it needs a terminal |
 | `--max-parallel` | `3` | With `--tui`, how many runs may be active at once |
+| `--past` | `20` | With `--tui`, how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none |
+| `--theme` | `auto` | With `--tui`, the colour theme: `auto`, `dark`, or `light` |
 | `--snapshot-hybrid` | on | Paste page snapshots of up to 5,000 characters into the prompt; for larger ones, let Claude grep the saved file. Decided again every step (see [Reading the page](#reading-the-page)) |
 | `--snapshot-full` | off | Always paste the page snapshot into the prompt, truncated at 40k characters. Claude gets no tools |
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
@@ -140,6 +142,12 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 ### Interactive TUI
 
 `duckwright --tui` opens a workspace in the terminal. You queue tasks, start several at once, and watch each step's goal, actions, results, and running cost live. Pass the usual options (`--model`, `--max-steps`, ...) as defaults for every task, and `--max-parallel N` to cap concurrent runs.
+
+**Past runs.** Runs saved in `runs/` appear in the sidebar with a muted name, newest `--past N` of them (default 20). They are read-only: select one to see its timeline, and press `⏎` to run it again with the current flags.
+
+**Filter.** Press `/` and type to narrow the sidebar by task name. `⏎` keeps the filter, `esc` clears it.
+
+**Themes.** `--theme auto` picks dark or light from `COLORFGBG`; `COLORTERM=truecolor` enables the full-colour palette. With `NO_COLOR` set, no colours are used and the focused pane gets a bold border instead.
 
 Five keys to learn first:
 
@@ -252,6 +260,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 - `page/snapshot.yml`: the latest accessibility snapshot of the page
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 
+- `events.jsonl`: every run event, one JSON object per line
 - `duckwright.spec.ts`: the generated regression test, only with `--export`
 
 > [!CAUTION]

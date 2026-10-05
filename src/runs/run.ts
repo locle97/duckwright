@@ -18,6 +18,7 @@ import { AbortedError } from "../proc.ts";
 import type { StepRecord } from "../prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../pw.ts";
 import { makeRunDir } from "../rundir.ts";
+import { jsonlSink } from "./sink.ts";
 
 export interface PromptPaths {
   system: string;
@@ -54,6 +55,7 @@ export interface RunDeps {
   signal: AbortSignal;
   createAgent(opts: AgentOptions): AgentLike;
   runsDir?: string; // default "runs"
+  onWarning?: (message: string) => void;
 }
 
 export interface RunHandle {
@@ -121,6 +123,7 @@ export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
   }
 
   const signal = AbortSignal.any([deps.signal, runAbort.signal]);
+  events.subscribe(jsonlSink(path.join(workdir, "events.jsonl"), (m) => deps.onWarning?.(m)));
   const done = execute(spec, deps, workdir, events, control, signal);
   return { id: path.basename(workdir), workdir, events, control, done };
 }

@@ -184,3 +184,25 @@ test("starttui_quit_stops_all_then_resolves_done", async () => {
   assert.deepEqual(m.log, ["stopAll"]);
   t.handle.restoreTerminal();
 });
+
+test("start_tui_resolves_theme", async () => {
+  const stdin = new FakeStdin();
+  const stdout = new FakeOut();
+  const stderr = new FakeOut();
+  const handle = startTui({
+    manager: new FakeManager(), exit: ((): never => { throw new Error("exit"); }) as (code: number) => never,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+    stdout: stdout as unknown as NodeJS.WriteStream,
+    stderr: stderr as unknown as NodeJS.WriteStream,
+    theme: "light", env: { NO_COLOR: "1" }, notices: ["n1"],
+  });
+  try {
+    await settle();
+    const out = stdout.writes.join("");
+    assert.match(out, /n1/);
+    assert.match(out, /┏/);
+  } finally {
+    handle.quit();
+    await handle.done;
+  }
+});

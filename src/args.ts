@@ -2,6 +2,8 @@
 // -f/--file, negatable booleans, mutually exclusive snapshot flags, and argparse's messages.
 import { SPEC_NAME } from "./export.ts";
 import type { SnapshotMode } from "./observe.ts";
+import { THEME_NAMES } from "./tui/theme.ts";
+import type { ThemeName } from "./tui/theme.ts";
 import type { TaskSettings } from "./taskfile.ts";
 
 export interface RunArgs {
@@ -18,6 +20,8 @@ export interface RunArgs {
   snapshot: SnapshotMode;
   tui: boolean;
   maxParallel: number | null;
+  past?: number;
+  theme?: ThemeName;
 }
 
 export interface ExportArgs {
@@ -45,7 +49,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-f FILE [FILE ...]
   + "                  [--state FILE] [--allow-file-access]\n"
   + "                  [--export | --no-export]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
-  + "                  [--tui] [--max-parallel N]\n"
+  + "                  [--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
   + "                  [task]";
 
 export const RUN_HELP = `${RUN_USAGE}
@@ -85,6 +89,8 @@ options:
                         saved file
   --tui                 open the interactive workspace
   --max-parallel N      with --tui: most runs at once (default 3)
+  --past N              with --tui: past runs to show (default 20, 0 = none)
+  --theme NAME          with --tui: auto, dark or light (default auto)
 
 Run a task file: duckwright -f tasks/login.md. To turn an earlier run into a
 test: duckwright export runs/<id>
@@ -158,11 +164,12 @@ const RUN_SPEC: OptionSpec = {
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
     "--snapshot-grep": "--snapshot-grep", "--tui": "--tui", "--max-parallel": "--max-parallel",
+    "--past": "--past", "--theme": "--theme",
   },
   shortWithValue: ["-f"],
 };
 
-const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel"];
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme"];
 
 // Python's int(): optional sign, digits with single underscores between them, spaces around.
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
@@ -220,6 +227,16 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
         const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
         if (n < 1) fail("argument --max-parallel: must be at least 1");
         args.maxParallel = n;
+      } else if (name === "--past") {
+        if (!PY_INT.test(v!)) fail(`argument --past: invalid int value: '${v}'`);
+        const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
+        if (n < 0) fail("argument --past: must be at least 0");
+        args.past = n;
+      } else if (name === "--theme") {
+        if (!(THEME_NAMES as readonly string[]).includes(v!)) {
+          fail(`argument --theme: invalid choice: '${v}' (choose from ${THEME_NAMES.map((t) => `'${t}'`).join(", ")})`);
+        }
+        args.theme = v as ThemeName;
       } else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
       else if (name === "--session") args.session = v!;

@@ -10,9 +10,12 @@ import { resolvePath } from "./paths.ts";
 import { attachPlain, printOutcome } from "./report/plain.ts";
 import { RunManager } from "./runs/manager.ts";
 import type { ManagerLike } from "./runs/manager.ts";
+import { loadPastRuns } from "./runs/past.ts";
+import type { PastRun } from "./runs/past.ts";
 import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
 import type { AgentLike, PromptPaths } from "./runs/run.ts";
 import { fixed4 } from "./text.ts";
+import type { ThemeName } from "./tui/theme.ts";
 import { TaskFileError, loadTaskFile, taskPaths } from "./taskfile.ts";
 
 export { PROMPTS, historyJson };
@@ -29,7 +32,7 @@ export function version(): string {
 
 /** `quit()` closes the TUI as a confirmed quit does: stop every run, then resolve `done`. */
 export interface TuiHandle { done: Promise<void>; restoreTerminal(): void; quit(): void }
-export interface TuiModule { startTui(o: { manager: ManagerLike }): TuiHandle }
+export interface TuiModule { startTui(o: { manager: ManagerLike; theme?: ThemeName; notices?: string[] }): TuiHandle }
 
 export interface CliDeps {
   which(name: string): string | null;
@@ -40,6 +43,7 @@ export interface CliDeps {
   signal: AbortSignal;
   isTTY(): boolean;
   loadTui(): Promise<TuiModule>;
+  loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
 }
 
 /** The first executable called `name` on PATH, like shutil.which. */
@@ -66,6 +70,7 @@ const DEFAULT_DEPS: CliDeps = {
   signal: new AbortController().signal,
   isTTY: () => !!process.stdin.isTTY && !!process.stdout.isTTY,
   loadTui: () => import("./tui/index.ts"),
+  loadPastRuns: (limit) => loadPastRuns({ runsDir: "runs", limit }),
 };
 
 function isFile(p: string): boolean {
@@ -124,7 +129,10 @@ function exportMain(deps: CliDeps, argv: string[]): number {
 async function runOne(
   deps: CliDeps, args: RunArgs, taskFile: string | null,
 ): Promise<[code: number, history: string, cost: number]> {
-  const handle = startRun({ task: args.task!, taskFile, args }, deps);
+  const handle = startRun(
+    { task: args.task!, taskFile, args },
+    { ...deps, onWarning: (m) => deps.stderr(`warning: ${m}`) },
+  );
   attachPlain(handle.events, deps.stdout);
   const o = await handle.done;
   printOutcome(o, deps.stdout, deps.stderr);
@@ -176,15 +184,23 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
     deps.stderr(err);
     return 2;
   }
-  const manager = new RunManager({
+  const limit = args.past ?? 20;
+  const past = limit === 0 ? { runs: [], skipped: 0 } : deps.loadPastRuns(limit);
+  const manager: RunManager = new RunManager({
     argv,
+    past: past.runs,
     defaultSkill: deps.prompts.defaultSkill,
     maxParallel: args.maxParallel ?? 3,
-    startRun: (s) => startRun(s, { prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent }),
+    startRun: (s) => startRun(s, {
+      prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent,
+      onWarning: (m) => manager.notify("error", m),
+    }),
     preflight: (a) => preflightArgs(deps, a),
   });
   const tui = await deps.loadTui();
-  const handle = tui.startTui({ manager });
+  const k = past.skipped;
+  const notices = k > 0 ? [`skipped ${k} unreadable run folder${k === 1 ? "" : "s"} in runs/`] : [];
+  const handle = tui.startTui({ manager, theme: args.theme ?? "auto", notices });
   // An outside SIGINT aborts the signal (and with it every run): close the TUI too, and exit 130.
   const onAbort = (): void => handle.quit();
   deps.signal.addEventListener("abort", onAbort, { once: true });
@@ -230,6 +246,8 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
   const { args } = parsed;
   if (args.tui) return tuiMain(deps, argv, args);
   if (args.maxParallel !== null) throw usage("--max-parallel needs --tui");
+  if (args.past !== undefined) throw usage("--past needs --tui");
+  if (args.theme !== undefined) throw usage("--theme needs --tui");
   if (args.task !== null && args.file !== null) throw usage("give a task or --file, not both");
   if (args.task === null && args.file === null) throw usage("give a task or --file");
   if (args.file === null) {
