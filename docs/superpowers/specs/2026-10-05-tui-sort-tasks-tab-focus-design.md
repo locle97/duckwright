@@ -24,7 +24,9 @@ Tab also changes meaning. Today it toggles focus between the task list and the d
 | Selection on add | `task:added` appends, so the selected index (and task) does not change. A new task appears at the top because it is newest. |
 | Selection on update | `task:updated` replaces in place; selection unchanged. |
 | Selection on remove | If a task other than the selected one is removed, selection stays on the same task (its index is recomputed by id). If the selected task is removed, selection moves to the task that was directly below it in the display order (visible rows only), else the one directly above, else index `0`. `snap` still runs afterwards. |
-| Add-box submission selection | Unchanged: after a successful add-box submission, `app.ts` still dispatches `selectTask` for `r.added[0]`. This is an explicit user action, distinct from a manager `task:added` event. The brief's "adding keeps the other task selected" is read as the reducer behaviour for `task:added`. |
+| Add-box submission selection | Changed: `app.ts` no longer dispatches `selectTask` for `r.added[0]` after a successful add-box submission (the two lines `const added = r.added[0]; if (added !== undefined) dispatch({ type: "selectTask", id: added });` are deleted). The selection stays on the previously selected task, as the brief asks. When the list was empty before the submission, `selected` is already `0`, so the first appended task (the new one) becomes the selection with no extra code. (Conductor ruling, following the brief literally.) |
+| Filter and a new task | Because `selectTask` is no longer dispatched on submission, an active filter is no longer cleared when a new task does not match it; the new task is simply hidden until the filter changes, like any other non-matching task. |
+| `selectTask` action | Kept in `UiAction` and the reducer with its existing tests, though `app.ts` no longer dispatches it. Removing it is outside this change. |
 | `j` / `↓`, `g` / `G` | Unchanged bindings; in display order `↓` moves to an older task, `g` goes to the newest (top), `G` to the oldest (bottom). |
 | Tab in list mode | `{ type: "focus", target: "compose" }`, always (also on an empty list), like `a`. Shift+Tab behaves the same (the `named("tab")` matcher ignores shift). |
 | Tab in compose, completion closed | `{ type: "focus", target: "list" }`: focus `list`, mode `list`. The draft (`compose`) and `addErrors` are kept, as Esc keeps them. Tab always goes to the list, even if compose was opened from the detail pane. (Brief assumption: draft kept.) Tab with `ctrl` or `meta` in compose is ignored as before. |
@@ -48,7 +50,7 @@ Tab also changes meaning. Today it toggles focus between the task list and the d
 
 ### `src/runs/manager.ts`
 - `TaskSnapshot` gains `createdAt: number`; `Task` gains `createdAt: number`.
-- `ManagerOptions` gains `now?: () => number`. The constructor keeps `#now = o.now ?? Date.now`.
+- `ManagerOptions` gains `now?: () => number`. The manager adds a private `#now` field, set in the constructor to `o.now ?? Date.now`.
 - Constructor: past tasks get `createdAt: p.startedAt`.
 - `#addTask`: `createdAt: this.#now()`.
 - `#snapshot` copies `createdAt`.
@@ -74,13 +76,16 @@ Pure, no imports beyond types; returns a new array, never mutates `tasks`.
 - `composeCommands`: after the `if (open && !k.ctrl && !k.meta) { … }` block and before the `return` handling, add: if `k.name === "tab" && !open && !k.ctrl && !k.meta` → `[ui({ type: "focus", target: "list" })]`.
 - `hints` compose case (completion closed): insert `{ key: "tab", label: "tasks" }` before `{ key: "esc", label: "back" }`.
 
+### `src/tui/app.ts`
+- `run`, `case "addSubmission"`: delete the `const added = r.added[0];` line and the `selectTask` dispatch after it. Everything else in the case (error handling, clearing the compose box, duplicate toasts) is unchanged.
+
 ### Unchanged
-`sidebar.ts` (already renders `visibleTasks` order and positions by `visible.indexOf(s.selected)`), `help.ts`, `footer.ts`, `app.ts`, `filter.ts`, `compose.ts`, the CLI and the report.
+`sidebar.ts` (already renders `visibleTasks` order and positions by `visible.indexOf(s.selected)`), `help.ts`, `footer.ts`, `filter.ts`, `compose.ts`, the CLI and the report.
 
 ## Data flow
 
 1. Startup: `loadPastRuns` returns `PastRun`s with `startedAt`; `RunManager` turns them into tasks with `createdAt = startedAt`. `manager.list()` (arrival order) goes to `initialState`, which replays past runs and selects the first index of `visibleTasks` (the newest task).
-2. Add: the user submits the add box; `RunManager.#addTask` stamps `createdAt = now()` and emits `task:added`; the reducer appends the snapshot. `visibleTasks` now puts it first, so the sidebar draws it on top; `selected` still points at the same task. `app.ts` then dispatches `selectTask` for the first added id (existing behaviour).
+2. Add: the user submits the add box; `RunManager.#addTask` stamps `createdAt = now()` and emits `task:added`; the reducer appends the snapshot. `visibleTasks` now puts it first, so the sidebar draws it on top; `selected` still points at the same task. `app.ts` no longer re-selects the new task, so the selection stays where it was (on an empty list it is index `0`, which is now the new task).
 3. Re-run / state change: `task:updated` replaces the snapshot; `createdAt` is unchanged, so the row stays put.
 4. Remove: `task:removed` removes the task and re-points `selected` per the removal rule.
 5. Keys: `keymap` maps Tab per mode to `focus` actions (`list` → compose, compose with closed completion → list, detail → list) and `→` in list to `focus detail`. `hints` / `helpBindings` read the same binding tables, so the footer and help follow.
@@ -123,10 +128,15 @@ New or changed unit tests:
   - detail: `tab` → `[ui({ type: "focus", target: "list" })]`.
   - footer: list footer contains `tab add` and not `a add`; detail footer contains `tab tasks`; compose (closed) footer equals `⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back`; compose (open) footer unchanged.
   - `helpBindings` in list contains `tab add`, `→ details`, `a add`; in detail contains `tab tasks`.
+- `test/tui/app.test.ts`:
+  - `app_mixed_submission` is updated, not deleted or skipped: with "older" selected, submitting `@a.md check the price` adds the task, the sidebar shows it on top (its row comes before the "older" row in the frame), and the detail pane still shows "older" (no `source: typed` / `check the price` detail lines; the "older" detail is shown).
+  - new `app_add_keeps_selection`: `FakeManager` with `snapshot(1, "First")` and `snapshot(2, "Second")` (both `createdAt: 0`, so the display order is Second, First). Press `j` to select First (id 1), then `a`, `x`, `⏎`, Esc, then `⏎` in the list. `m.log` ends with `start:1` (the start went to First, still selected), and in the frame the `"x"` row comes before the `"Second"` row (the new task is on top).
+  - new `app_add_on_empty_list_selects_new`: on an empty list, adding a typed task makes it the selected task (its detail is shown).
+  - other app tests that submit tasks (`app_add_tasks_in_a_row`, `app_keys_without_rerender_between_them`, `app_completion_*`, `app_duplicate_toast`) assert nothing about selection and stay as they are; if one does fail because of the selection change, it is updated to the new behaviour, not deleted or skipped.
 - `test/runs/manager.test.ts`: with `now` injected returning 100 then 200, `addTyped` twice gives `createdAt` 100 and 200 on the snapshots and in `task:added` events; a file task added through `add()` is stamped; a past task's `createdAt` equals `startedAt`; re-running a task (`start`) leaves `createdAt` unchanged; `list()` order is still arrival order.
 - `test/runs/past.test.ts`: `startedAt` equals the `run:start` `at` from `events.jsonl`; equals `history.json` mtime when `events.jsonl` is missing (via the synthesised events); equals the folder mtime when `events.jsonl` is valid but has no `run:start`; `0` when the folder mtime throws (fake `PastFs`).
 
-Success criteria mapping: order 3, 2, 1 and past-5-above-typed-4 → `order.test.ts` and `state.test.ts`; selection kept on add → `state.test.ts`; Tab list↔compose with draft kept and completion still completing → `keys.test.ts` and `state.test.ts`; Tab detail → list → `keys.test.ts`; footer and help labels → `keys.test.ts`.
+Success criteria mapping: order 3, 2, 1 and past-5-above-typed-4 → `order.test.ts` and `state.test.ts`; selection kept on add → `state.test.ts` (reducer) and `app.test.ts` (`app_add_keeps_selection`, `app_mixed_submission`); new task selected on an empty list → `app.test.ts`; Tab list↔compose with draft kept and completion still completing → `keys.test.ts` and `state.test.ts`; Tab detail → list → `keys.test.ts`; footer and help labels → `keys.test.ts`.
 
 ### Manual e2e
 
@@ -138,5 +148,4 @@ For the user, optional: run `duckwright --tui` with a few past runs, add two tas
 - Changing the order of the plain (non-TUI) report or the quit summary.
 - Persisting the creation time anywhere new (`startedAt` is derived from files that already exist).
 - Mouse focus.
-- Changing which task the add-box submission selects.
 - A Shift+Tab reverse cycle distinct from Tab.
