@@ -1,4 +1,4 @@
-// The per-task settings form: one row per field, overridden values in the accent colour,
+// A settings form (one task's, or the global options as a dialog): one row per field, overridden values in the accent colour,
 // an invalid field's error under it.
 import { Text } from "ink";
 import { createElement as h } from "react";
@@ -11,10 +11,10 @@ import { useTheme } from "./themeContext.ts";
 
 const DIALOG_WIDTH = 56;
 
-export function FormView({ form, width, height }: { form: FormState; width: number; height: number }): ReactElement {
+export function FormView({ form, title, width, height }: { form: FormState; title: string; width: number; height: number }): ReactElement {
   const { role } = useTheme();
   const labelWidth = Math.max(...form.fields.map((f) => f.label.length)) + 2;
-  const rows: ReactElement[] = [h(Text, { bold: true, wrap: "truncate-end" }, "Settings")];
+  const rows: ReactElement[] = [h(Text, { bold: true, wrap: "truncate-end" }, title)];
   form.fields.forEach((f, i) => {
     const focused = i === form.focus;
     rows.push(h(Text, { wrap: "truncate-end" },

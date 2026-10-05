@@ -626,3 +626,53 @@ test("addbox_no_color_mentions", () => {
   }
   assert.deepEqual(found, []);
 });
+
+test("app_global_options_pane_layout", async () => {
+  const m = new FakeManager([snapshot(1, "First")]);
+  m.globalsValue = { base: snapshot(1, "x").effective, overrides: { model: "opus" } };
+  const t = mount(m, { columns: 100, rows: 40 });
+  await settle();
+  const lines = t.frame().split("\n");
+  const tasksRow = lines.findIndex((l) => /TASKS/.test(l));
+  const optionsRow = lines.findIndex((l) => /OPTIONS/.test(l));
+  const inputRow = lines.findIndex((l) => /Describe a task/.test(l));
+  assert.ok(tasksRow < optionsRow && optionsRow < inputRow, "tasks, then options, then the add box");
+  assert.match(lines[optionsRow + 1] ?? "", /model +opus/);
+  assert.match(t.frame(), /snapshot mode +hybrid/, "all five fields fit at 40 rows");
+  assert.match(t.frame(), /source: typed/, "the detail pane is still beside the column");
+});
+
+test("app_global_options_edit_and_save", async () => {
+  const m = new FakeManager([snapshot(1, "First")]);
+  const t = mount(m, { columns: 100, rows: 40 });
+  await settle();
+  await t.type("O", "\x1b[B", "x");
+  // The narrow column wraps the error over several rows.
+  assert.match(t.frame(), /│ {5}max-steps must be a +│/, "inline error in the pane");
+  assert.match(t.frame(), /│ {5}whole number of at +│/);
+  assert.doesNotMatch(t.frame(), /Settings|Global options/, "no dialog: edited in place");
+  await t.type("\r");
+  assert.deepEqual(m.globalsSaved, [], "invalid: not saved");
+  await t.type("\x7f", "\x7f", "\x7f", "8", "\r");
+  assert.deepEqual(m.globalsSaved, [{ maxSteps: 8 }]);
+  assert.match(t.frame(), /max steps +8/);
+});
+
+test("app_global_options_pane_scrolls_to_focus", async () => {
+  const t = mount(new FakeManager([snapshot(1, "First")]));   // 100x24: a 5-row pane
+  await settle();
+  await t.type("O", "\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B");
+  assert.match(t.frame(), /OPTIONS/);
+  assert.match(t.frame(), /› snapshot mode/, "the focused last field is visible");
+});
+
+test("app_global_options_dialog_when_no_room", async () => {
+  for (const size of [{ columns: 59, rows: 24 }, { columns: 100, rows: 12 }]) {
+    const t = mount(new FakeManager([snapshot(1, "First")]), size);
+    await settle();
+    assert.doesNotMatch(t.frame(), /OPTIONS/);
+    await t.type("O");
+    assert.match(t.frame(), /Global options/, `${size.columns}x${size.rows}: dialog fallback`);
+    cleanup();
+  }
+});

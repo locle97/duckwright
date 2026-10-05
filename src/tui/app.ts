@@ -22,9 +22,10 @@ import { Help } from "./help.ts";
 import type { KeyName, KeyPress } from "./keypress.ts";
 import { keymap, tooSmallKeymap } from "./keys.ts";
 import type { Command } from "./keys.ts";
+import { OptionsPane, optionsHeight } from "./optionsPane.ts";
 import { sanitize } from "./sanitize.ts";
 import { Sidebar } from "./sidebar.ts";
-import { initialState, reduce } from "./state.ts";
+import { editingGlobals, initialState, reduce } from "./state.ts";
 import type { UiAction, ViewState } from "./state.ts";
 import { DEFAULT_THEME } from "./theme.ts";
 import type { Theme } from "./theme.ts";
@@ -82,7 +83,7 @@ function Workspace(p: AppProps): ReactElement {
   // The view state lives in a ref that `dispatch` updates at once, so a key that arrives before
   // React re-renders (held keys, split pastes) is mapped against the state the previous key left.
   const state = useRef<ViewState | null>(null);
-  if (state.current === null) state.current = initialState(Date.now(), manager.list(), p.notices ?? []);
+  if (state.current === null) state.current = initialState(Date.now(), manager.list(), p.notices ?? [], manager.globals());
   const s = state.current;
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const dispatch = (a: UiAction): void => {
@@ -200,8 +201,9 @@ function Workspace(p: AppProps): ReactElement {
   }
 
   const paneHeight = Math.max(0, rows - HEADER_ROWS - FOOTER_ROWS - addBoxHeight(s.compose, s.addErrors));
-  const listFocused = s.focus === "list" && s.mode !== "compose";
+  const listFocused = s.focus === "list" && s.mode !== "compose" && !editingGlobals(s);
   const detailFocused = s.focus === "detail" && s.mode !== "compose";
+  const oh = optionsHeight(paneHeight, columns);
   let panes: ReactElement[];
   if (columns < 60) {
     panes = [s.focus === "list"
@@ -211,13 +213,16 @@ function Workspace(p: AppProps): ReactElement {
     const wide = columns >= 90;
     const sideWidth = wide ? clamp(Math.round(columns * 0.3), 24, 40) : clamp(Math.round(columns * 0.3), 18, 26);
     panes = [
-      h(Sidebar, { key: "list", s, width: sideWidth, height: paneHeight, focused: listFocused, showCost: wide }),
+      h(Box, { key: "left", flexDirection: "column", width: sideWidth, height: paneHeight, flexShrink: 0 },
+        h(Sidebar, { s, width: sideWidth, height: paneHeight - oh, focused: listFocused, showCost: wide }),
+        oh > 0 ? h(OptionsPane, { s, width: sideWidth, height: oh }) : null),
       h(Detail, { key: "detail", s, width: columns - sideWidth, height: paneHeight, focused: detailFocused }),
     ];
   }
   const area = { width: columns, height: paneHeight };
   const overlay = s.mode === "help" ? h(Help, { key: "help", s, ...area })
-    : s.mode === "form" && s.form !== null ? h(FormView, { key: "form", form: s.form, ...area })
+    : s.mode === "form" && s.form !== null && s.form.taskId !== null ? h(FormView, { key: "form", form: s.form, title: "Settings", ...area })
+    : s.mode === "form" && s.form !== null && oh === 0 ? h(FormView, { key: "form", form: s.form, title: "Global options", ...area })
     : s.mode === "confirm" && s.confirm !== null ? h(Confirm, { key: "confirm", s, ...area })
     : null;
 
