@@ -122,7 +122,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
-| `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed inside it, so it takes no task or `--file`, and it needs a terminal |
+| `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed or `@`-mentioned inside it, so it takes no task or `--file`, and it needs a terminal |
 | `--max-parallel` | `3` | With `--tui`, how many runs may be active at once |
 | `--snapshot-hybrid` | on | Paste page snapshots of up to 5,000 characters into the prompt; for larger ones, let Claude grep the saved file. Decided again every step (see [Reading the page](#reading-the-page)) |
 | `--snapshot-full` | off | Always paste the page snapshot into the prompt, truncated at 40k characters. Claude gets no tools |
@@ -152,6 +152,14 @@ Five keys to learn first:
 | `q` | Quit (asks first if runs are active) |
 
 Press `?` inside the TUI for the rest.
+
+In the add box, `@` mentions task files: `@tasks/login.md` adds that file, and `@tasks/smoke/` adds every task file at the folder's root. Their front matter applies, as with `-f`, except `session:`, because each run gets its own browser session. Any text left over becomes one typed task:
+
+```text
+› @tasks/smoke/ @tasks/login.md Check the footer links
+```
+
+A completion list opens as you type after `@`. `tab` completes (going into a folder), and `⏎` accepts. Write a path with spaces as `@"my tasks/a.md"`, and `\@` for a literal `@`. If any mention fails (a missing file, a folder with no task files, bad front matter), nothing from that line is added and the errors show under the box.
 
 ### Authenticated pages
 
