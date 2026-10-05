@@ -1,5 +1,7 @@
 // The Ink workspace: holds the view state, feeds it manager events, clock ticks and key presses,
 // runs the keymap's commands, and lays the panes out for the terminal size.
+import fs from "node:fs";
+
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { Key as InkKey } from "ink";
 import { Component, createElement as h, useEffect, useReducer, useRef, useState } from "react";
@@ -7,6 +9,9 @@ import type { ReactElement, ReactNode } from "react";
 
 import type { ManagerLike } from "../runs/manager.ts";
 import { AddBox, addBoxHeight } from "./addBox.ts";
+import { nodeReadDir, walk } from "./candidates.ts";
+import type { ReadDir } from "./candidates.ts";
+import { Completion } from "./completion.ts";
 import { submit } from "./compose.ts";
 import { Confirm, question } from "./confirm.ts";
 import { Detail } from "./detail.ts";
@@ -26,8 +31,13 @@ import { Toasts } from "./toast.ts";
 
 export type { InkKey };
 
+/** File access for @ mentions: the completion walk, and whether a mentioned path exists. */
+export interface TuiFiles { readdir: ReadDir; exists(path: string): boolean }
+
 export interface AppProps {
   manager: ManagerLike;
+  /** Default: the real current folder. */
+  files?: TuiFiles;
   /** Fixed terminal size, for tests; by default the real size, following resizes. */
   size?: { columns: number; rows: number };
   /** Clock tick for spinners, elapsed times and toast expiry. Default 100. */
@@ -57,8 +67,12 @@ export function fromInk(input: string, key: InkKey): KeyPress {
   return { input: name === null ? input : "", name, ctrl: key.ctrl, meta: key.meta, shift: key.shift };
 }
 
+const exists = (p: string): boolean => fs.existsSync(p);
+
 function Workspace(p: AppProps): ReactElement {
   const { manager } = p;
+  const files = useRef<TuiFiles | null>(null);
+  files.current ??= p.files ?? { readdir: nodeReadDir(process.cwd()), exists };
   // The view state lives in a ref that `dispatch` updates at once, so a key that arrives before
   // React re-renders (held keys, split pastes) is mapped against the state the previous key left.
   const state = useRef<ViewState | null>(null);
@@ -126,6 +140,8 @@ function Workspace(p: AppProps): ReactElement {
         return;
       }
       case "openCompletion":
+        // Walked again each time the list opens, so files made meanwhile show up.
+        dispatch({ type: "completion", value: { index: walk(files.current?.readdir ?? (() => [])), highlight: 0 } });
         return;
       case "addSubmission": {
         const r = manager.add({ mentions: c.mentions.map((m) => m.path), typed: c.typed });
@@ -176,7 +192,7 @@ function Workspace(p: AppProps): ReactElement {
       ...lines.map((line, i) => h(Text, { key: i, color: ROLE.muted, wrap: "truncate-end" }, line)));
   }
 
-  const paneHeight = Math.max(0, rows - HEADER_ROWS - FOOTER_ROWS - addBoxHeight(s.compose));
+  const paneHeight = Math.max(0, rows - HEADER_ROWS - FOOTER_ROWS - addBoxHeight(s.compose, s.addErrors));
   const listFocused = s.focus === "list" && s.mode !== "compose";
   const detailFocused = s.focus === "detail" && s.mode !== "compose";
   let panes: ReactElement[];
@@ -201,8 +217,13 @@ function Workspace(p: AppProps): ReactElement {
   return h(Box, { flexDirection: "column", width: columns, height: rows },
     h(Header, { s, width: columns }),
     h(Box, { flexDirection: "row", width: columns, height: paneHeight, flexShrink: 0 },
-      ...panes, overlay, h(Toasts, { key: "toasts", toasts: s.toasts, width: columns })),
-    h(AddBox, { compose: s.compose, focused: s.mode === "compose", width: columns }),
+      ...panes, overlay,
+      s.mode === "compose" ? h(Completion, { key: "completion", s, width: columns, paneHeight }) : null,
+      h(Toasts, { key: "toasts", toasts: s.toasts, width: columns })),
+    h(AddBox, {
+      compose: s.compose, focused: s.mode === "compose", width: columns,
+      exists: files.current.exists, errors: s.addErrors,
+    }),
     h(Footer, { s, width: columns }));
 }
 
