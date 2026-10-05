@@ -37,7 +37,7 @@ function IdleTask({ t }: { t: TaskSnapshot }): ReactElement {
   return h(Box, { flexDirection: "column" },
     ...text.map((line, i) => h(Box, { key: `t${i}` }, row(line))),
     row(" "),
-    row(h(Text, { color: ROLE.muted }, "source: "), "typed"),
+    row(h(Text, { color: ROLE.muted }, "source: "), t.source.kind === "file" ? sanitize(t.source.path) : "typed"),
     row(" "),
     ...SETTINGS.map(([key, label]) => {
       const value = sanitize(String(t.effective[key]));

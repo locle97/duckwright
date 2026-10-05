@@ -2,11 +2,13 @@
 import type { Decision } from "../../src/brain.ts";
 import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import { taskName } from "../../src/runs/manager.ts";
-import type { ManagerEvent, ManagerLike, Overrides, StartResult, TaskId, TaskSnapshot } from "../../src/runs/manager.ts";
+import type {
+  AddResult, ManagerEvent, ManagerLike, Overrides, StartResult, Submission, TaskId, TaskSnapshot,
+} from "../../src/runs/manager.ts";
 
 export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> = {}): TaskSnapshot {
   return {
-    id, text, name: taskName(text), state: "idle", overrides: {},
+    id, text, name: taskName(text), source: { kind: "typed" }, state: "idle", overrides: {},
     effective: { model: "sonnet", maxSteps: 25, headed: false, export: false, snapshot: "hybrid" },
     error: null, runId: null, runCount: 0, ...over,
   };
@@ -20,6 +22,8 @@ export class FakeManager implements ManagerLike {
   active = 0;
   startResult: StartResult = { ok: true, runId: "r1" };
   stopAllResult: Promise<void> = Promise.resolve();
+  /** What add() returns; by default it adds the typed task and reports it. */
+  addResult: AddResult | null = null;
   #listeners: Array<(e: ManagerEvent) => void> = [];
   #nextId: number;
 
@@ -49,6 +53,19 @@ export class FakeManager implements ManagerLike {
     this.tasks.push(task);
     this.emit({ type: "task:added", task });
     return task.id;
+  }
+
+  add(sub: Submission): AddResult {
+    this.log.push(`add:${sub.mentions.join(",")}|${sub.typed ?? ""}`);
+    if (this.addResult !== null) return this.addResult;
+    const added: TaskId[] = [];
+    if (sub.typed !== null) {
+      const task = snapshot(this.#nextId++, sub.typed);
+      this.tasks.push(task);
+      this.emit({ type: "task:added", task });
+      added.push(task.id);
+    }
+    return { ok: true, added, duplicates: [] };
   }
 
   setOverrides(id: TaskId, o: Overrides): void {

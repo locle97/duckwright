@@ -401,3 +401,10 @@ test("app_too_small_quits_from_any_mode", async () => {
   await u.type("y");
   assert.deepEqual(busy.log, ["stopAll", "onQuit"]);
 });
+
+test("app_detail_shows_file_source", async () => {
+  const m = new FakeManager([snapshot(1, "body", { source: { kind: "file", path: "tasks/a.md" }, name: "tasks/a.md" })]);
+  const t = mount(m);
+  await settle();
+  assert.match(t.frame(), /source: tasks\/a\.md/);
+});

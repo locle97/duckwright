@@ -13,7 +13,7 @@ import type { UiAction, ViewState } from "../../src/tui/state.ts";
 function task(id: number, state: TaskState = "idle"): TaskSnapshot {
   const live = state === "running" || state === "paused" || state === "stopping";
   return {
-    id, text: `task ${id}`, name: `"task ${id}"`, state, overrides: {},
+    id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, export: false, snapshot: "hybrid" },
     error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0,
   };

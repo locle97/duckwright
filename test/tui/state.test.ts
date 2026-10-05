@@ -10,7 +10,7 @@ import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle", runId: string | null = null): TaskSnapshot {
   return {
-    id, text: `task ${id}`, name: `"task ${id}"`, state, overrides: {},
+    id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, export: false, snapshot: "hybrid" },
     error: null, runId, runCount: runId ? 1 : 0,
   };

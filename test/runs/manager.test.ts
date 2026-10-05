@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import type { RunArgs } from "../../src/args.ts";
@@ -8,6 +10,8 @@ import type { RunOutcome } from "../../src/events.ts";
 import { RunManager, taskName } from "../../src/runs/manager.ts";
 import type { ManagerEvent, ManagerOptions } from "../../src/runs/manager.ts";
 import type { RunHandle, RunSpec } from "../../src/runs/run.ts";
+import { resolvePath } from "../../src/paths.ts";
+import { tmpDir } from "../helpers.ts";
 
 function outcome(status: "pass" | "fail" | "stop", over: Partial<RunOutcome> = {}): RunOutcome {
   return {
@@ -334,4 +338,125 @@ test("manager_error_after_run_start_stays_in_run", async () => {
   fakes[0].finish(outcome("fail", { error: "error: Error: boom" }));
   await tick();
   assert.equal(mgr.list()[0].error, null, "the run view shows it");
+});
+
+/** Write `files` (relative path -> content) under a fresh temp dir; folders end with "/". */
+function tree(files: Record<string, string>): string {
+  const dir = tmpDir();
+  for (const [rel, body] of Object.entries(files)) {
+    const p = path.join(dir, rel);
+    if (rel.endsWith("/")) fs.mkdirSync(p, { recursive: true });
+    else {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, body);
+    }
+  }
+  return dir;
+}
+
+test("manager_add_typed_only", () => {
+  const { mgr } = setup();
+  assert.deepEqual(mgr.add({ mentions: [], typed: "x" }), { ok: true, added: [1], duplicates: [] });
+  const t = mgr.list()[0];
+  assert.deepEqual(t.source, { kind: "typed" });
+  assert.equal(t.name, '"x"');
+});
+
+test("manager_add_file_and_folder_in_order", () => {
+  const dir = tree({ "a.md": "---\nmodel: opus\n---\nDo A", "smoke/b.md": "Do B", "smoke/c.txt": "Do C" });
+  const { mgr } = setup({ cwd: dir });
+  const r = mgr.add({ mentions: [`${dir}/a.md`, `${dir}/smoke`], typed: "check it" });
+  assert.equal(r.ok, true);
+  const list = mgr.list();
+  assert.deepEqual(list.map((t) => t.name), ["a.md", "smoke/b.md", "smoke/c.txt", '"check it"']);
+  assert.deepEqual(list[0].source, { kind: "file", path: `${dir}/a.md` });
+  assert.equal(list[0].text, "Do A");
+  assert.deepEqual(r.ok && r.added, list.map((t) => t.id));
+});
+
+test("manager_add_all_or_nothing", () => {
+  const dir = tree({ "good.md": "ok", "bad/x.md": "---\nfoo: 1\n---\nbody" });
+  const { mgr, events } = setup({ cwd: dir });
+  const [good, nope, bad] = [`${dir}/good.md`, `${dir}/nope.md`, `${dir}/bad`];
+  assert.deepEqual(mgr.add({ mentions: [good, nope, bad], typed: "t" }), {
+    ok: false,
+    errors: [
+      { mention: 1, message: `@${nope}: not found (type \\@ for a literal @)` },
+      { mention: 2, message: `${bad}/x.md:2: unknown setting "foo"` },
+    ],
+  });
+  assert.deepEqual(mgr.list(), []);
+  assert.deepEqual(events, []);
+});
+
+test("manager_add_folder_errors_name_the_mention", () => {
+  const dir = tree({ "empty/": "", "my dir/": "" });
+  const { mgr } = setup({ cwd: dir });
+  const r = mgr.add({ mentions: [`${dir}/empty`, `${dir}/my dir/`], typed: null });
+  assert.deepEqual(r, {
+    ok: false,
+    errors: [
+      { mention: 0, message: `@${dir}/empty: no task files (.md or .txt)` },
+      { mention: 1, message: `@"${dir}/my dir/": no task files (.md or .txt)` },
+    ],
+  });
+});
+
+test("manager_add_skips_duplicates", () => {
+  const dir = tree({ "t/a.md": "A", "t/b.md": "B" });
+  const { mgr } = setup({ cwd: dir });
+  const r = mgr.add({ mentions: [`${dir}/t`, `${dir}/t/a.md`], typed: null });
+  assert.equal(r.ok && r.added.length, 2);
+  assert.deepEqual(r.ok && r.duplicates, ["t/a.md"]);
+  assert.deepEqual(mgr.add({ mentions: [`${dir}/t/b.md`], typed: null }), { ok: true, added: [], duplicates: ["t/b.md"] });
+  assert.equal(mgr.list().length, 2);
+});
+
+test("manager_add_paths_outside_cwd", () => {
+  const dir = tree({ "x.md": "X", "sub/": "" });
+  const { mgr } = setup({ cwd: `${dir}/sub` });
+  mgr.add({ mentions: [`${dir}/x.md`], typed: null });
+  assert.equal(mgr.list()[0].name, "../x.md");
+});
+
+test("manager_file_settings_layering", () => {
+  const dir = tree({ "f.md": "---\nmodel: opus\nmax-steps: 7\nsession: mine\n---\nThe body" });
+  const f = `${dir}/f.md`;
+  {
+    const { mgr, fakes } = setup({ cwd: dir });
+    mgr.add({ mentions: [f], typed: null });
+    const id = mgr.list()[0].id;
+    assert.equal(mgr.list()[0].effective.model, "opus");
+    assert.equal(mgr.list()[0].effective.maxSteps, 7);
+    mgr.setOverrides(id, { model: "sonnet" });
+    assert.equal(mgr.list()[0].effective.model, "sonnet");
+    assert.equal(mgr.start(id).ok, true);
+    assert.equal(fakes[0].spec.args.session, "duckwright-1");
+    assert.equal(fakes[0].spec.taskFile, f);
+    assert.equal(fakes[0].spec.task, "The body");
+  }
+  {
+    const { mgr } = setup({ cwd: dir, argv: ["--model", "haiku"] });
+    mgr.add({ mentions: [f], typed: null });
+    assert.equal(mgr.list()[0].effective.model, "haiku");
+  }
+});
+
+test("manager_file_skill_reaches_preflight", () => {
+  const dir = tree({ "s.md": "skill", "f.md": "---\nskill: s.md\n---\nbody" });
+  const seen: string[] = [];
+  const { mgr } = setup({ cwd: dir, preflight: (a: RunArgs) => { seen.push(a.skill); return null; } });
+  mgr.add({ mentions: [`${dir}/f.md`], typed: null });
+  mgr.start(mgr.list()[0].id);
+  assert.deepEqual(seen, [resolvePath(`${dir}/s.md`)]);
+});
+
+test("manager_summary_names_file_tasks", async () => {
+  const dir = tree({ "a.md": "A" });
+  const { mgr, fakes } = setup({ cwd: dir });
+  mgr.add({ mentions: [`${dir}/a.md`], typed: null });
+  mgr.start(mgr.list()[0].id);
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  assert.match(mgr.summary().lines[1] ?? "", /^pass  a\.md  /);
 });
