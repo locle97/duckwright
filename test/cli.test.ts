@@ -985,7 +985,7 @@ function aPastRun(): PastRun {
   } as unknown as PastRun["outcome"];
   return {
     id: "20260101-000000-old", workdir: "/runs/20260101-000000-old", text: "old task",
-    source: { kind: "typed" }, fileSettings: {}, events: [], outcome,
+    source: { kind: "typed" }, fileSettings: {}, events: [], outcome, startedAt: 0,
   };
 }
 

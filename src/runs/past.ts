@@ -9,7 +9,7 @@ import type { TaskSource } from "./manager.ts";
 
 export interface PastRun {
   id: string; workdir: string; text: string; source: TaskSource; fileSettings: TaskSettings;
-  events: RunEvent[]; outcome: RunOutcome;
+  events: RunEvent[]; outcome: RunOutcome; startedAt: number;
 }
 
 export interface PastFs {
@@ -173,7 +173,18 @@ export function loadPastRuns(o: { runsDir: string; limit: number; cwd?: string; 
     }
     const last = events?.[events.length - 1];
     const outcome = last?.type === "run:end" ? last.outcome : outcomeFromHistory(h, historyFile);
-    runs.push({ id, workdir, ...sourceOf(h, cwd, fsx), events: events ?? eventsFromHistory(h, workdir, at), outcome });
+    const chosen = events ?? eventsFromHistory(h, workdir, at);
+    const first = chosen.find((e) => e.type === "run:start");
+    let startedAt: number;
+    if (first) startedAt = first.at;
+    else {
+      try {
+        startedAt = fsx.mtimeMs(workdir);
+      } catch {
+        startedAt = 0;
+      }
+    }
+    runs.push({ id, workdir, ...sourceOf(h, cwd, fsx), events: chosen, outcome, startedAt });
   }
   return { runs: runs.reverse(), skipped };
 }

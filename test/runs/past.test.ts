@@ -199,3 +199,43 @@ test("past_run_end_outcome_validated", () => {
   const step = JSON.stringify({ type: "step:start", at: 1, step: "1" });
   assert.equal(readEventsJsonl(step + "\n" + JSON.stringify(endEv(outcome())) + "\n"), null);
 });
+
+test("past_started_at_from_events_jsonl", () => {
+  const runs = tmpDir();
+  mkRun(runs, "20261001-100000-a", hist(), lines({ ...startEv(), at: 1234 }, endEv(outcome())));
+  assert.equal(loadPastRuns({ runsDir: runs, limit: 1 }).runs[0].startedAt, 1234);
+});
+
+test("past_started_at_history_mtime_without_events", () => {
+  const runs = tmpDir();
+  const dir = mkRun(runs, "20261001-100000-a", hist());
+  const file = path.join(dir, "history.json");
+  const d = new Date("2026-03-04T05:06:07Z");
+  fs.utimesSync(file, d, d);
+  assert.equal(loadPastRuns({ runsDir: runs, limit: 1 }).runs[0].startedAt, fs.statSync(file).mtimeMs);
+});
+
+test("past_started_at_folder_mtime_without_run_start", () => {
+  const runs = tmpDir();
+  const dir = mkRun(runs, "20261001-100000-a", hist(), lines(endEv(outcome())));
+  const hd = new Date("2026-03-04T05:06:07Z");
+  fs.utimesSync(path.join(dir, "history.json"), hd, hd);
+  const d = new Date("2026-05-06T07:08:09Z");
+  fs.utimesSync(dir, d, d);
+  const r = loadPastRuns({ runsDir: runs, limit: 1 }).runs[0];
+  assert.equal(r.startedAt, fs.statSync(dir).mtimeMs);
+  assert.notEqual(r.startedAt, fs.statSync(path.join(dir, "history.json")).mtimeMs);
+});
+
+test("past_started_at_zero_when_folder_mtime_throws", () => {
+  const fake = {
+    listDirs: () => ["20261001-100000-a"],
+    readFile: (p: string) => (p.endsWith("history.json") ? JSON.stringify(hist()) : lines(endEv(outcome()))),
+    mtimeMs: (p: string) => {
+      if (p.endsWith("history.json")) return 5;
+      throw new Error("nope");
+    },
+    exists: () => false,
+  };
+  assert.equal(loadPastRuns({ runsDir: "/r", limit: 1, fs: fake }).runs[0].startedAt, 0);
+});

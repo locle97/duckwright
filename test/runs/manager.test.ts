@@ -466,7 +466,7 @@ function pastRun(id: string, status: "pass" | "fail" | "stop", over: Partial<Pas
   const out = outcome(status);
   return {
     id, workdir: `/runs/${id}`, text: `text of ${id}`, source: { kind: "typed" }, fileSettings: {},
-    events: [{ type: "run:end", at: 1, outcome: out }], outcome: out, ...over,
+    events: [{ type: "run:end", at: 1, outcome: out }], outcome: out, startedAt: 0, ...over,
   };
 }
 
