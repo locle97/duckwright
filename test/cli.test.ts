@@ -6,7 +6,8 @@ import { afterEach, test } from "node:test";
 import { Brain, BrainError } from "../src/brain.ts";
 import type { Action } from "../src/brain.ts";
 import { PROMPTS, historyJson, main, version } from "../src/cli.ts";
-import type { AgentLike, CliDeps } from "../src/cli.ts";
+import type { AgentLike, CliDeps, TuiHandle, TuiModule } from "../src/cli.ts";
+import type { ManagerLike } from "../src/runs/manager.ts";
 import type { AgentOptions, RunResult } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
@@ -99,7 +100,7 @@ test("playwright_error_history_shape", async () => {
     codes: ["await page.getByRole('button', { name: 'Go' }).click();"],
   };
   const createAgent = agentWith(async (opts) => {
-    opts.onStep!(r);
+    opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
     throw new PlaywrightError("snapshot died");
   });
   assert.equal(await main(e.argv, e.deps({ createAgent })), 1);
@@ -137,7 +138,8 @@ test("abort writes interrupted history and exits 130", async () => {
   const e = env();
   const ac = new AbortController();
   const createAgent = agentWith(async (opts, agent) => {
-    assert.equal(opts.signal, ac.signal);
+    // The agent gets a per-run signal that follows the process one.
+    assert.equal(opts.signal!.aborted, false);
     agent.costUsd = 0.02;
     ac.abort();
     throw new AbortedError();
@@ -331,7 +333,7 @@ function fakeRun(success = true, actions?: Action[], codes?: (string | null)[]) 
   const acts = actions ?? [{ cmd: "goto", args: ["u"] }, { cmd: "expect", args: ["url", "u"] }];
   const r = rec(acts, acts.map(() => "ok"), codes ?? [GOTO, EXPECT]);
   return agentWith(async (opts) => {
-    opts.onStep!(r);
+    opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
     return result(success, [r]);
   });
 }
@@ -809,4 +811,166 @@ test("costs round like Python", async () => {
   const e = env();
   assert.equal(await main(e.argv, e.deps({ createAgent: agentWith(async () => result(true, [], 0.03125)) })), 0);
   assert.equal(e.out[2], "Steps: 1  Cost: $0.0312");
+});
+
+interface FakeTui {
+  load: () => Promise<TuiModule>;
+  loads: number;
+  restores: number;
+  manager: ManagerLike | null;
+}
+
+/** A TUI that adds one task, starts it, and finishes when the run ends (or rejects `done`). */
+function fakeTui(rejectWith: Error | null = null): FakeTui {
+  const fake: FakeTui = { loads: 0, restores: 0, manager: null, load: null as never };
+  fake.load = async () => {
+    fake.loads++;
+    return {
+      startTui({ manager }): TuiHandle {
+        fake.manager = manager;
+        const id = manager.addTyped("do it");
+        const done = new Promise<void>((resolve, reject) => {
+          const off = manager.subscribe((e) => {
+            if (e.type === "task:updated" && e.task.state === "passed") {
+              off();
+              // The manager records the outcome a tick after the state flips.
+              setImmediate(() => (rejectWith ? reject(rejectWith) : resolve()));
+            }
+          });
+        });
+        manager.start(id);
+        return { done, restoreTerminal: () => void fake.restores++, quit: () => {} };
+      },
+    };
+  };
+  return fake;
+}
+
+const tuiAgent = agentWith(async () => result(true, [], 0.5));
+
+test("tui_needs_tty", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--tui", "--skill", e.argv[2]], e.deps({ isTTY: () => false, loadTui: fake.load }));
+  assert.equal(code, 2);
+  assert.deepEqual(e.err, ["--tui needs an interactive terminal"]);
+  assert.equal(fake.loads, 0);
+});
+
+test("tui_rejects_task_and_file", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const over = e.deps({ isTTY: () => true, loadTui: fake.load });
+  assert.equal(await main(["--tui", "task"], over), 2);
+  assert.ok(e.err.some((l) => l.includes("give tasks inside the TUI, not with --tui")));
+  e.err.length = 0;
+  assert.equal(await main(["--tui", "-f", "a.md"], over), 2);
+  assert.ok(e.err.some((l) => l.includes("give tasks inside the TUI, not with --tui")));
+  assert.equal(fake.loads, 0);
+});
+
+test("tui_max_parallel_needs_tui", async () => {
+  const e = env();
+  assert.equal(await main([...e.argv, "--max-parallel", "2"], e.deps()), 2);
+  assert.ok(e.err.some((l) => l.includes("--max-parallel needs --tui")));
+});
+
+test("tui_preflight_fails_before_load", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--tui", "--skill", path.join(e.tmp, "missing.md")],
+    e.deps({ isTTY: () => true, loadTui: fake.load }));
+  assert.equal(code, 2);
+  assert.ok(e.err[0].startsWith("playwright-cli skill not found"));
+  assert.equal(fake.loads, 0);
+});
+
+test("tui_prints_summary_and_exit_code", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--tui", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
+  assert.equal(code, 0);
+  assert.equal(fake.restores, 1);
+  assert.ok(e.out[0].startsWith("Batch: 1 passed, 0 failed, 0 stopped"));
+  assert.ok(e.out[1].startsWith('pass  "do it"'));
+});
+
+test("tui_restores_terminal_when_done_rejects", async () => {
+  const e = env();
+  const fake = fakeTui(new Error("boom"));
+  await assert.rejects(
+    main(["--tui", "--skill", e.argv[2]],
+      e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent })),
+    /boom/,
+  );
+  assert.equal(fake.restores, 1);
+});
+
+test("tui_max_parallel_reaches_manager", async () => {
+  const e = env();
+  const fake = fakeTui();
+  await main(["--tui", "--max-parallel", "1", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
+  const m = fake.manager!;
+  const a = m.addTyped("a");
+  const b = m.addTyped("b");
+  assert.equal(m.start(a).ok, true);
+  const second = m.start(b);
+  assert.equal(second.ok, false);
+  await m.stopAll();
+});
+
+/** A TUI that starts one task (if `start`), and closes only when asked to quit, like the real one. */
+function quitOnlyTui(start: boolean) {
+  const fake = { quits: 0, restores: 0, load: null as never as () => Promise<TuiModule> };
+  fake.load = async () => ({
+    startTui({ manager }): TuiHandle {
+      if (start) manager.start(manager.addTyped("do it"));
+      let resolve!: () => void;
+      const done = new Promise<void>((r) => { resolve = r; });
+      return {
+        done,
+        restoreTerminal: () => void fake.restores++,
+        quit: () => {
+          fake.quits++;
+          void manager.stopAll().then(resolve);
+        },
+      };
+    },
+  });
+  return fake;
+}
+
+/** An agent that runs until the signal aborts. */
+const untilAborted = agentWith((opts) => new Promise((_, reject) => {
+  opts.signal!.addEventListener("abort", () => reject(new AbortedError()), { once: true });
+}));
+
+test("tui_outside_sigint_quits", { timeout: 5000 }, async () => {
+  const e = env();
+  const fake = quitOnlyTui(true);
+  const ac = new AbortController();
+  const p = main(["--tui", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: untilAborted, signal: ac.signal }));
+  await new Promise((r) => setTimeout(r, 20));
+  ac.abort();
+  assert.equal(await p, 130);
+  assert.equal(fake.quits, 1);
+  assert.equal(fake.restores, 1);
+  assert.equal(e.out[0], "Batch: 0 passed, 0 failed, 1 stopped  Cost: $0.0000");
+  assert.ok(e.out[1].startsWith('stop  "do it"'));
+});
+
+test("tui_outside_sigint_quits_without_runs", { timeout: 5000 }, async () => {
+  const e = env();
+  const fake = quitOnlyTui(false);
+  const ac = new AbortController();
+  const p = main(["--tui", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, signal: ac.signal }));
+  await new Promise((r) => setTimeout(r, 20));
+  ac.abort();
+  assert.equal(await p, 130);
+  assert.equal(fake.quits, 1);
+  assert.deepEqual(e.out, []);
 });

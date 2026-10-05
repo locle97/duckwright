@@ -1,6 +1,8 @@
 import { execute } from "./actions.ts";
 import { BrainError } from "./brain.ts";
 import type { DecideFn } from "./brain.ts";
+import { RunControl } from "./control.ts";
+import { RunEvents } from "./events.ts";
 import { observe, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { AbortedError } from "./proc.ts";
@@ -42,6 +44,8 @@ export interface AgentOptions {
   onStep?: (rec: StepRecord) => void;
   snapshotMode?: SnapshotMode;
   signal?: AbortSignal;
+  events?: RunEvents;
+  control?: RunControl;
 }
 
 export class Agent {
@@ -53,9 +57,10 @@ export class Agent {
   readonly maxFailures: number;
   readonly headed: boolean;
   readonly state: string | null;
-  readonly onStep: ((rec: StepRecord) => void) | undefined;
   readonly snapshotMode: SnapshotMode;
   readonly signal: AbortSignal | undefined;
+  readonly events: RunEvents;
+  readonly control: RunControl | undefined;
   // Updated as the run goes, so a caller can still read it after run() throws.
   costUsd = 0;
 
@@ -68,14 +73,17 @@ export class Agent {
     this.maxFailures = opts.maxFailures ?? 3;
     this.headed = opts.headed ?? false;
     this.state = opts.state ?? null;
-    this.onStep = opts.onStep;
     this.snapshotMode = opts.snapshotMode ?? "full";
     this.signal = opts.signal;
+    this.events = opts.events ?? new RunEvents();
+    this.control = opts.control;
+    const onStep = opts.onStep;
+    if (onStep) this.events.subscribe((e) => { if (e.type === "step:end") onStep(e.record); });
   }
 
-  private record(history: StepRecord[], rec: StepRecord): void {
+  private record(history: StepRecord[], rec: StepRecord, cost: number, startedAt: number): void {
     history.push(rec);
-    this.onStep?.(rec);
+    this.events.emit({ type: "step:end", record: rec, cost, durationMs: this.events.now() - startedAt });
   }
 
   async run(): Promise<RunResult> {
@@ -97,11 +105,16 @@ export class Agent {
     let steps = 0;
     for (let step = 1; step <= this.maxSteps; step++) {
       if (this.signal?.aborted) throw new AbortedError();
+      await this.control?.gate(this.signal ?? new AbortController().signal);
+      const startedAt = this.events.now();
+      this.events.emit({ type: "step:start", step });
+      this.events.emit({ type: "phase", step, phase: "observing" });
       const obs = await observe(this.pw, this.workdir);
       const nudge = isRepeating(history) ? REPEAT_NUDGE : null;
       const paste = pasteSnapshot(this.snapshotMode, obs);
       const prompt = buildPrompt(this.task, step, this.maxSteps, history, memory, obs, { nudge, paste });
       steps = step;
+      this.events.emit({ type: "phase", step, phase: "thinking" });
       let decision;
       let cost;
       try {
@@ -112,12 +125,13 @@ export class Agent {
         // Ctrl-C reaches claude too, and its exit can arrive before the abort does.
         if (this.signal?.aborted) throw new AbortedError();
         failures += 1;
+        this.events.emit({ type: "brain:error", step, message: e.message, cost: e.cost, failures });
         this.record(history, {
           step,
           decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [] },
           results: [`brain error: ${e.message}`],
           codes: [],
-        });
+        }, e.cost, startedAt);
         if (failures >= this.maxFailures) {
           return {
             success: false,
@@ -133,8 +147,13 @@ export class Agent {
       this.costUsd += cost;
       memory = decision.memory;
       const codes: (string | null)[] = [];
-      const { results, done } = await execute(this.pw, decision.actions, codes);
-      this.record(history, { step, decision, results, codes });
+      this.events.emit({ type: "decision", step, decision, cost });
+      this.events.emit({ type: "phase", step, phase: "acting" });
+      const { results, done } = await execute(this.pw, decision.actions, codes, {
+        start: (index) => this.events.emit({ type: "action:start", step, index }),
+        result: (index, result, code) => this.events.emit({ type: "action:result", step, index, result, code }),
+      });
+      this.record(history, { step, decision, results, codes }, cost, startedAt);
       if (done !== null) return { success: done.success, answer: done.answer, steps, costUsd: this.costUsd, history };
     }
     return { success: false, answer: "max steps reached", steps, costUsd: this.costUsd, history };

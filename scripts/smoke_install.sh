@@ -39,4 +39,22 @@ case "$err" in
   *) echo "stderr missing 'claude CLI not found':" >&2; echo "$err" >&2; exit 1 ;;
 esac
 
+# --tui refuses to start without a terminal.
+set +e
+err="$("$prefix/bin/duckwright" --tui </dev/null 2>&1 >/dev/null)"
+code=$?
+set -e
+if [ "$code" -ne 2 ]; then
+  echo "expected --tui exit code 2, got $code" >&2
+  echo "$err" >&2
+  exit 1
+fi
+case "$err" in
+  *"--tui needs an interactive terminal"*) ;;
+  *) echo "stderr missing '--tui needs an interactive terminal':" >&2; echo "$err" >&2; exit 1 ;;
+esac
+
+# Ink and React must resolve from the installed tarball.
+"$node_bin" -e "import('$prefix/lib/node_modules/duckwright/dist/tui/index.js')"
+
 echo "smoke ok"

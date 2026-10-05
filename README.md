@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/duckwright/blob/main/LICENSE)
 [![CI](https://github.com/locle97/duckwright/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/duckwright/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.18-blue)
-![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+![Dependencies](https://img.shields.io/badge/dependencies-ink%20for%20--tui-brightgreen)
 
 **The rubber duck that drives your browser, then writes the regression test.**
 
@@ -42,7 +42,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Full audit trail**: every run writes `history.json` with each decision, its results, and the total cost.
 - **Replayable as a test**: each action in `history.json` carries the Playwright code `playwright-cli` ran for it, exported as a regression test with `duckwright export`.
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
-- **No runtime dependencies**: the CLI uses only Node's standard library. TypeScript and the test tools are development dependencies.
+- **Minimal dependencies**: the core loop uses only Node's standard library; `--tui` uses Ink. TypeScript and the test tools are development dependencies.
 
 ## Getting started
 
@@ -106,6 +106,7 @@ duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--allow-file-access] [--[no-]export]
 duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export RUN [-o FILE]
+duckwright --tui [--max-parallel N] [options]
 ```
 
 Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
@@ -121,6 +122,8 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
+| `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed inside it, so it takes no task or `--file`, and it needs a terminal |
+| `--max-parallel` | `3` | With `--tui`, how many runs may be active at once |
 | `--snapshot-hybrid` | on | Paste page snapshots of up to 5,000 characters into the prompt; for larger ones, let Claude grep the saved file. Decided again every step (see [Reading the page](#reading-the-page)) |
 | `--snapshot-full` | off | Always paste the page snapshot into the prompt, truncated at 40k characters. Claude gets no tools |
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
@@ -129,10 +132,26 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 > When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
 
 > [!IMPORTANT]
-> Two runs at the same time must use different `--session` names. Otherwise they drive the same browser.
+> Two runs at the same time must use different `--session` names. Otherwise they drive the same browser. The same goes for two TUIs: give each its own `--session`. Inside one TUI, runs get their own sessions automatically.
 
 > [!WARNING]
 > `--allow-file-access` gives the browser unrestricted access to local files, not just one file. A page that hijacks the agent could `goto file:///home/you/.ssh/...` and leak the contents. Only use it with trusted pages and trusted tasks. The flag only applies when the session's browser is first opened, so close any existing session first.
+
+### Interactive TUI
+
+`duckwright --tui` opens a workspace in the terminal. You queue tasks, start several at once, and watch each step's goal, actions, results, and running cost live. Pass the usual options (`--model`, `--max-steps`, ...) as defaults for every task, and `--max-parallel N` to cap concurrent runs.
+
+Five keys to learn first:
+
+| Key | Does |
+| --- | --- |
+| `a` | Add a task |
+| `⏎` | Start the selected task |
+| `p` | Pause or resume it |
+| `s` | Stop it |
+| `q` | Quit (asks first if runs are active) |
+
+Press `?` inside the TUI for the rest.
 
 ### Authenticated pages
 
@@ -347,7 +366,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Experience**
 
-- [ ] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
+- [x] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [x] **Batch runs**: `duckwright -f tasks/` (or several files) runs task files one after another and prints a summary.
 - [ ] **Parallel batches**: `-j N` runs up to N task files at once, giving each its own `--session` name automatically so they never share a browser.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.

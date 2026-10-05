@@ -28,7 +28,13 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
     "ajv": "^8.20.0",
+    "ink-testing-library": "^4.0.0",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "ink": "^8.0.0",
+    "react": "^19.3.0"
   }
 }

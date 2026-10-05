@@ -1,13 +1,9 @@
 import type { Decision } from "./brain.ts";
 import { SNAPSHOT_FILE } from "./observe.ts";
 import type { Observation } from "./observe.ts";
-import { splitLines } from "./text.ts";
+import { flat, neutralise } from "./text.ts";
 
 export const HISTORY_WINDOW = 15;
-
-function flat(s: string): string {
-  return s ? splitLines(String(s)).join(" ") : "";
-}
 
 export interface StepRecord {
   step: number;
@@ -29,13 +25,6 @@ export function stepLine(rec: StepRecord): string {
     }).join("; ")
     : results.join("; ");
   return `step ${rec.step} | ${flat(d.evaluationPreviousGoal)} | ${flat(d.nextGoal)} | ${acts}`;
-}
-
-const HARNESS_TAG = /<(?=\/?(?:page_snapshot|tabs|task|memory|history))/gi;
-
-/** Escape harness section tags inside untrusted page data so it cannot close its block. */
-function neutralise(body: string): string {
-  return body.replace(HARNESS_TAG, "&lt;");
 }
 
 function section(tag: string, body: string): string {

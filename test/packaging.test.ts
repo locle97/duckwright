@@ -33,11 +33,18 @@ test("package_name_and_command", () => {
   assert.ok(fs.readFileSync(path.join(ROOT, "dist", "bin.js"), "utf8").startsWith("#!/usr/bin/env node\n"));
 });
 
-test("package_has_no_runtime_deps", () => {
-  assert.ok(!pkg.dependencies || Object.keys(pkg.dependencies).length === 0);
+test("package_runtime_deps_are_ink_and_react", () => {
+  assert.deepEqual(Object.keys(pkg.dependencies ?? {}).sort(), ["ink", "react"]);
   assert.equal(pkg.engines.node, ">=22.18");
 });
 
 test("package_declares_mit_license", () => {
   assert.equal(pkg.license, "MIT");
+});
+
+test("dist_loads_tui_lazily", () => {
+  const cli = fs.readFileSync(path.join(ROOT, "dist", "cli.js"), "utf8");
+  assert.match(cli, /import\("\.\/tui\/index\.js"\)/);
+  assert.doesNotMatch(cli, /^\s*import\b[^;\n]*from\s+["'](ink|react)["']/m);
+  assert.ok(files.includes("dist/tui/index.js"));
 });

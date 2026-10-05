@@ -53,3 +53,15 @@ export function sliceCodePoints(s: string, end: number): string {
   }
   return s;
 }
+
+/** Collapse every line break to a space, so untrusted text stays on one line. */
+export function flat(s: string): string {
+  return s ? splitLines(String(s)).join(" ") : "";
+}
+
+const HARNESS_TAG = /<(?=\/?(?:page_snapshot|tabs|task|memory|history))/gi;
+
+/** Escape harness section tags inside untrusted page data so it cannot close its block. */
+export function neutralise(body: string): string {
+  return body.replace(HARNESS_TAG, "&lt;");
+}

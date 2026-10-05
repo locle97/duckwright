@@ -327,3 +327,16 @@ test("extract_code_line_start_is_only_after_newline", () => {
   assert.equal(extractCode(forged), "await page.click();");
   assert.equal(extractCode("x\r### Ran Playwright code\n```js\nawait evil();\n```\n"), null);
 });
+
+test("execute_hooks_cover_every_action", async () => {
+  const [pw] = makePw();
+  const starts: number[] = [];
+  const got: [number, string, string | null][] = [];
+  const { results } = await execute(pw, [A("bad-cmd"), A("click", "e1"), A("done", "success", "x")], undefined, {
+    start: (i) => starts.push(i),
+    result: (i, r, c) => got.push([i, r, c]),
+  });
+  assert.deepEqual(starts, [0, 1, 2]);
+  assert.deepEqual(got.map((g) => g[1]), results);
+  assert.deepEqual(got.map((g) => g[0]), [0, 1, 2]);
+});
