@@ -7,6 +7,10 @@ import { createElement as h } from "react";
 
 import type { RunOutcome } from "../../src/events.ts";
 import { App, fromInk } from "../../src/tui/app.ts";
+import type { TuiFiles } from "../../src/tui/app.ts";
+import { AddBox } from "../../src/tui/addBox.ts";
+import { EMPTY_COMPOSE } from "../../src/tui/compose.ts";
+import { ROLE } from "../../src/tui/theme.ts";
 import { decision, ev, FakeManager, snapshot } from "./fake-manager.ts";
 
 afterEach(() => cleanup());
@@ -23,7 +27,20 @@ interface Harness {
   log: string[];
 }
 
-function mount(manager: FakeManager, size = { columns: 100, rows: 24 }): Harness {
+/** Fake file access over `tree` (relDir -> names; folder names end with "/"). */
+function fakeFiles(tree: Record<string, string[]>): TuiFiles {
+  const known = new Set<string>();
+  for (const [dir, names] of Object.entries(tree)) {
+    for (const n of names) known.add((dir === "" ? "" : `${dir}/`) + n);
+  }
+  return {
+    readdir: (rel) => (tree[rel] ?? []).map((n) => (n.endsWith("/") ? { name: n.slice(0, -1), dir: true } : { name: n, dir: false })),
+    exists: (p) => known.has(p) || known.has(`${p.replace(/\/$/, "")}/`),
+  };
+}
+const FILES = fakeFiles({ "": ["tasks/", "a.md"], tasks: ["login.md", "smoke.md"] });
+
+function mount(manager: FakeManager, size = { columns: 100, rows: 24 }, files: TuiFiles = FILES): Harness {
   const quits: Array<Error | undefined> = [];
   const harness: Harness = {
     quits, forced: 0, log: manager.log,
@@ -37,7 +54,7 @@ function mount(manager: FakeManager, size = { columns: 100, rows: 24 }): Harness
     },
   };
   const r = render(h(App, {
-    manager, size, tickMs: 10,
+    manager, size, tickMs: 10, files,
     onQuit: (e?: Error) => {
       manager.log.push("onQuit");
       quits.push(e);
@@ -59,7 +76,7 @@ test("app_empty_workspace", async () => {
   await settle();
   const f = t.frame();
   assert.match(f, /🦆 duckwright/);
-  assert.match(f, /Describe a task to add…/);
+  assert.match(f, /Describe a task, or @ a task file or folder…/);
   assert.match(f, /a add/);
 });
 
@@ -69,10 +86,10 @@ test("app_add_tasks_in_a_row", async () => {
   await settle();
   await t.type("a", "Check the price", "\r", "Second", "\r");
   const f = t.frame();
-  assert.deepEqual(m.log, ["addTyped:Check the price", "addTyped:Second"]);
+  assert.deepEqual(m.log, ["add:|Check the price", "add:|Second"]);
   assert.match(f, /"Check the price"/);
   assert.match(f, /"Second"/);
-  assert.match(f, /› Describe a task to add…/, "the box is empty again");
+  assert.match(f, /› Describe a task, or @ a task file or folder…/, "the box is empty again");
   assert.match(f, /⏎ add/, "focus stays in the add box");
 });
 
@@ -278,7 +295,7 @@ test("app_keys_without_rerender_between_them", async () => {
   await settle();
   for (const k of ["a", "h", "e", "l", "l", "o", "\r", "x", "\r"]) r.stdin.write(k);
   await settle();
-  assert.deepEqual(m.log, ["addTyped:hello", "addTyped:x"]);
+  assert.deepEqual(m.log, ["add:|hello", "add:|x"]);
   r.stdin.write("\x1b"); // alone: Ink reads an escape followed at once by "q" as alt+q
   await settle();
   for (const k of ["q", "y"]) r.stdin.write(k);
@@ -400,4 +417,107 @@ test("app_too_small_quits_from_any_mode", async () => {
   assert.match(u.frame(), /y yes · n no/);
   await u.type("y");
   assert.deepEqual(busy.log, ["stopAll", "onQuit"]);
+});
+
+test("app_detail_shows_file_source", async () => {
+  const m = new FakeManager([snapshot(1, "body", { source: { kind: "file", path: "tasks/a.md" }, name: "tasks/a.md" })]);
+  const t = mount(m);
+  await settle();
+  assert.match(t.frame(), /source: tasks\/a\.md/);
+});
+
+test("app_completion_file", async () => {
+  const m = new FakeManager();
+  const t = mount(m);
+  await settle();
+  await t.type("a", "@", "t", "a", "s", "k", "s", "/", "l");
+  assert.match(t.frame(), /tasks\/login\.md/);
+  assert.match(t.frame(), /tab complete/);
+  await t.type("\r");
+  assert.match(t.frame(), /› @tasks\/login\.md/);
+  assert.doesNotMatch(t.frame(), /tab complete/);
+  await t.type("\r");
+  assert.deepEqual(m.log, ["add:tasks/login.md|"]);
+});
+
+test("app_completion_folder", async () => {
+  const t = mount(new FakeManager());
+  await settle();
+  await t.type("a", "@", "t", "a", "s");
+  assert.match(t.frame(), /folder · 2/);
+  await t.type("\t");
+  assert.match(t.frame(), /› @tasks\//);
+  assert.match(t.frame(), /tasks\/login\.md/);
+  await t.type("\x1b");
+  assert.doesNotMatch(t.frame(), /tasks\/login\.md/);
+  assert.match(t.frame(), /esc back/, "still in the add box");
+  await t.type("\x1b");
+  assert.match(t.frame(), /a add/);
+});
+
+test("app_mixed_submission", async () => {
+  const m = new FakeManager([snapshot(1, "older")]);
+  const t = mount(m);
+  await settle();
+  await t.type("a", "@a.md check the price", "\r");
+  assert.deepEqual(m.log, ["add:a.md|check the price"]);
+  const f = t.frame();
+  assert.match(f, /› Describe a task, or @/, "the box is empty again");
+  assert.match(f, /source: typed/);
+  assert.match(f, /││ check the price/, "the detail pane shows the new task");
+});
+
+test("app_bad_mention_adds_nothing", async () => {
+  const m = new FakeManager();
+  m.addResult = { ok: false, errors: [{ mention: 1, message: "@nope.md: not found (type \\@ for a literal @)" }] };
+  const t = mount(m);
+  await settle();
+  await t.type("a", "@a.md @nope.md x", "\r");
+  const f = t.frame();
+  assert.match(f, /@nope\.md: not found \(type \\@ for a literal @\)/);
+  assert.match(f, /› @a\.md @nope\.md x/);
+  assert.match(f, /No tasks yet/);
+  // The next edit clears the error.
+  await t.type("y");
+  assert.doesNotMatch(t.frame(), /not found/);
+});
+
+test("app_duplicate_toast", async () => {
+  const m = new FakeManager();
+  m.addResult = { ok: true, added: [], duplicates: ["a.md"] };
+  const t = mount(m);
+  await settle();
+  // Typed at once, the mention still opens the list (the cursor ends inside it): accept, then submit.
+  await t.type("a", "@a.md", "\r", "\r");
+  assert.match(t.frame(), /already added: a\.md/);
+  assert.match(t.frame(), /› Describe a task, or @/);
+});
+
+test("app_completion_sanitizes_names", async () => {
+  const t = mount(new FakeManager(), undefined, fakeFiles({ "": ["evil\x1b[2J.md"] }));
+  await settle();
+  await t.type("a", "@", "e", "v");
+  assert.match(t.frame(), /evil/);
+  assert.ok(!t.raw().includes("\x1b[2J"));
+});
+
+test("app_missing_mention_is_red", () => {
+  // Ink draws no colours under the test renderer, so read the colours off the element tree.
+  const compose = { ...EMPTY_COMPOSE, text: "@a.md @zz.md x", cursor: 3 };
+  const coloured: [string, unknown][] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (node === null || typeof node !== "object" || !("props" in node)) return;
+    const props = (node as { props: { color?: unknown; children?: unknown } }).props;
+    const kids = props.children;
+    if (typeof kids === "string" && props.color !== undefined) coloured.push([kids, props.color]);
+    visit(kids);
+  };
+  for (const focused of [false, true]) {
+    coloured.length = 0;
+    visit(AddBox({ compose, focused, width: 80, exists: FILES.exists, errors: [] }));
+    assert.deepEqual(coloured.filter(([, c]) => c === ROLE.error).map(([t]) => t), ["@zz.md"], `focused ${focused}`);
+    // While focused the cursor cell ("m") is drawn inverse; the rest of "@a.md" stays accent.
+    assert.equal(coloured.filter(([, c]) => c === ROLE.accent).map(([t]) => t).join(""), focused ? "@a.d" : "@a.md");
+  }
 });

@@ -65,3 +65,8 @@ const HARNESS_TAG = /<(?=\/?(?:page_snapshot|tabs|task|memory|history))/gi;
 export function neutralise(body: string): string {
   return body.replace(HARNESS_TAG, "&lt;");
 }
+
+/** How a path is written as an add-box mention: `@path`, quoted when it holds whitespace. */
+export function mentionToken(p: string): string {
+  return /\s/.test(p) ? `@"${p}"` : `@${p}`;
+}

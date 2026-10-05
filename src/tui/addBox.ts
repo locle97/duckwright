@@ -1,45 +1,98 @@
 // The add box under the panes: a `› ` prompt, the typed text with a cursor while focused,
 // or the placeholder. Shows at most MAX_LINES lines and scrolls to keep the cursor in view.
+// Mentions are drawn in the accent colour, or red when their path does not exist; the errors of
+// a refused submission are listed under the text.
 import { Box, Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
 
-import { lines } from "./compose.ts";
-import type { ComposeState } from "./compose.ts";
+import { lines, spans } from "./compose.ts";
+import type { ComposeState, SpanKind } from "./compose.ts";
 import { sanitize } from "./sanitize.ts";
 import { ROLE } from "./theme.ts";
 
 export const MAX_LINES = 6;
-const PLACEHOLDER = "Describe a task to add…";
+const MAX_ERRORS = 3;
+const PLACEHOLDER = "Describe a task, or @ a task file or folder…";
 
-/** Rows the box takes, border included. */
-export function addBoxHeight(c: ComposeState): number {
-  return Math.min(MAX_LINES, lines(c).lines.length) + 2;
+/** The error rows shown: up to MAX_ERRORS, then `…and N more`. */
+function errorRows(errors: string[]): string[] {
+  if (errors.length <= MAX_ERRORS) return errors;
+  return [...errors.slice(0, MAX_ERRORS - 1), `…and ${errors.length - MAX_ERRORS + 1} more`];
 }
 
-export function AddBox({ compose, focused, width }: { compose: ComposeState; focused: boolean; width: number }): ReactElement {
+/** Rows the box takes, border included. */
+export function addBoxHeight(c: ComposeState, errors: string[] = []): number {
+  return Math.min(MAX_LINES, lines(c).lines.length) + errorRows(errors).length + 2;
+}
+
+const COLOR: Record<SpanKind, string | undefined> = { text: undefined, mention: ROLE.accent, missing: ROLE.error };
+
+interface Piece { text: string; kind: SpanKind }
+
+/** The parts of one line (starting at `offset` in the text), cut where the span kinds change. */
+function linePieces(all: { start: number; text: string; kind: SpanKind }[], offset: number, line: string): Piece[] {
+  const end = offset + line.length;
+  const out: Piece[] = [];
+  for (const sp of all) {
+    const from = Math.max(sp.start, offset);
+    const to = Math.min(sp.start + sp.text.length, end);
+    if (to > from) out.push({ text: sp.text.slice(from - sp.start, to - sp.start), kind: sp.kind });
+  }
+  return out;
+}
+
+/** Pieces of `[from, to)` in line coordinates, as coloured Text. */
+function draw(pieces: Piece[], from: number, to: number, dim: boolean, key: string): ReactElement[] {
+  const out: ReactElement[] = [];
+  let at = 0;
+  pieces.forEach((p, i) => {
+    const a = Math.max(from, at);
+    const b = Math.min(to, at + p.text.length);
+    if (b > a) out.push(h(Text, { key: `${key}${i}`, color: COLOR[p.kind], dimColor: dim }, sanitize(p.text.slice(a - at, b - at))));
+    at += p.text.length;
+  });
+  return out;
+}
+
+export interface AddBoxProps {
+  compose: ComposeState;
+  focused: boolean;
+  width: number;
+  exists(path: string): boolean;
+  errors: string[];
+}
+
+export function AddBox({ compose, focused, width, exists, errors }: AddBoxProps): ReactElement {
   const { lines: all, row, col } = lines(compose);
   const first = Math.min(Math.max(0, row - MAX_LINES + 1), Math.max(0, all.length - MAX_LINES));
+  const marked = spans(compose.text, exists);
+  const offsets: number[] = [];
+  all.reduce((at, line) => (offsets.push(at), at + line.length + 1), 0);
   // Border and padding take 4 columns, the prompt 2; keep one more for the cursor.
   const room = Math.max(1, width - 6 - 1);
   const shown = all.slice(first, first + MAX_LINES).map((line, i) => {
-    const prompt = first + i === 0 ? "› " : "  ";
+    const n = first + i;
+    const prompt = n === 0 ? "› " : "  ";
     if (compose.text === "") {
       // While focused the cursor sits on the placeholder's first letter.
       return h(Text, { key: i, wrap: "truncate-end" }, prompt,
         h(Text, { dimColor: true, inverse: focused }, PLACEHOLDER[0]), h(Text, { dimColor: true }, PLACEHOLDER.slice(1)));
     }
-    if (!focused || first + i !== row) {
-      return h(Text, { key: i, wrap: "truncate-end", dimColor: !focused }, prompt, sanitize(line));
+    const pieces = linePieces(marked, offsets[n] ?? 0, line);
+    if (!focused || n !== row) {
+      return h(Text, { key: i, wrap: "truncate-end", dimColor: !focused }, prompt, ...draw(pieces, 0, line.length, !focused, "p"));
     }
     const from = Math.max(0, col - room + 1);
     const code = line.codePointAt(col);
     const under = code === undefined ? "" : String.fromCodePoint(code);
-    return h(Text, { key: i, wrap: "truncate-end" }, prompt, sanitize(line.slice(from, col)),
-      h(Text, { inverse: true }, sanitize(under) || " "), sanitize(line.slice(col + under.length)));
+    return h(Text, { key: i, wrap: "truncate-end" }, prompt, ...draw(pieces, from, col, false, "a"),
+      h(Text, { key: "cursor", inverse: true }, sanitize(under) || " "),
+      ...draw(pieces, col + under.length, line.length, false, "b"));
   });
+  const problems = errorRows(errors).map((e, i) => h(Text, { key: `e${i}`, color: ROLE.error, wrap: "truncate-end" }, sanitize(e)));
   return h(Box, {
     flexDirection: "column", width, flexShrink: 0, paddingX: 1,
     borderStyle: "round", borderColor: focused ? ROLE.accent : ROLE.border,
-  }, ...shown);
+  }, ...shown, ...problems);
 }

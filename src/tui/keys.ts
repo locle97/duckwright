@@ -2,16 +2,18 @@
 // Bindings live in tables so the footer hints and the help overlay are generated from the same data.
 // No ink/react here.
 import type { Overrides, TaskId, TaskSnapshot } from "../runs/manager.ts";
-import { composeKey, submit } from "./compose.ts";
+import { applyCompletion, composeKey, deleteMentionBefore, mentionAt, submission } from "./compose.ts";
+import type { ComposeState, Mention } from "./compose.ts";
 import { formKey, formResult, openForm } from "./form.ts";
 import type { KeyPress } from "./keypress.ts";
-import { selectedRun, selectedTask } from "./state.ts";
+import { completionItems, selectedRun, selectedTask } from "./state.ts";
 import type { UiAction, ViewState } from "./state.ts";
 
 export type Command =
   | { kind: "ui"; action: UiAction }
   | { kind: "manager"; call: "start" | "pause" | "resume" | "step" | "stop" | "remove"; id: TaskId }
-  | { kind: "addTask"; text: string }
+  | { kind: "openCompletion" }
+  | { kind: "addSubmission"; mentions: Mention[]; typed: string | null }
   | { kind: "saveOverrides"; id: TaskId; overrides: Overrides }
   | { kind: "quit" }
   | { kind: "stopAllAndQuit" } | { kind: "forceExit" };
@@ -118,14 +120,46 @@ function ctrlC(s: ViewState, activeRuns: number): Command[] {
   return [...quitCommands(s, activeRuns), count];
 }
 
+const closeList = ui({ type: "completion", value: null });
+
 function composeCommands(k: KeyPress, s: ViewState): Command[] {
-  if (k.name === "escape") return [ui({ type: "escape" })];
-  if (k.name === "return" && !k.meta) {
-    const { state, task } = submit(s.compose);
-    return task === null ? [] : [ui({ type: "compose", next: state }), { kind: "addTask", text: task }];
+  const list = s.completion;
+  const open = list !== null;
+  const reopen = (): Command => ui({ type: "completion", value: list && { index: list.index, highlight: 0 } });
+  if (k.name === "escape") return [open ? closeList : ui({ type: "escape" })];
+  if (open && !k.ctrl && !k.meta) {
+    const items = completionItems(s);
+    const item = items[Math.min(list.highlight, items.length - 1)];
+    if (k.name === "up" || k.name === "down") return [ui({ type: "completionMove", delta: k.name === "up" ? -1 : 1 })];
+    if (k.name === "tab") {
+      if (item === undefined) return [];
+      if (item.folder) {
+        return [ui({ type: "compose", next: applyCompletion(s.compose, item.path, "descend") }), reopen()];
+      }
+      return [ui({ type: "compose", next: applyCompletion(s.compose, item.path, "accept") }), closeList];
+    }
+    if (k.name === "return" && item !== undefined) {
+      return [ui({ type: "compose", next: applyCompletion(s.compose, item.path, "accept") }), closeList];
+    }
   }
-  const next = composeKey(s.compose, k);
-  return next === s.compose ? [] : [ui({ type: "compose", next })];
+  if (k.name === "return" && !k.meta) {
+    if (s.compose.text.trim() === "") return [];
+    const { mentions, typed } = submission(s.compose.text);
+    return [closeList, { kind: "addSubmission", mentions, typed }];
+  }
+  const next: ComposeState = (k.name === "backspace" && !open ? deleteMentionBefore(s.compose) : null) ?? composeKey(s.compose, k);
+  if (next === s.compose) return [];
+  const cmds: Command[] = [ui({ type: "compose", next })];
+  const mention = mentionAt(next.text, next.cursor);
+  if (open) {
+    const before = mentionAt(s.compose.text, s.compose.cursor);
+    if (mention === null || mention.start !== before?.start) cmds.push(closeList);
+    else if (mention.path !== before.path) cmds.push(reopen());
+  } else if (mention !== null && k.name === null && !k.ctrl && !k.meta) {
+    // Only typing opens the list: moving the cursor into a mention, or a paste that ends past it, does not.
+    cmds.push({ kind: "openCompletion" });
+  }
+  return cmds;
 }
 
 function formCommands(k: KeyPress, s: ViewState): Command[] {
@@ -189,7 +223,13 @@ const dedupe = (list: Hint[]): Hint[] => list.filter((h, i) => list.findIndex((x
 export function hints(s: ViewState): Hint[] {
   switch (s.mode) {
     case "compose":
-      return [{ key: "⏎", label: "add" }, { key: "alt+⏎", label: "newline" }, { key: "↑↓", label: "history" }, { key: "esc", label: "back" }];
+      if (s.completion !== null) {
+        return [{ key: "↑↓", label: "move" }, { key: "tab", label: "complete" }, { key: "⏎", label: "accept" }, { key: "esc", label: "close" }];
+      }
+      return [
+        { key: "⏎", label: "add" }, { key: "@", label: "file" }, { key: "alt+⏎", label: "newline" },
+        { key: "↑↓", label: "history" }, { key: "esc", label: "back" },
+      ];
     case "form": {
       const save: Hint[] = s.form !== null && formResult(s.form).ok ? [{ key: "⏎", label: "save" }] : [];
       return [...save, { key: "ctrl+r", label: "reset" }, { key: "esc", label: "cancel" }];

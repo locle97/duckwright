@@ -1,8 +1,10 @@
 // Pure view-state reducer: turns manager events and UI actions into the screen state the Ink
 // components render. No ink/react here; labels are raw (sanitising happens at render time).
 import type { ControlState, Phase, RunEvent, RunOutcome } from "../events.ts";
-import type { ManagerEvent, TaskSnapshot, TaskState } from "../runs/manager.ts";
-import { EMPTY_COMPOSE } from "./compose.ts";
+import type { ManagerEvent, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
+import { rank } from "./candidates.ts";
+import type { Candidate, CandidateIndex } from "./candidates.ts";
+import { EMPTY_COMPOSE, mentionAt } from "./compose.ts";
 import type { ComposeState } from "./compose.ts";
 import type { FormState } from "./form.ts";
 
@@ -54,6 +56,10 @@ export interface ViewState {
   focus: "list" | "detail";
   mode: Mode;
   compose: ComposeState;
+  /** The @ completion list, while open: the folder walk it ranks, and the highlighted row. */
+  completion: { index: CandidateIndex; highlight: number } | null;
+  /** Why the last add-box submission was refused; cleared when the text changes. */
+  addErrors: string[];
   form: FormState | null;
   confirm: { kind: "quit"; count: number } | { kind: "remove"; taskId: number } | null;
   toasts: Toast[];
@@ -67,19 +73,27 @@ export type UiAction =
   | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
   | { type: "help"; open: boolean } | { type: "confirm"; value: ViewState["confirm"] }
   | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
-  | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" } | { type: "quitting" };
+  | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" } | { type: "quitting" }
+  | { type: "completion"; value: ViewState["completion"] } | { type: "completionMove"; delta: number }
+  | { type: "addFailed"; errors: string[]; cursor: number } | { type: "selectTask"; id: TaskId };
 
 const TOAST_MS = 4000;
 
 export function initialState(now: number, tasks: TaskSnapshot[] = []): ViewState {
   return {
     now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list",
-    compose: EMPTY_COMPOSE, form: null, confirm: null, toasts: [], ctrlC: 0,
+    compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, confirm: null, toasts: [], ctrlC: 0,
   };
 }
 
 export function selectedTask(s: ViewState): TaskSnapshot | null {
   return s.tasks[s.selected] ?? null;
+}
+
+/** The completion rows for the mention under the cursor, best first; empty while the list is closed. */
+export function completionItems(s: ViewState): Candidate[] {
+  if (s.completion === null) return [];
+  return rank(s.completion.index, mentionAt(s.compose.text, s.compose.cursor)?.path ?? "");
 }
 
 export function selectedRun(s: ViewState): RunView | null {
@@ -267,9 +281,25 @@ function apply(s: ViewState, a: UiAction): ViewState {
     }
     case "escape":
       if (s.mode === "list" || s.mode === "detail") return { ...s, focus: "list", mode: "list" };
-      return { ...s, mode: baseMode(s), form: s.mode === "form" ? null : s.form, confirm: s.mode === "confirm" ? null : s.confirm };
+      return {
+        ...s, mode: baseMode(s), form: s.mode === "form" ? null : s.form, confirm: s.mode === "confirm" ? null : s.confirm,
+        completion: s.mode === "compose" ? null : s.completion,
+      };
     case "compose":
-      return { ...s, compose: a.next };
+      return { ...s, compose: a.next, addErrors: a.next.text === s.compose.text ? s.addErrors : [] };
+    case "completion":
+      return { ...s, completion: a.value };
+    case "completionMove": {
+      if (s.completion === null) return s;
+      const last = Math.max(0, completionItems(s).length - 1);
+      return { ...s, completion: { ...s.completion, highlight: clamp(s.completion.highlight + a.delta, 0, last) } };
+    }
+    case "addFailed":
+      return { ...s, addErrors: a.errors, compose: { ...s.compose, cursor: a.cursor }, completion: null };
+    case "selectTask": {
+      const i = s.tasks.findIndex((t) => t.id === a.id);
+      return i === -1 ? s : { ...s, selected: i };
+    }
     case "form":
       return a.next ? { ...s, form: a.next, mode: "form" } : { ...s, form: null, mode: baseMode(s) };
     case "help":

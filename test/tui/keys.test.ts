@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
-import { insertText } from "../../src/tui/compose.ts";
+import type { CandidateIndex } from "../../src/tui/candidates.ts";
+import { EMPTY_COMPOSE, insertText } from "../../src/tui/compose.ts";
 import { openForm, formKey } from "../../src/tui/form.ts";
 import { helpBindings, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
@@ -13,7 +14,7 @@ import type { UiAction, ViewState } from "../../src/tui/state.ts";
 function task(id: number, state: TaskState = "idle"): TaskSnapshot {
   const live = state === "running" || state === "paused" || state === "stopping";
   return {
-    id, text: `task ${id}`, name: `"task ${id}"`, state, overrides: {},
+    id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, export: false, snapshot: "hybrid" },
     error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0,
   };
@@ -118,12 +119,9 @@ test("keys_compose_submit_and_escape", () => {
   assert.deepEqual(press(s, "return"), []);
   s = reduce(s, { type: "compose", next: insertText(s.compose, "  buy milk ") });
   const cmds = press(s, "return");
-  assert.equal(cmds.length, 2);
-  assert.equal(cmds[0]?.kind, "ui");
-  assert.deepEqual(cmds[1], { kind: "addTask", text: "buy milk" });
-  const after = play(s, cmds);
-  assert.equal(after.compose.text, "");
-  assert.deepEqual(after.compose.history, ["buy milk"]);
+  assert.deepEqual(cmds, [ui({ type: "completion", value: null }), { kind: "addSubmission", mentions: [], typed: "buy milk" }]);
+  // The App clears the box once the manager has accepted the submission.
+  assert.equal(play(s, cmds).compose.text, "  buy milk ");
   // alt+return inserts a newline instead of submitting.
   const nl = press(s, "alt+return");
   assert.equal(nl.length, 1);
@@ -229,7 +227,7 @@ test("hints_per_mode_and_state", () => {
   assert.equal(footer(mk("idle")), "⏎ run · a add · o options · d remove · ? help");
   assert.equal(footer(mk("stopping")), "⏎ open · a add · tab focus · ? help");
   assert.equal(footer(initialState(0)), "a add · ? help");
-  assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · alt+⏎ newline · ↑↓ history · esc back");
+  assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · esc back");
   const t = task(1);
   assert.equal(footer(reduce(initialState(0, [t]), { type: "form", next: openForm(1, t.effective, {}) })), "⏎ save · ctrl+r reset · esc cancel");
   assert.equal(footer(reduce(mk("idle"), { type: "confirm", value: { kind: "remove", taskId: 1 } })), "y yes · n no");
@@ -248,4 +246,122 @@ test("help_lists_mode_bindings", () => {
   assert.ok(detail.some((l) => l.includes("expand all")));
   assert.ok(detail.some((l) => l.includes("collapse all")));
   assert.ok(!detail.some((l) => l.startsWith("⏎ run")));
+});
+
+const IDX: CandidateIndex = {
+  items: [
+    { path: "tasks/", folder: true, count: 2 },
+    { path: "tasks/a.md", folder: false, count: 0 },
+    { path: "tasks/b.md", folder: false, count: 0 },
+  ],
+  truncated: false,
+};
+
+/** A compose-mode state holding `text`, cursor at the end, with the completion list open when `open`. */
+function composing(text: string, open = false): ViewState {
+  let s = reduce(mk("idle"), { type: "focus", target: "compose" });
+  s = reduce(s, { type: "compose", next: { ...EMPTY_COMPOSE, text, cursor: text.length } });
+  return open ? reduce(s, { type: "completion", value: { index: IDX, highlight: 0 } }) : s;
+}
+const kinds = (cmds: Command[]): string[] => cmds.map((c) => (c.kind === "ui" ? `ui:${c.action.type}` : c.kind));
+/** Press keys in order, applying ui commands, and opening the completion on openCompletion. */
+function typeKeys(s: ViewState, ...specs: string[]): { s: ViewState; cmds: Command[] } {
+  let cmds: Command[] = [];
+  for (const spec of specs) {
+    cmds = press(s, spec);
+    for (const c of cmds) {
+      if (c.kind === "ui") s = reduce(s, c.action);
+      if (c.kind === "openCompletion") s = reduce(s, { type: "completion", value: { index: IDX, highlight: 0 } });
+    }
+  }
+  return { s, cmds };
+}
+
+test("keys_at_opens_completion", () => {
+  assert.deepEqual(kinds(press(composing("go "), "@")), ["ui:compose", "openCompletion"]);
+  assert.deepEqual(kinds(press(composing("me"), "@")), ["ui:compose"]);
+  assert.deepEqual(kinds(press(composing("@a.md"), "x")), ["ui:compose", "openCompletion"]);
+  // Moving into a mention does not open the list.
+  assert.deepEqual(kinds(press(composing("@a.md "), "left")), ["ui:compose"]);
+  assert.deepEqual(kinds(press(composing("@a.md "), "left")), ["ui:compose"]);
+  const { s } = typeKeys(composing("@a.md "), "left", "left");
+  assert.equal(s.completion, null);
+});
+
+test("keys_completion_navigation", () => {
+  const open = composing("@tas", true);
+  assert.deepEqual(press(open, "down"), [ui({ type: "completionMove", delta: 1 })]);
+  let r = typeKeys(open, "tab");
+  assert.equal(r.s.compose.text, "@tasks/");
+  assert.notEqual(r.s.completion, null);
+  r = typeKeys(open, "down", "return");
+  assert.equal(r.s.compose.text, "@tasks/a.md ");
+  assert.equal(r.s.completion, null);
+  assert.ok(!r.cmds.some((c) => c.kind === "addSubmission"));
+  r = typeKeys(open, "down", "tab");
+  assert.equal(r.s.compose.text, "@tasks/a.md ");
+  assert.equal(r.s.completion, null);
+});
+
+test("keys_completion_escape_then_escape", () => {
+  const first = typeKeys(composing("@ta", true), "escape").s;
+  assert.equal(first.completion, null);
+  assert.equal(first.mode, "compose");
+  assert.equal(first.compose.text, "@ta");
+  assert.equal(typeKeys(first, "escape").s.mode, "list");
+});
+
+test("keys_completion_closes_when_cursor_leaves", () => {
+  assert.equal(typeKeys(composing("@ta", true), "space").s.completion, null);
+  assert.equal(typeKeys(composing("x @ta", true), "home").s.completion, null);
+  // Editing inside the mention keeps it open and resets the highlight.
+  const s = reduce(composing("@ta", true), { type: "completionMove", delta: 1 });
+  const after = typeKeys(s, "s").s;
+  assert.equal(after.completion?.highlight, 0);
+});
+
+test("keys_return_with_no_matches_submits", () => {
+  const cmds = press(composing("@zz", true), "return");
+  const sub = cmds.find((c) => c.kind === "addSubmission");
+  assert.ok(sub && sub.kind === "addSubmission");
+  assert.equal(sub.mentions[0]?.path, "zz");
+  assert.deepEqual(press(composing("@zz", true), "tab"), []);
+});
+
+test("keys_submit_split", () => {
+  assert.deepEqual(press(composing("@a.md check it"), "return")[1], {
+    kind: "addSubmission", mentions: [{ start: 0, end: 5, path: "a.md", quoted: false }], typed: "check it",
+  });
+  assert.deepEqual(press(composing("   "), "return"), []);
+});
+
+test("keys_backspace_mention_only_when_closed", () => {
+  assert.equal(typeKeys(composing("@a.md"), "backspace").s.compose.text, "");
+  assert.equal(typeKeys(composing("@a.md", true), "backspace").s.compose.text, "@a.m");
+});
+
+test("keys_up_down_history_only_when_closed", () => {
+  let s = composing("");
+  s = reduce(s, { type: "compose", next: { ...s.compose, history: ["old"] } });
+  assert.equal(typeKeys(s, "up").s.compose.text, "old");
+  const open = composing("@ta", true);
+  assert.deepEqual(press(open, "up"), [ui({ type: "completionMove", delta: -1 })]);
+});
+
+test("keys_paste_with_mention_does_not_open_list", () => {
+  const r = typeKeys(composing(""), "@a.md check it");
+  assert.ok(!r.cmds.some((c) => c.kind === "openCompletion"));
+  assert.equal(r.s.completion, null);
+  assert.equal(kinds(press(r.s, "return"))[1], "addSubmission");
+});
+
+test("keys_compose_hints_with_completion", () => {
+  assert.equal(footer(composing("x")), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · esc back");
+  assert.equal(footer(composing("@t", true)), "↑↓ move · tab complete · ⏎ accept · esc close");
+});
+
+test("keys_completion_closes_when_cursor_jumps_to_another_mention", () => {
+  let s = reduce(composing("@ta @ta", true), { type: "compose", next: { ...EMPTY_COMPOSE, text: "@ta @ta", cursor: 3 } });
+  s = reduce(s, { type: "completion", value: { index: IDX, highlight: 0 } });
+  assert.equal(typeKeys(s, "end").s.completion, null);
 });

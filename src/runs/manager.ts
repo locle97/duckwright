@@ -1,18 +1,29 @@
-// Holds typed tasks and their runs, with no UI: starts runs in numbered browser-session slots,
-// forwards their events, and builds the quit summary.
+// Holds typed and file tasks and their runs, with no UI: starts runs in numbered browser-session
+// slots, forwards their events, and builds the quit summary.
+import path from "node:path";
+
 import { parseRunArgs } from "../args.ts";
 import type { RunArgs } from "../args.ts";
 import type { ControlState, RunEvent, RunOutcome } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
-import { fixed4 } from "../text.ts";
+import { resolvePath } from "../paths.ts";
+import { loadTaskFile, TaskFileError, taskPaths } from "../taskfile.ts";
+import type { TaskFile, TaskSettings } from "../taskfile.ts";
+import { fixed4, mentionToken } from "../text.ts";
 import type { RunHandle, RunSpec } from "./run.ts";
 
 export type TaskId = number;
 export type TaskState = "idle" | "running" | "paused" | "passed" | "failed" | "stopping" | "stopped";
 export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; export?: boolean; snapshot?: SnapshotMode }
 export interface Effective { model: string; maxSteps: number; headed: boolean; export: boolean; snapshot: SnapshotMode }
+export type TaskSource = { kind: "typed" } | { kind: "file"; path: string };
+/** One submission of the add box: mentioned paths in order, and the leftover typed task. */
+export interface Submission { mentions: string[]; typed: string | null }
+export type AddResult =
+  | { ok: true; added: TaskId[]; duplicates: string[] }
+  | { ok: false; errors: { mention: number; message: string }[] };
 export interface TaskSnapshot {
-  id: TaskId; text: string; name: string; state: TaskState; overrides: Overrides; effective: Effective;
+  id: TaskId; text: string; name: string; source: TaskSource; state: TaskState; overrides: Overrides; effective: Effective;
   error: string | null; runId: string | null; runCount: number;
 }
 export type ManagerEvent =
@@ -27,6 +38,7 @@ export interface ManagerLike {
   list(): TaskSnapshot[];
   subscribe(fn: (e: ManagerEvent) => void): () => void;
   addTyped(text: string): TaskId;
+  add(sub: Submission): AddResult;
   setOverrides(id: TaskId, o: Overrides): void;
   remove(id: TaskId): boolean;
   start(id: TaskId): StartResult;
@@ -44,6 +56,8 @@ export interface ManagerOptions {
   maxParallel: number;
   startRun(spec: RunSpec): RunHandle;
   preflight(args: RunArgs): string | null;
+  /** The folder file-task names are relative to. Default: the process's current folder. */
+  cwd?: string;
 }
 
 /** `"<first line>"`, cut with … so it holds at most `max` code points. */
@@ -65,6 +79,10 @@ interface RunRecord {
 interface Task {
   id: TaskId;
   text: string;
+  name: string;
+  source: TaskSource;
+  /** Front matter, minus `session` (the slot always wins). Empty for typed tasks. */
+  fileSettings: TaskSettings;
   overrides: Overrides;
   state: TaskState;
   error: string | null;
@@ -105,10 +123,51 @@ export class RunManager implements ManagerLike {
   }
 
   addTyped(text: string): TaskId {
-    const task: Task = { id: this.#nextId++, text, overrides: {}, state: "idle", error: null, runs: [] };
-    this.#tasks.push(task);
-    this.#emit({ type: "task:added", task: this.#snapshot(task) });
-    return task.id;
+    return this.#addTask({ kind: "typed" }, text, {}, taskName(text));
+  }
+
+  /**
+   * Add one add-box submission: every mentioned file (folders expanded as -f does), then the
+   * typed task. All or nothing: if any mention fails, nothing is added and every error is returned.
+   */
+  add(sub: Submission): AddResult {
+    const errors: { mention: number; message: string }[] = [];
+    const files: { path: string; tf: TaskFile }[] = [];
+    sub.mentions.forEach((mention, i) => {
+      const own = (message: string): string => {
+        const rest = message.startsWith(mention) ? message.slice(mention.length) : `: ${message}`;
+        return mentionToken(mention) + (rest === ": file not found" ? ": not found (type \\@ for a literal @)" : rest);
+      };
+      for (const p of taskPaths([mention])) {
+        if (p instanceof TaskFileError) {
+          errors.push({ mention: i, message: own(p.message) });
+          continue;
+        }
+        try {
+          files.push({ path: p, tf: loadTaskFile(p) });
+        } catch (e) {
+          if (!(e instanceof TaskFileError)) throw e;
+          errors.push({ mention: i, message: p === mention ? own(e.message) : e.message });
+        }
+      }
+    });
+    if (errors.length > 0) return { ok: false, errors };
+    const seen = new Set(this.#tasks.flatMap((t) => (t.source.kind === "file" ? [resolvePath(t.source.path)] : [])));
+    const added: TaskId[] = [];
+    const duplicates: string[] = [];
+    for (const { path: p, tf } of files) {
+      const name = this.#fileName(p);
+      const key = resolvePath(p);
+      if (seen.has(key)) {
+        duplicates.push(name);
+        continue;
+      }
+      seen.add(key);
+      const { session: _ignored, ...settings } = tf.settings;
+      added.push(this.#addTask({ kind: "file", path: p }, tf.task, settings, name));
+    }
+    if (sub.typed !== null) added.push(this.addTyped(sub.typed));
+    return { ok: true, added, duplicates };
   }
 
   setOverrides(id: TaskId, o: Overrides): void {
@@ -153,7 +212,8 @@ export class RunManager implements ManagerLike {
     const session = `${args.session}-${slot}`;
     let handle: RunHandle;
     try {
-      handle = this.#o.startRun({ task: task.text, taskFile: null, args: { ...args, session } });
+      const taskFile = task.source.kind === "file" ? task.source.path : null;
+      handle = this.#o.startRun({ task: task.text, taskFile, args: { ...args, session } });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       task.error = message;
@@ -249,7 +309,7 @@ export class RunManager implements ManagerLike {
         total += r.outcome.costUsd;
         latest = r.outcome;
       }
-      if (latest) rows.push({ name: taskName(t.text), outcome: latest });
+      if (latest) rows.push({ name: t.name, outcome: latest });
     }
     if (rows.length === 0 && !quit) return { lines: [], exitCode: 0 };
     const count = (s: RunOutcome["status"]) => rows.filter((r) => r.outcome.status === s).length;
@@ -264,7 +324,7 @@ export class RunManager implements ManagerLike {
   }
 
   #argsFor(task: Task): RunArgs {
-    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, {});
+    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, task.fileSettings);
     if (parsed.kind !== "args") throw new Error("argv does not describe a run");
     const args = { ...parsed.args };
     const o = task.overrides;
@@ -280,11 +340,25 @@ export class RunManager implements ManagerLike {
     const a = this.#argsFor(task);
     const latest = task.runs[task.runs.length - 1];
     return {
-      id: task.id, text: task.text, name: taskName(task.text), state: task.state,
+      id: task.id, text: task.text, name: task.name, source: { ...task.source }, state: task.state,
       overrides: { ...task.overrides },
       effective: { model: a.model, maxSteps: a.maxSteps, headed: a.headed, export: a.export, snapshot: a.snapshot },
       error: task.error, runId: latest ? latest.handle.id : null, runCount: task.runs.length,
     };
+  }
+
+  #addTask(source: TaskSource, text: string, fileSettings: TaskSettings, name: string): TaskId {
+    const task: Task = {
+      id: this.#nextId++, text, name, source, fileSettings, overrides: {}, state: "idle", error: null, runs: [],
+    };
+    this.#tasks.push(task);
+    this.#emit({ type: "task:added", task: this.#snapshot(task) });
+    return task.id;
+  }
+
+  /** A file task's name: its path relative to the current folder. */
+  #fileName(p: string): string {
+    return path.relative(resolvePath(this.#o.cwd ?? process.cwd()), resolvePath(p)) || p;
   }
 
   #find(id: TaskId): Task | undefined {

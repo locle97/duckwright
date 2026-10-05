@@ -4,13 +4,14 @@ import { test } from "node:test";
 import type { Decision } from "../../src/brain.ts";
 import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import type { ManagerEvent, TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
+import type { CandidateIndex } from "../../src/tui/candidates.ts";
 import { EMPTY_COMPOSE } from "../../src/tui/compose.ts";
-import { headerCounts, initialState, reduce, selectedRun, selectedTask } from "../../src/tui/state.ts";
+import { completionItems, headerCounts, initialState, reduce, selectedRun, selectedTask } from "../../src/tui/state.ts";
 import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle", runId: string | null = null): TaskSnapshot {
   return {
-    id, text: `task ${id}`, name: `"task ${id}"`, state, overrides: {},
+    id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, export: false, snapshot: "hybrid" },
     error: null, runId, runCount: runId ? 1 : 0,
   };
@@ -348,4 +349,60 @@ test("state_quitting_closes_confirm", () => {
   assert.equal(s.mode, "quitting");
   assert.equal(s.confirm, null);
   assert.equal(s.focus, "detail", "the panes stay as they were");
+});
+
+const CIDX: CandidateIndex = {
+  items: [{ path: "a.md", folder: false, count: 0 }, { path: "tasks/", folder: true, count: 1 }, { path: "tasks/b.md", folder: false, count: 0 }],
+  truncated: false,
+};
+const withText = (s: ViewState, text: string, cursor = text.length): ViewState =>
+  reduce(s, { type: "compose", next: { ...s.compose, text, cursor } });
+
+test("state_add_failed_sets_errors_and_cursor", () => {
+  let s = withText(reduce(initialState(0), { type: "focus", target: "compose" }), "@a.md @nope.md x");
+  s = reduce(s, { type: "completion", value: { index: CIDX, highlight: 0 } });
+  s = reduce(s, { type: "addFailed", errors: ["@nope.md: not found"], cursor: 6 });
+  assert.deepEqual(s.addErrors, ["@nope.md: not found"]);
+  assert.equal(s.compose.cursor, 6);
+  assert.equal(s.compose.text, "@a.md @nope.md x");
+  assert.equal(s.completion, null);
+});
+
+test("state_compose_edit_clears_errors", () => {
+  let s = reduce(withText(initialState(0), "@x"), { type: "addFailed", errors: ["e"], cursor: 0 });
+  s = withText(s, "@x", 2); // cursor move only: errors stay
+  assert.deepEqual(s.addErrors, ["e"]);
+  s = withText(s, "@xy");
+  assert.deepEqual(s.addErrors, []);
+});
+
+test("state_completion_move_clamps", () => {
+  let s = withText(initialState(0), "@");
+  s = reduce(s, { type: "completion", value: { index: CIDX, highlight: 0 } });
+  s = reduce(s, { type: "completionMove", delta: -1 });
+  assert.equal(s.completion?.highlight, 0);
+  s = reduce(s, { type: "completionMove", delta: 10 });
+  assert.equal(s.completion?.highlight, 2);
+});
+
+test("state_select_task_by_id", () => {
+  const s = initialState(0, [task(4), task(7), task(9)]);
+  assert.equal(reduce(s, { type: "selectTask", id: 9 }).selected, 2);
+  assert.equal(reduce(s, { type: "selectTask", id: 5 }).selected, 0);
+});
+
+test("state_completion_items_rank_query", () => {
+  let s = withText(initialState(0), "go @tas");
+  assert.deepEqual(completionItems(s), []);
+  s = reduce(s, { type: "completion", value: { index: CIDX, highlight: 0 } });
+  assert.deepEqual(completionItems(s).map((c) => c.path), ["tasks/", "tasks/b.md"]);
+  assert.equal(completionItems(withText(s, "go @")).length, 3);
+});
+
+test("state_escape_from_compose_closes_completion", () => {
+  let s = withText(reduce(initialState(0), { type: "focus", target: "compose" }), "@");
+  s = reduce(s, { type: "completion", value: { index: CIDX, highlight: 0 } });
+  s = reduce(s, { type: "escape" });
+  assert.equal(s.completion, null);
+  assert.equal(s.mode, "list");
 });
