@@ -1,0 +1,290 @@
+// Pure view-state reducer: turns manager events and UI actions into the screen state the Ink
+// components render. No ink/react here; labels are raw (sanitising happens at render time).
+import type { ControlState, Phase, RunEvent, RunOutcome } from "../events.ts";
+import type { ManagerEvent, TaskSnapshot, TaskState } from "../runs/manager.ts";
+import { EMPTY_COMPOSE } from "./compose.ts";
+import type { ComposeState } from "./compose.ts";
+import type { FormState } from "./form.ts";
+
+export type Mode = "list" | "detail" | "compose" | "form" | "help" | "confirm";
+
+export interface StepView {
+  step: number;
+  goal: string;
+  evaluation: string;
+  /** Only when it changed from the earlier step's memory. */
+  memory: string | null;
+  actions: { label: string; result: string | null }[];
+  runningAction: number | null;
+  phase: Phase | null;
+  status: "running" | "ok" | "warn" | "brain" | "done";
+  error: string | null;
+  cost: number | null;
+  durationMs: number | null;
+}
+
+export interface RunView {
+  runId: string;
+  maxSteps: number;
+  startedAt: number;
+  steps: StepView[];
+  control: ControlState;
+  pausedSince: number | null;
+  pausedMs: number;
+  cost: number;
+  brainFailures: number;
+  outcome: RunOutcome | null;
+  /** Index into `steps`. */
+  selected: number;
+  expanded: number[];
+  follow: boolean;
+}
+
+export interface Toast { id: number; level: "info" | "error"; message: string; until: number }
+
+export interface ViewState {
+  now: number;
+  openedAt: number;
+  tasks: TaskSnapshot[];
+  /** Keyed by run id. */
+  runs: Record<string, RunView>;
+  /** Index into `tasks`. */
+  selected: number;
+  focus: "list" | "detail";
+  mode: Mode;
+  compose: ComposeState;
+  form: FormState | null;
+  confirm: { kind: "quit"; count: number } | { kind: "remove"; taskId: number } | null;
+  toasts: Toast[];
+  ctrlC: number;
+}
+
+export type UiAction =
+  | { type: "tick"; now: number } | { type: "manager"; event: ManagerEvent }
+  | { type: "select"; delta: number } | { type: "selectEdge"; edge: "first" | "last" }
+  | { type: "focus"; target: "list" | "detail" | "compose" } | { type: "toggleFocus" } | { type: "escape" }
+  | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
+  | { type: "help"; open: boolean } | { type: "confirm"; value: ViewState["confirm"] }
+  | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
+  | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" };
+
+const TOAST_MS = 4000;
+
+export function initialState(now: number, tasks: TaskSnapshot[] = []): ViewState {
+  return {
+    now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", mode: "list",
+    compose: EMPTY_COMPOSE, form: null, confirm: null, toasts: [], ctrlC: 0,
+  };
+}
+
+export function selectedTask(s: ViewState): TaskSnapshot | null {
+  return s.tasks[s.selected] ?? null;
+}
+
+export function selectedRun(s: ViewState): RunView | null {
+  const runId = selectedTask(s)?.runId;
+  return runId ? (s.runs[runId] ?? null) : null;
+}
+
+export function headerCounts(s: ViewState): { counts: Partial<Record<TaskState, number>>; cost: number; elapsedMs: number } {
+  const counts: Partial<Record<TaskState, number>> = {};
+  for (const t of s.tasks) counts[t.state] = (counts[t.state] ?? 0) + 1;
+  let cost = 0;
+  for (const r of Object.values(s.runs)) cost += r.cost;
+  return { counts, cost, elapsedMs: s.now - s.openedAt };
+}
+
+const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
+
+/** The base mode a focus shows when no overlay (compose, help, form, confirm) is open. */
+const baseMode = (s: ViewState): Mode => s.focus;
+
+function addToast(s: ViewState, level: "info" | "error", message: string): ViewState {
+  const id = s.toasts.reduce((m, t) => Math.max(m, t.id), 0) + 1;
+  return { ...s, toasts: [...s.toasts, { id, level, message, until: s.now + TOAST_MS }] };
+}
+
+function updateRun(s: ViewState, runId: string, fn: (r: RunView) => RunView): ViewState {
+  const r = s.runs[runId];
+  return r ? { ...s, runs: { ...s.runs, [runId]: fn(r) } } : s;
+}
+
+function updateStep(r: RunView, step: number, fn: (v: StepView) => StepView): RunView {
+  const i = r.steps.findIndex((v) => v.step === step);
+  const cur = r.steps[i];
+  if (!cur) return r;
+  return { ...r, steps: r.steps.map((v, j) => (j === i ? fn(cur) : v)) };
+}
+
+/** Under follow, selection tracks the last step and the running (last) step is expanded. */
+function applyFollow(r: RunView, previousLast: number): RunView {
+  if (!r.follow || r.steps.length === 0) return r;
+  const last = r.steps.length - 1;
+  const expanded = r.expanded.filter((i) => i !== previousLast || i === last);
+  if (!expanded.includes(last)) expanded.push(last);
+  return { ...r, selected: last, expanded };
+}
+
+function closePause(r: RunView, at: number): RunView {
+  return r.pausedSince === null ? r : { ...r, pausedMs: r.pausedMs + (at - r.pausedSince), pausedSince: null };
+}
+
+function previousMemory(r: RunView): string | null {
+  for (let i = r.steps.length - 1; i >= 0; i--) {
+    const m = r.steps[i]?.memory;
+    if (m !== null && m !== undefined) return m;
+  }
+  return null;
+}
+
+function stepStatus(results: (string | null)[], actions: StepView["actions"]): StepView["status"] {
+  const done = actions.some((a, i) => a.label.split(" ")[0] === "done" && (a.result ?? results[i]) === "done");
+  if (done) return "done";
+  return actions.some((a) => a.result?.startsWith("error:")) ? "warn" : "ok";
+}
+
+function reduceRunEvent(r: RunView, e: RunEvent): RunView {
+  switch (e.type) {
+    case "run:start":
+      return r;
+    case "step:start": {
+      const previousLast = r.steps.length - 1;
+      const view: StepView = {
+        step: e.step, goal: "", evaluation: "", memory: null, actions: [], runningAction: null,
+        phase: null, status: "running", error: null, cost: null, durationMs: null,
+      };
+      return applyFollow({ ...r, steps: [...r.steps, view] }, previousLast);
+    }
+    case "phase":
+      return updateStep(r, e.step, (v) => ({ ...v, phase: e.phase }));
+    case "decision": {
+      const prev = previousMemory(r);
+      const d = e.decision;
+      const memory = d.memory === (prev ?? "") ? null : d.memory;
+      const next = updateStep(r, e.step, (v) => ({
+        ...v, goal: d.nextGoal, evaluation: d.evaluationPreviousGoal, memory,
+        actions: d.actions.map((a) => ({ label: [a.cmd, ...a.args].join(" "), result: null })),
+        cost: (v.cost ?? 0) + e.cost,
+      }));
+      return { ...next, cost: r.cost + e.cost, brainFailures: 0 };
+    }
+    case "action:start":
+      return updateStep(r, e.step, (v) => ({ ...v, runningAction: e.index }));
+    case "action:result":
+      return updateStep(r, e.step, (v) => ({
+        ...v, runningAction: v.runningAction === e.index ? null : v.runningAction,
+        actions: v.actions.map((a, i) => (i === e.index ? { ...a, result: e.result } : a)),
+      }));
+    case "brain:error": {
+      const next = updateStep(r, e.step, (v) => ({ ...v, status: "brain", error: e.message, cost: (v.cost ?? 0) + e.cost }));
+      return { ...next, cost: r.cost + e.cost, brainFailures: e.failures };
+    }
+    case "step:end":
+      return updateStep(r, e.record.step, (v) => ({
+        ...v, durationMs: e.durationMs, runningAction: null, phase: null,
+        status: v.status === "brain" ? "brain" : stepStatus(e.record.results, v.actions),
+      }));
+    case "control": {
+      if (e.state === "paused") {
+        return { ...r, control: e.state, pausedSince: r.pausedSince ?? e.at };
+      }
+      return { ...closePause(r, e.at), control: e.state };
+    }
+    case "run:end":
+      return { ...closePause(r, e.at), outcome: e.outcome };
+  }
+}
+
+function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
+  switch (e.type) {
+    case "task:added":
+      return { ...s, tasks: [...s.tasks, e.task] };
+    case "task:updated":
+      return { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
+    case "task:removed": {
+      const tasks = s.tasks.filter((t) => t.id !== e.taskId);
+      return { ...s, tasks, selected: clamp(s.selected, 0, Math.max(0, tasks.length - 1)) };
+    }
+    case "toast":
+      return addToast(s, e.level, e.message);
+    case "run": {
+      if (e.event.type === "run:start") {
+        const view: RunView = {
+          runId: e.runId, maxSteps: e.event.maxSteps, startedAt: e.event.at, steps: [], control: "running",
+          pausedSince: null, pausedMs: 0, cost: 0, brainFailures: 0, outcome: null, selected: 0, expanded: [], follow: true,
+        };
+        return { ...s, runs: { ...s.runs, [e.runId]: view } };
+      }
+      const event = e.event;
+      return updateRun(s, e.runId, (r) => reduceRunEvent(r, event));
+    }
+  }
+}
+
+function reduceTimeline(r: RunView, op: Extract<UiAction, { type: "timeline" }>["op"], delta: number): RunView {
+  const last = r.steps.length - 1;
+  if (last < 0) return r;
+  switch (op) {
+    case "move":
+    case "page":
+      return { ...r, selected: clamp(r.selected + delta, 0, last), follow: delta < 0 ? false : r.follow };
+    case "first":
+      return { ...r, selected: 0, follow: false };
+    case "last": {
+      const expanded = r.expanded.includes(last) ? r.expanded : [...r.expanded, last];
+      return { ...r, selected: last, follow: true, expanded };
+    }
+    case "toggle":
+      return { ...r, expanded: r.expanded.includes(r.selected) ? r.expanded.filter((i) => i !== r.selected) : [...r.expanded, r.selected] };
+    case "expandAll":
+      return { ...r, expanded: r.steps.map((_, i) => i) };
+    case "collapseAll":
+      return { ...r, expanded: [] };
+  }
+}
+
+function apply(s: ViewState, a: UiAction): ViewState {
+  switch (a.type) {
+    case "tick":
+      return { ...s, now: a.now, toasts: s.toasts.filter((t) => t.until > a.now) };
+    case "manager":
+      return reduceManager(s, a.event);
+    case "select":
+      return { ...s, selected: clamp(s.selected + a.delta, 0, Math.max(0, s.tasks.length - 1)) };
+    case "selectEdge":
+      return { ...s, selected: a.edge === "first" ? 0 : Math.max(0, s.tasks.length - 1) };
+    case "focus":
+      return a.target === "compose" ? { ...s, mode: "compose" } : { ...s, focus: a.target, mode: a.target };
+    case "toggleFocus": {
+      const focus = s.focus === "list" ? "detail" : "list";
+      return { ...s, focus, mode: focus };
+    }
+    case "escape":
+      if (s.mode === "list" || s.mode === "detail") return { ...s, focus: "list", mode: "list" };
+      return { ...s, mode: baseMode(s), form: s.mode === "form" ? null : s.form, confirm: s.mode === "confirm" ? null : s.confirm };
+    case "compose":
+      return { ...s, compose: a.next };
+    case "form":
+      return a.next ? { ...s, form: a.next, mode: "form" } : { ...s, form: null, mode: baseMode(s) };
+    case "help":
+      return { ...s, mode: a.open ? "help" : baseMode(s) };
+    case "confirm":
+      return a.value ? { ...s, confirm: a.value, mode: "confirm" } : { ...s, confirm: null, mode: baseMode(s) };
+    case "timeline": {
+      const runId = selectedTask(s)?.runId;
+      if (!runId) return s;
+      return updateRun(s, runId, (r) => reduceTimeline(r, a.op, a.delta ?? 0));
+    }
+    case "toast":
+      return addToast(s, a.level, a.message);
+    case "ctrlC":
+      return { ...s, ctrlC: s.ctrlC + 1 };
+  }
+}
+
+export function reduce(s: ViewState, a: UiAction): ViewState {
+  const next = apply(s, a);
+  // Ctrl-C counts consecutive presses; any other action but a clock tick resets it.
+  if (a.type === "ctrlC" || a.type === "tick") return next;
+  return next.ctrlC === 0 ? next : { ...next, ctrlC: 0 };
+}
