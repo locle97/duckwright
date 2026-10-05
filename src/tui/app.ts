@@ -7,6 +7,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import type { ManagerLike } from "../runs/manager.ts";
 import { AddBox, addBoxHeight } from "./addBox.ts";
+import { submit } from "./compose.ts";
 import { Confirm, question } from "./confirm.ts";
 import { Detail } from "./detail.ts";
 import { Footer, quittingText } from "./footer.ts";
@@ -124,10 +125,22 @@ function Workspace(p: AppProps): ReactElement {
         if (!r.ok && toastsSeen.current === seen) dispatch({ type: "toast", level: "error", message: r.reason });
         return;
       }
-      case "addTask":
-        manager.addTyped(c.text);
-        dispatch({ type: "selectEdge", edge: "last" });
+      case "openCompletion":
         return;
+      case "addSubmission": {
+        const r = manager.add({ mentions: c.mentions.map((m) => m.path), typed: c.typed });
+        if (!r.ok) {
+          const first = c.mentions[r.errors[0]?.mention ?? 0];
+          const cursor = first?.start ?? (state.current ?? s).compose.cursor;
+          dispatch({ type: "addFailed", errors: r.errors.map((e) => e.message), cursor });
+          return;
+        }
+        dispatch({ type: "compose", next: submit((state.current ?? s).compose).state });
+        for (const d of r.duplicates) dispatch({ type: "toast", level: "info", message: `already added: ${d}` });
+        const added = r.added[0];
+        if (added !== undefined) dispatch({ type: "selectTask", id: added });
+        return;
+      }
       case "saveOverrides":
         manager.setOverrides(c.id, c.overrides);
         return;

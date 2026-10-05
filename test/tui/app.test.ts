@@ -69,7 +69,7 @@ test("app_add_tasks_in_a_row", async () => {
   await settle();
   await t.type("a", "Check the price", "\r", "Second", "\r");
   const f = t.frame();
-  assert.deepEqual(m.log, ["addTyped:Check the price", "addTyped:Second"]);
+  assert.deepEqual(m.log, ["add:|Check the price", "add:|Second"]);
   assert.match(f, /"Check the price"/);
   assert.match(f, /"Second"/);
   assert.match(f, /› Describe a task to add…/, "the box is empty again");
@@ -278,7 +278,7 @@ test("app_keys_without_rerender_between_them", async () => {
   await settle();
   for (const k of ["a", "h", "e", "l", "l", "o", "\r", "x", "\r"]) r.stdin.write(k);
   await settle();
-  assert.deepEqual(m.log, ["addTyped:hello", "addTyped:x"]);
+  assert.deepEqual(m.log, ["add:|hello", "add:|x"]);
   r.stdin.write("\x1b"); // alone: Ink reads an escape followed at once by "q" as alt+q
   await settle();
   for (const k of ["q", "y"]) r.stdin.write(k);
