@@ -78,9 +78,10 @@ export function startTui(o: StartTuiOptions): TuiHandle {
     });
   };
 
+  const quitRequest = new AbortController();
   try {
     process.on("SIGINT", onSigint);
-    instance = render(h(App, { manager: o.manager, onQuit, onForceExit: forceExit }), {
+    instance = render(h(App, { manager: o.manager, quitSignal: quitRequest.signal, onQuit, onForceExit: forceExit }), {
       stdin, stdout, stderr, exitOnCtrlC: false, patchConsole: true, alternateScreen: true,
     });
   } catch (e) {
@@ -88,5 +89,5 @@ export function startTui(o: StartTuiOptions): TuiHandle {
     restoreTerminal();
     throw e;
   }
-  return { done, restoreTerminal };
+  return { done, restoreTerminal, quit: () => quitRequest.abort() };
 }

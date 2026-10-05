@@ -298,3 +298,106 @@ test("app_manager_throw_on_key_stops_all", async () => {
   assert.deepEqual(m.log, ["stopAll", "onQuit"]);
   assert.equal(t.quits[0]?.message, "pause exploded");
 });
+
+test("app_ctrlc_third_press_force_exits_while_stopping", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 })]);
+  m.active = 1;
+  m.stopAll = () => {
+    m.log.push("stopAll");
+    // Like the real manager: stopping a run emits at once, inside the key's handling.
+    m.run(1, "r1", [ev.control("stopping")]);
+    m.update(1, { state: "stopping" });
+    return new Promise(() => {});
+  };
+  const t = mount(m);
+  await settle();
+  await t.type("\x03");
+  m.update(1, { state: "running" }); // a run event between presses
+  await settle();
+  await t.type("\x03");
+  assert.deepEqual(m.log, ["stopAll"]);
+  assert.equal(t.forced, 0);
+  await t.type("\x03");
+  assert.equal(t.forced, 1);
+});
+
+test("app_quitting_ignores_keys", async () => {
+  const m = new FakeManager([
+    snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 }),
+    snapshot(2, "Second"),
+  ]);
+  m.active = 1;
+  m.stopAllResult = new Promise(() => {});
+  const t = mount(m);
+  await settle();
+  await t.type("q", "y");
+  m.update(1, { state: "stopping" });
+  await settle();
+  let f = t.frame();
+  assert.doesNotMatch(f, /and quit\?/, "the confirm closes");
+  assert.match(f, /"First"/, "the panes stay");
+  assert.match(f, /■ /, "stopping is shown");
+  assert.match(f, /stopping 1 run…/);
+  await t.type("\x1b");
+  await t.type("n", "j", "\r", "a", "x", "\r", "q", "d", "y");
+  f = t.frame();
+  assert.deepEqual(m.log, ["stopAll"], "no key acts while quitting");
+  assert.deepEqual(t.quits, []);
+  assert.match(f, /stopping 1 run…/);
+  await t.type("\x03", "\x03");
+  assert.equal(t.forced, 0);
+  await t.type("\x03");
+  assert.equal(t.forced, 1, "ctrl+c still counts toward force exit");
+});
+
+test("app_quit_signal_stops_all", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 })]);
+  m.active = 1;
+  let finish!: () => void;
+  m.stopAllResult = new Promise((r) => { finish = r; });
+  const quit = new AbortController();
+  const quits: Array<Error | undefined> = [];
+  const r = render(h(App, {
+    manager: m, size: { columns: 100, rows: 24 }, tickMs: 10, quitSignal: quit.signal,
+    onQuit: (e?: Error) => quits.push(e), onForceExit: () => {},
+  }));
+  await settle();
+  quit.abort();
+  await settle();
+  assert.deepEqual(m.log, ["stopAll"]);
+  assert.match((r.lastFrame() ?? "").replace(SGR, ""), /stopping 1 run…/);
+  r.stdin.write("\r");
+  await settle();
+  assert.deepEqual(m.log, ["stopAll"]);
+  finish();
+  await settle();
+  assert.deepEqual(quits, [undefined]);
+});
+
+test("app_sanitizes_settings", async () => {
+  const t0 = snapshot(1, "First");
+  const effective = { ...t0.effective, model: "gpt\nx", snapshot: "hy\rbrid" as never };
+  const m = new FakeManager([{ ...t0, overrides: { model: "gpt\nx" }, effective }]);
+  const t = mount(m);
+  await settle();
+  assert.match(t.frame(), /model +gpt x/, "an override is drawn on one line");
+  assert.match(t.frame(), /snapshot mode +hybrid/, "a default loses its controls");
+});
+
+test("app_too_small_quits_from_any_mode", async () => {
+  const m = new FakeManager([snapshot(1, "First")]);
+  const t = mount(m, { columns: 39, rows: 7 });
+  await settle();
+  await t.type("a", "q");
+  assert.deepEqual(m.log, ["onQuit"], "q quits instead of being typed into the hidden box");
+  cleanup();
+  const busy = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 })]);
+  busy.active = 1;
+  const u = mount(busy, { columns: 39, rows: 7 });
+  await settle();
+  await u.type("a", "\x1b");
+  assert.match(u.frame(), /stop 1 run and quit\?/);
+  assert.match(u.frame(), /y yes · n no/);
+  await u.type("y");
+  assert.deepEqual(busy.log, ["stopAll", "onQuit"]);
+});

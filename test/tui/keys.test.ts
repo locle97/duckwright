@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { TaskSnapshot, TaskState } from "../../src/runs/manager.ts";
 import { insertText } from "../../src/tui/compose.ts";
 import { openForm, formKey } from "../../src/tui/form.ts";
-import { helpBindings, hints, keymap } from "../../src/tui/keys.ts";
+import { helpBindings, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
 import { key } from "../../src/tui/keypress.ts";
 import { initialState, reduce } from "../../src/tui/state.ts";
@@ -195,6 +195,32 @@ test("keys_ctrlc_sequence", () => {
   // Works from compose too.
   const compose = reduce(mk("idle"), { type: "focus", target: "compose" });
   assert.deepEqual(press(compose, "ctrl+c", 2)[0], ui({ type: "confirm", value: { kind: "quit", count: 2 } }));
+});
+
+test("keys_quitting_ignores_all_but_ctrlc", () => {
+  let s = reduce(reduce(mk("running", "idle"), { type: "confirm", value: { kind: "quit", count: 1 } }), { type: "quitting" });
+  for (const k of ["escape", "n", "y", "return", "q", "a", "j", "s", "d", "?", "tab"]) {
+    assert.deepEqual(press(s, k, 1), [], k);
+  }
+  assert.deepEqual(press(s, "ctrl+c", 1), [ui({ type: "ctrlC" })]);
+  s = play(s, press(s, "ctrl+c", 1));
+  s = play(s, press(s, "ctrl+c", 1));
+  assert.deepEqual(press(s, "ctrl+c", 1), [{ kind: "forceExit" }]);
+});
+
+test("keys_too_small_screen", () => {
+  const compose = reduce(mk("idle"), { type: "focus", target: "compose" });
+  assert.deepEqual(tooSmallKeymap(key("q"), compose, 0), [{ kind: "quit" }]);
+  assert.deepEqual(tooSmallKeymap(key("escape"), compose, 0), [{ kind: "quit" }]);
+  assert.deepEqual(tooSmallKeymap(key("x"), compose, 0), [], "nothing is typed into the hidden box");
+  const ask = tooSmallKeymap(key("q"), mk("running"), 1);
+  assert.deepEqual(ask, [ui({ type: "confirm", value: { kind: "quit", count: 1 } })]);
+  const confirm = play(mk("running"), ask);
+  assert.deepEqual(tooSmallKeymap(key("y"), confirm, 1), [{ kind: "stopAllAndQuit" }]);
+  assert.deepEqual(tooSmallKeymap(key("n"), confirm, 1), [ui({ type: "confirm", value: null })]);
+  const quitting = reduce(confirm, { type: "quitting" });
+  assert.deepEqual(tooSmallKeymap(key("q"), quitting, 1), []);
+  assert.deepEqual(tooSmallKeymap(key("ctrl+c"), quitting, 1), [ui({ type: "ctrlC" })]);
 });
 
 test("hints_per_mode_and_state", () => {

@@ -326,5 +326,26 @@ test("state_ctrlc_counter_resets", () => {
   s = reduce(s, { type: "select", delta: 1 });
   assert.equal(s.ctrlC, 0);
   s = play(s, { type: "ctrlC" }, mgr({ type: "toast", level: "info", message: "x" }));
-  assert.equal(s.ctrlC, 0);
+  assert.equal(s.ctrlC, 1, "a manager event is not a key and keeps the count");
+  s = reduce(s, { type: "toast", level: "error", message: "refused" });
+  assert.equal(s.ctrlC, 0, "a key-driven ui action resets it");
+});
+
+test("state_ctrlc_survives_manager_events", () => {
+  let s = initialState(0, [task(1, "running", "r1")]);
+  s = reduce(s, { type: "ctrlC" });
+  s = play(s, mgr({ type: "task:updated", task: task(1, "stopping", "r1") }), run({ type: "control", at: 0, state: "stopping" }));
+  s = reduce(s, { type: "ctrlC" });
+  s = play(s, mgr({ type: "task:updated", task: task(1, "stopping", "r1") }), { type: "quitting" });
+  assert.equal(s.ctrlC, 2, "manager events and entering the quitting state keep the count");
+});
+
+test("state_quitting_closes_confirm", () => {
+  let s = initialState(0, [task(1, "running", "r1")]);
+  s = reduce(s, { type: "focus", target: "detail" });
+  s = reduce(s, { type: "confirm", value: { kind: "quit", count: 1 } });
+  s = reduce(s, { type: "quitting" });
+  assert.equal(s.mode, "quitting");
+  assert.equal(s.confirm, null);
+  assert.equal(s.focus, "detail", "the panes stay as they were");
 });

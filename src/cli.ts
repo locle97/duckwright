@@ -27,7 +27,8 @@ export function version(): string {
   }
 }
 
-export interface TuiHandle { done: Promise<void>; restoreTerminal(): void }
+/** `quit()` closes the TUI as a confirmed quit does: stop every run, then resolve `done`. */
+export interface TuiHandle { done: Promise<void>; restoreTerminal(): void; quit(): void }
 export interface TuiModule { startTui(o: { manager: ManagerLike }): TuiHandle }
 
 export interface CliDeps {
@@ -184,14 +185,19 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
   });
   const tui = await deps.loadTui();
   const handle = tui.startTui({ manager });
+  // An outside SIGINT aborts the signal (and with it every run): close the TUI too, and exit 130.
+  const onAbort = (): void => handle.quit();
+  deps.signal.addEventListener("abort", onAbort, { once: true });
+  if (deps.signal.aborted) onAbort();
   try {
     await handle.done;
   } finally {
+    deps.signal.removeEventListener("abort", onAbort);
     handle.restoreTerminal();
   }
   const { lines, exitCode } = manager.summary();
   for (const line of lines) deps.stdout(line);
-  return exitCode;
+  return deps.signal.aborted ? 130 : exitCode;
 }
 
 function usageError(deps: CliDeps, e: UsageError): number {

@@ -6,7 +6,8 @@ import { EMPTY_COMPOSE } from "./compose.ts";
 import type { ComposeState } from "./compose.ts";
 import type { FormState } from "./form.ts";
 
-export type Mode = "list" | "detail" | "compose" | "form" | "help" | "confirm";
+/** `quitting`: a confirmed quit is stopping the runs; the panes stay and only Ctrl-C acts. */
+export type Mode = "list" | "detail" | "compose" | "form" | "help" | "confirm" | "quitting";
 
 export interface StepView {
   step: number;
@@ -66,7 +67,7 @@ export type UiAction =
   | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
   | { type: "help"; open: boolean } | { type: "confirm"; value: ViewState["confirm"] }
   | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
-  | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" };
+  | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" } | { type: "quitting" };
 
 const TOAST_MS = 4000;
 
@@ -84,6 +85,11 @@ export function selectedTask(s: ViewState): TaskSnapshot | null {
 export function selectedRun(s: ViewState): RunView | null {
   const runId = selectedTask(s)?.runId;
   return runId ? (s.runs[runId] ?? null) : null;
+}
+
+/** Tasks whose latest run has not ended yet. */
+export function liveCount(s: ViewState): number {
+  return s.tasks.filter((t) => t.state === "running" || t.state === "paused" || t.state === "stopping").length;
 }
 
 export function headerCounts(s: ViewState): { counts: Partial<Record<TaskState, number>>; cost: number; elapsedMs: number } {
@@ -279,12 +285,15 @@ function apply(s: ViewState, a: UiAction): ViewState {
       return addToast(s, a.level, a.message);
     case "ctrlC":
       return { ...s, ctrlC: s.ctrlC + 1 };
+    case "quitting":
+      return { ...s, mode: "quitting", confirm: null, form: null };
   }
 }
 
 export function reduce(s: ViewState, a: UiAction): ViewState {
   const next = apply(s, a);
-  // Ctrl-C counts consecutive presses; any other action but a clock tick resets it.
-  if (a.type === "ctrlC" || a.type === "tick") return next;
+  // Ctrl-C counts consecutive presses; another key resets it. Clock ticks, manager events (a run
+  // stopping emits some during the press that confirms the quit) and entering the quitting state do not.
+  if (a.type === "ctrlC" || a.type === "tick" || a.type === "manager" || a.type === "quitting") return next;
   return next.ctrlC === 0 ? next : { ...next, ctrlC: 0 };
 }

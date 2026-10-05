@@ -259,3 +259,79 @@ test("manager_summary_lines", async () => {
   ]);
   assert.equal(s.exitCode, 1);
 });
+
+test("manager_start_refused_while_quitting", async () => {
+  const { mgr, fakes } = setup();
+  const [a, b] = [mgr.addTyped("a"), mgr.addTyped("b")];
+  mgr.start(a);
+  let settled = false;
+  const p = mgr.stopAll().then(() => { settled = true; });
+  assert.deepEqual(mgr.start(b), { ok: false, reason: "quitting" });
+  assert.equal(fakes.length, 1, "no run is launched once quitting began");
+  assert.equal(mgr.list()[1].state, "idle");
+  fakes[0].finish(outcome("stop"));
+  await p;
+  assert.equal(settled, true);
+  assert.equal(mgr.activeCount(), 0);
+  assert.deepEqual(mgr.start(b), { ok: false, reason: "quitting" }, "still refused after stopAll settles");
+});
+
+test("manager_summary_keeps_removed_tasks_runs", async () => {
+  const { mgr, fakes } = setup();
+  const [a, b, c] = [mgr.addTyped("broken"), mgr.addTyped("fine"), mgr.addTyped("never run")];
+  mgr.start(a);
+  fakes[0].finish(outcome("fail", { costUsd: 0.1 }));
+  await tick();
+  assert.equal(mgr.remove(a), true);
+  assert.equal(mgr.remove(c), true);
+  mgr.start(b);
+  fakes[1].finish(outcome("pass", { costUsd: 0.2 }));
+  await tick();
+  const s = mgr.summary();
+  assert.deepEqual(s.lines, [
+    "Batch: 1 passed, 1 failed, 0 stopped  Cost: $0.3000",
+    `fail  ${'"broken"'.padEnd(8)}  $0.1000  -`,
+    `pass  ${'"fine"'.padEnd(8)}  $0.2000  -`,
+  ]);
+  assert.equal(s.exitCode, 1);
+  assert.deepEqual(mgr.list().map((t) => t.text), ["fine"], "a removed task stays out of the list");
+});
+
+test("manager_error_before_run_start_reaches_task", async () => {
+  const fails: Array<(o: RunOutcome) => void> = [];
+  const { mgr, events } = setup({
+    startRun() {
+      const ev = new RunEvents();
+      const control = new RunControl(new AbortController(), ev);
+      const done = new Promise<RunOutcome>((resolve) => {
+        fails.push((o) => {
+          ev.emit({ type: "run:end", outcome: o });
+          resolve(o);
+        });
+      });
+      return { id: "", workdir: "", events: ev, control, done };
+    },
+  });
+  const id = mgr.addTyped("a");
+  mgr.start(id);
+  events.length = 0;
+  fails[0](outcome("fail", { error: "error: Error: EACCES: runs", steps: 0 }));
+  await tick();
+  const t = mgr.list()[0];
+  assert.equal(t.state, "failed");
+  assert.equal(t.error, "error: Error: EACCES: runs");
+  const last = events.filter((e) => e.type === "task:updated").pop();
+  assert.ok(last && last.type === "task:updated" && last.task.error === "error: Error: EACCES: runs");
+});
+
+test("manager_error_after_run_start_stays_in_run", async () => {
+  const { mgr, fakes } = setup();
+  const id = mgr.addTyped("a");
+  mgr.start(id);
+  fakes[0].handle.events.emit({
+    type: "run:start", task: "a", maxSteps: 1, model: "m", snapshot: "hybrid", headed: false, session: "s", workdir: "/w",
+  });
+  fakes[0].finish(outcome("fail", { error: "error: Error: boom" }));
+  await tick();
+  assert.equal(mgr.list()[0].error, null, "the run view shows it");
+});

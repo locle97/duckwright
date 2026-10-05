@@ -35,6 +35,7 @@ interface Binding {
 const plain = (k: KeyPress): boolean => !k.ctrl && !k.meta;
 const char = (...chars: string[]) => (k: KeyPress): boolean => k.name === null && plain(k) && chars.includes(k.input);
 const named = (...names: NonNullable<KeyPress["name"]>[]) => (k: KeyPress): boolean => k.name !== null && names.includes(k.name);
+const isCtrlC = (k: KeyPress): boolean => k.ctrl && !k.meta && k.name === null && k.input === "c";
 const anyOf = (...ms: ((k: KeyPress) => boolean)[]) => (k: KeyPress): boolean => ms.some((m) => m(k));
 
 const isLive = (t: TaskSnapshot | null): boolean => t !== null && (t.state === "running" || t.state === "paused" || t.state === "stopping");
@@ -110,8 +111,9 @@ function ctx(s: ViewState, activeRuns: number): Ctx {
 
 function ctrlC(s: ViewState, activeRuns: number): Command[] {
   if (s.ctrlC >= 2) return [{ kind: "forceExit" }];
-  // The ui ctrlC goes last: the reducer resets the counter on every other action.
+  // The ui ctrlC goes last: the reducer resets the counter on any other key's action.
   const count = ui({ type: "ctrlC" });
+  if (s.mode === "quitting") return [count];
   if (s.mode === "confirm" && s.confirm?.kind === "quit") return [{ kind: "stopAllAndQuit" }, count];
   return [...quitCommands(s, activeRuns), count];
 }
@@ -149,7 +151,7 @@ function confirmCommands(k: KeyPress, s: ViewState): Command[] {
 }
 
 export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[] {
-  if (k.ctrl && !k.meta && k.name === null && k.input === "c") return ctrlC(s, activeRuns);
+  if (isCtrlC(k)) return ctrlC(s, activeRuns);
   switch (s.mode) {
     case "compose":
       return composeCommands(k, s);
@@ -159,6 +161,8 @@ export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[]
       return named("escape")(k) || char("?")(k) ? [ui({ type: "help", open: false })] : [];
     case "confirm":
       return confirmCommands(k, s);
+    case "quitting":
+      return [];
     case "list":
     case "detail": {
       const c = ctx(s, activeRuns);
@@ -166,6 +170,17 @@ export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[]
       return b ? b.run(c) : [];
     }
   }
+}
+
+/**
+ * The "terminal too small" screen shows no panes, so only quitting acts there, whatever the mode:
+ * `q` or `esc` quits (or asks first), the quit or remove question takes y/n, and Ctrl-C counts as usual.
+ */
+export function tooSmallKeymap(k: KeyPress, s: ViewState, activeRuns: number): Command[] {
+  if (isCtrlC(k)) return ctrlC(s, activeRuns);
+  if (s.mode === "quitting") return [];
+  if (s.mode === "confirm") return confirmCommands(k, s);
+  return char("q")(k) || named("escape")(k) ? quitCommands(s, activeRuns) : [];
 }
 
 const dedupe = (list: Hint[]): Hint[] => list.filter((h, i) => list.findIndex((x) => x.key === h.key && x.label === h.label) === i);
@@ -183,6 +198,8 @@ export function hints(s: ViewState): Hint[] {
       return [{ key: "esc", label: "close" }];
     case "confirm":
       return [{ key: "y", label: "yes" }, { key: "n", label: "no" }];
+    case "quitting":
+      return [];
     case "list":
     case "detail": {
       const c = ctx(s, 0);

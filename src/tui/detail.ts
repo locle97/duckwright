@@ -39,9 +39,12 @@ function IdleTask({ t }: { t: TaskSnapshot }): ReactElement {
     row(" "),
     row(h(Text, { color: ROLE.muted }, "source: "), "typed"),
     row(" "),
-    ...SETTINGS.map(([key, label]) => h(Box, { key },
-      row(h(Text, { color: ROLE.muted }, label.padEnd(width)),
-        t.overrides[key] !== undefined ? h(Text, { color: ROLE.accent }, String(t.effective[key])) : String(t.effective[key])))),
+    ...SETTINGS.map(([key, label]) => {
+      const value = sanitize(String(t.effective[key]));
+      return h(Box, { key },
+        row(h(Text, { color: ROLE.muted }, label.padEnd(width)),
+          t.overrides[key] !== undefined ? h(Text, { color: ROLE.accent }, value) : value));
+    }),
     t.error !== null ? row(" ") : null,
     t.error !== null ? row(h(Text, { color: ROLE.error }, `! ${sanitize(t.error)}`)) : null);
 }

@@ -81,7 +81,11 @@ const OUTCOME_TO_STATE: Record<RunOutcome["status"], TaskState> = {
 export class RunManager implements ManagerLike {
   #o: ManagerOptions;
   #tasks: Task[] = [];
+  /** Removed tasks that ran: out of the list, but their runs stay in the quit summary. */
+  #retired: Task[] = [];
   #nextId = 1;
+  /** Set by stopAll: no run starts after quitting began. */
+  #closing = false;
   #listeners: Array<(e: ManagerEvent) => void> = [];
 
   constructor(o: ManagerOptions) {
@@ -118,6 +122,7 @@ export class RunManager implements ManagerLike {
     const task = this.#find(id);
     if (!task || this.#activeRun(task)) return false;
     this.#tasks = this.#tasks.filter((t) => t !== task);
+    if (task.runs.length > 0) this.#retired.push(task);
     this.#emit({ type: "task:removed", taskId: id });
     return true;
   }
@@ -131,6 +136,7 @@ export class RunManager implements ManagerLike {
   start(id: TaskId): StartResult {
     const task = this.#find(id);
     if (!task) return { ok: false, reason: "no such task" };
+    if (this.#closing) return { ok: false, reason: "quitting" };
     if (this.#activeRun(task)) return { ok: false, reason: "already running" };
     const n = this.activeCount();
     if (n >= this.#o.maxParallel) return { ok: false, reason: `${n} runs active (limit ${this.#o.maxParallel})` };
@@ -158,9 +164,12 @@ export class RunManager implements ManagerLike {
     const run: RunRecord = { handle, slot, session, active: true, quitStopped: false, outcome: null };
     task.runs.push(run);
     task.state = CONTROL_TO_STATE[handle.control.state];
+    let started = false;
     handle.events.subscribe((event) => {
       this.#emit({ type: "run", taskId: task.id, runId: handle.id, event });
-      if (event.type === "control") {
+      if (event.type === "run:start") {
+        started = true;
+      } else if (event.type === "control") {
         task.state = CONTROL_TO_STATE[event.state];
         this.#updated(task);
       } else if (event.type === "run:end") {
@@ -171,6 +180,11 @@ export class RunManager implements ManagerLike {
     void handle.done.then((outcome) => {
       run.outcome = outcome;
       run.active = false;
+      // A run that failed before run:start has no run view to show why: put it on the task.
+      if (!started && outcome.error !== null) {
+        task.error = outcome.error;
+        this.#updated(task);
+      }
       if (outcome.error?.startsWith("playwright error:")) {
         this.#emit({
           type: "toast", level: "error",
@@ -205,20 +219,29 @@ export class RunManager implements ManagerLike {
   }
 
   async stopAll(): Promise<void> {
-    const active = this.#tasks.flatMap((t) => t.runs).filter((r) => r.active);
-    for (const r of active) {
-      r.quitStopped = true;
-      r.handle.control.stop();
+    this.#closing = true;
+    // No run can start now; still, wait until none is active (each one once, should `done` reject).
+    const waited = new Set<RunRecord>();
+    for (;;) {
+      const active = this.#tasks.flatMap((t) => t.runs).filter((r) => r.active && !waited.has(r));
+      if (active.length === 0) return;
+      for (const r of active) {
+        waited.add(r);
+        r.quitStopped = true;
+        r.handle.control.stop();
+      }
+      await Promise.all(active.map((r) => r.handle.done.then(() => undefined, () => undefined)));
+      // `done` handlers registered in start() run before ours, so every outcome is recorded here.
     }
-    await Promise.all(active.map((r) => r.handle.done.then(() => undefined, () => undefined)));
-    // `done` handlers registered in start() run before ours, so every outcome is recorded here.
   }
 
   summary(): { lines: string[]; exitCode: number } {
     const rows: Array<{ name: string; outcome: RunOutcome }> = [];
     let total = 0;
     let quit = false;
-    for (const t of this.#tasks) {
+    // Removed tasks' runs count too; ids follow the order the tasks were added.
+    const tasks = [...this.#retired, ...this.#tasks].sort((a, b) => a.id - b.id);
+    for (const t of tasks) {
       let latest: RunOutcome | null = null;
       for (const r of t.runs) {
         if (r.quitStopped) quit = true;

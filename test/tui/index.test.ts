@@ -172,3 +172,15 @@ test("starttui_force_exit_survives_throwing_unmount", async () => {
   assert.deepEqual(t.exits, [130]);
   assert.equal(restores(t.stdout), 1);
 });
+
+test("starttui_quit_stops_all_then_resolves_done", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 })]);
+  m.active = 1;
+  const t = setup(m);
+  await settle();
+  t.handle.quit();
+  t.handle.quit(); // twice: one stop
+  await t.handle.done;
+  assert.deepEqual(m.log, ["stopAll"]);
+  t.handle.restoreTerminal();
+});

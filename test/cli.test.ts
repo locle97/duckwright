@@ -839,7 +839,7 @@ function fakeTui(rejectWith: Error | null = null): FakeTui {
           });
         });
         manager.start(id);
-        return { done, restoreTerminal: () => void fake.restores++ };
+        return { done, restoreTerminal: () => void fake.restores++, quit: () => {} };
       },
     };
   };
@@ -919,4 +919,58 @@ test("tui_max_parallel_reaches_manager", async () => {
   const second = m.start(b);
   assert.equal(second.ok, false);
   await m.stopAll();
+});
+
+/** A TUI that starts one task (if `start`), and closes only when asked to quit, like the real one. */
+function quitOnlyTui(start: boolean) {
+  const fake = { quits: 0, restores: 0, load: null as never as () => Promise<TuiModule> };
+  fake.load = async () => ({
+    startTui({ manager }): TuiHandle {
+      if (start) manager.start(manager.addTyped("do it"));
+      let resolve!: () => void;
+      const done = new Promise<void>((r) => { resolve = r; });
+      return {
+        done,
+        restoreTerminal: () => void fake.restores++,
+        quit: () => {
+          fake.quits++;
+          void manager.stopAll().then(resolve);
+        },
+      };
+    },
+  });
+  return fake;
+}
+
+/** An agent that runs until the signal aborts. */
+const untilAborted = agentWith((opts) => new Promise((_, reject) => {
+  opts.signal!.addEventListener("abort", () => reject(new AbortedError()), { once: true });
+}));
+
+test("tui_outside_sigint_quits", { timeout: 5000 }, async () => {
+  const e = env();
+  const fake = quitOnlyTui(true);
+  const ac = new AbortController();
+  const p = main(["--tui", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: untilAborted, signal: ac.signal }));
+  await new Promise((r) => setTimeout(r, 20));
+  ac.abort();
+  assert.equal(await p, 130);
+  assert.equal(fake.quits, 1);
+  assert.equal(fake.restores, 1);
+  assert.equal(e.out[0], "Batch: 0 passed, 0 failed, 1 stopped  Cost: $0.0000");
+  assert.ok(e.out[1].startsWith('stop  "do it"'));
+});
+
+test("tui_outside_sigint_quits_without_runs", { timeout: 5000 }, async () => {
+  const e = env();
+  const fake = quitOnlyTui(false);
+  const ac = new AbortController();
+  const p = main(["--tui", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, signal: ac.signal }));
+  await new Promise((r) => setTimeout(r, 20));
+  ac.abort();
+  assert.equal(await p, 130);
+  assert.equal(fake.quits, 1);
+  assert.deepEqual(e.out, []);
 });

@@ -7,14 +7,14 @@ import type { ReactElement, ReactNode } from "react";
 
 import type { ManagerLike } from "../runs/manager.ts";
 import { AddBox, addBoxHeight } from "./addBox.ts";
-import { Confirm } from "./confirm.ts";
+import { Confirm, question } from "./confirm.ts";
 import { Detail } from "./detail.ts";
-import { Footer } from "./footer.ts";
+import { Footer, quittingText } from "./footer.ts";
 import { FormView } from "./formView.ts";
 import { Header } from "./header.ts";
 import { Help } from "./help.ts";
 import type { KeyName, KeyPress } from "./keypress.ts";
-import { keymap } from "./keys.ts";
+import { keymap, tooSmallKeymap } from "./keys.ts";
 import type { Command } from "./keys.ts";
 import { sanitize } from "./sanitize.ts";
 import { Sidebar } from "./sidebar.ts";
@@ -31,6 +31,8 @@ export interface AppProps {
   size?: { columns: number; rows: number };
   /** Clock tick for spinners, elapsed times and toast expiry. Default 100. */
   tickMs?: number;
+  /** Aborting it quits as a confirmed quit does: stop every run, then leave. */
+  quitSignal?: AbortSignal;
   /** After quit, after stopAll on a confirmed quit, or after a render crash (with its error). */
   onQuit(error?: Error): void;
   onForceExit(): void;
@@ -88,9 +90,23 @@ function Workspace(p: AppProps): ReactElement {
   const quit = (stopFirst: boolean): void => {
     if (quitting.current) return;
     quitting.current = true;
-    if (!stopFirst) p.onQuit();
-    else void manager.stopAll().then(() => p.onQuit(), (e: unknown) => p.onQuit(e instanceof Error ? e : new Error(String(e))));
+    if (!stopFirst) {
+      p.onQuit();
+      return;
+    }
+    // The panes stay up, showing each run stopping; only Ctrl-C acts from here on.
+    dispatch({ type: "quitting" });
+    void manager.stopAll().then(() => p.onQuit(), (e: unknown) => p.onQuit(e instanceof Error ? e : new Error(String(e))));
   };
+
+  const { quitSignal } = p;
+  useEffect(() => {
+    if (quitSignal === undefined) return undefined;
+    const onAbort = (): void => quit(true);
+    if (quitSignal.aborted) onAbort();
+    quitSignal.addEventListener("abort", onAbort, { once: true });
+    return () => quitSignal.removeEventListener("abort", onAbort);
+  }, [quitSignal]);
 
   const run = (c: Command): void => {
     switch (c.kind) {
@@ -127,18 +143,24 @@ function Workspace(p: AppProps): ReactElement {
     }
   };
 
+  const tooSmall = columns < MIN_COLUMNS || rows < MIN_ROWS;
   useInput((input, key) => {
     try {
-      for (const c of keymap(fromInk(input, key), state.current ?? s, manager.activeCount())) run(c);
+      const map = tooSmall ? tooSmallKeymap : keymap;
+      for (const c of map(fromInk(input, key), state.current ?? s, manager.activeCount())) run(c);
     } catch (e) {
       setThrown(e instanceof Error ? e : new Error(String(e)));
     }
   });
 
-  if (columns < MIN_COLUMNS || rows < MIN_ROWS) {
+  if (tooSmall) {
+    // No panes fit, so only quitting acts here (see tooSmallKeymap); say how, whatever the mode.
+    const lines = s.mode === "quitting" ? [quittingText(s)]
+      : s.mode === "confirm" && s.confirm !== null ? [question(s), "y yes · n no"]
+      : ["q quit"];
     return h(Box, { flexDirection: "column" },
       h(Text, { wrap: "truncate-end" }, "terminal too small"),
-      h(Text, { color: ROLE.muted, wrap: "truncate-end" }, "q quit"));
+      ...lines.map((line, i) => h(Text, { key: i, color: ROLE.muted, wrap: "truncate-end" }, line)));
   }
 
   const paneHeight = Math.max(0, rows - HEADER_ROWS - FOOTER_ROWS - addBoxHeight(s.compose));
