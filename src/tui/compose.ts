@@ -13,6 +13,7 @@ export interface ComposeState {
 export const EMPTY_COMPOSE: ComposeState = { text: "", cursor: 0, history: [], historyIndex: null, draft: "" };
 
 function lineStart(text: string, cursor: number): number {
+  if (cursor <= 0) return 0;
   return text.lastIndexOf("\n", cursor - 1) + 1;
 }
 

@@ -138,3 +138,13 @@ test("compose_up_moves_line_when_not_first", () => {
   s = press(s, "up");
   assert.equal(s.text, "old");
 });
+
+test("compose_leading_newline_cursor_at_start", () => {
+  const base: ComposeState = { ...EMPTY_COMPOSE, text: "\nabc", cursor: 0, history: ["old"] };
+  assert.deepEqual(lines(base), { lines: ["", "abc"], row: 0, col: 0 });
+  assert.equal(press(base, "ctrl+u").text, "\nabc");
+  assert.equal(press(base, "home").cursor, 0);
+  assert.equal(press(base, "ctrl+a").cursor, 0);
+  const recalled = press(base, "up");
+  assert.deepEqual([recalled.text, recalled.historyIndex, recalled.draft], ["old", 0, "\nabc"]);
+});
