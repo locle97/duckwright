@@ -89,7 +89,8 @@ export function startTui(o: StartTuiOptions): TuiHandle {
   try {
     process.on("SIGINT", onSigint);
     instance = render(h(App, { manager: o.manager, theme, notices: o.notices, quitSignal: quitRequest.signal, onQuit, onForceExit: forceExit }), {
-      stdin, stdout, stderr, exitOnCtrlC: false, patchConsole: true, alternateScreen: true,
+      // The CLI only starts the TUI on a TTY: don't let Ink's CI detection turn off live frames.
+      stdin, stdout, stderr, exitOnCtrlC: false, patchConsole: true, alternateScreen: true, interactive: true,
     });
   } catch (e) {
     stopWatchingSigint();

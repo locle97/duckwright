@@ -196,10 +196,13 @@ test("start_tui_resolves_theme", async () => {
     stderr: stderr as unknown as NodeJS.WriteStream,
     theme: "light", env: { NO_COLOR: "1" }, notices: ["n1"],
   });
-  await settle();
-  const out = stdout.writes.join("");
-  assert.match(out, /n1/);
-  assert.match(out, /┏/);
-  handle.quit();
-  await handle.done;
+  try {
+    await settle();
+    const out = stdout.writes.join("");
+    assert.match(out, /n1/);
+    assert.match(out, /┏/);
+  } finally {
+    handle.quit();
+    await handle.done;
+  }
 });

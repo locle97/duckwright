@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "npm run typecheck && node --test \"test/**/*.test.ts\"",
+    "test": "npm run typecheck && node --test --test-timeout=60000 \"test/**/*.test.ts\"",
     "prepare": "npm run build"
   },
   "devDependencies": {
