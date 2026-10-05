@@ -7,7 +7,8 @@ import { Brain, BrainError } from "../src/brain.ts";
 import type { Action } from "../src/brain.ts";
 import { PROMPTS, historyJson, main, version } from "../src/cli.ts";
 import type { AgentLike, CliDeps, TuiHandle, TuiModule } from "../src/cli.ts";
-import type { ManagerLike } from "../src/runs/manager.ts";
+import type { ManagerEvent, ManagerLike } from "../src/runs/manager.ts";
+import type { PastRun } from "../src/runs/past.ts";
 import type { AgentOptions, RunResult } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
@@ -973,4 +974,131 @@ test("tui_outside_sigint_quits_without_runs", { timeout: 5000 }, async () => {
   assert.equal(await p, 130);
   assert.equal(fake.quits, 1);
   assert.deepEqual(e.out, []);
+});
+
+// ---- past runs, themes and sink warnings ----
+
+function aPastRun(): PastRun {
+  const outcome = {
+    exitCode: 0, success: true, answer: "a", steps: 1, costUsd: 0, historyPath: "/runs/x/history.json",
+    export: { kind: "off" }, warnings: [], error: null,
+  } as unknown as PastRun["outcome"];
+  return {
+    id: "20260101-000000-old", workdir: "/runs/20260101-000000-old", text: "old task",
+    source: { kind: "typed" }, fileSettings: {}, events: [], outcome,
+  };
+}
+
+interface OptsTui { load: () => Promise<TuiModule>; opts: any; manager: ManagerLike | null }
+function optsTui(): OptsTui {
+  const t: OptsTui = { opts: null, manager: null, load: null as never };
+  t.load = async () => ({
+    startTui(o): TuiHandle {
+      t.opts = o;
+      t.manager = o.manager;
+      return { done: Promise.resolve(), restoreTerminal: () => {}, quit: () => {} };
+    },
+  });
+  return t;
+}
+
+test("past_and_theme_need_tui", async () => {
+  for (const [flags, msg] of [
+    [["--past", "3"], "--past needs --tui"],
+    [["--theme", "dark"], "--theme needs --tui"],
+  ] as const) {
+    const e = env();
+    assert.equal(await main([...e.argv, ...flags], e.deps()), 2);
+    assert.ok(e.err.some((l) => l.includes(msg)), msg);
+  }
+  const e1 = env();
+  assert.equal(await main(["--tui", "--past", "x"], e1.deps()), 2);
+  assert.ok(e1.err.some((l) => l.includes("argument --past: invalid int value: 'x'")));
+  const e2 = env();
+  assert.equal(await main(["--tui", "--theme", "blue"], e2.deps()), 2);
+  assert.ok(e2.err.some((l) => l.includes("invalid choice: 'blue'")));
+});
+
+test("tui_passes_theme_notices_and_past", async () => {
+  for (const [skipped, notices] of [
+    [2, ["skipped 2 unreadable run folders in runs/"]],
+    [1, ["skipped 1 unreadable run folder in runs/"]],
+    [0, []],
+  ] as const) {
+    const e = env();
+    const t = optsTui();
+    let limit = -1;
+    const code = await main(["--tui", "--theme", "light", "--past", "5", "--skill", e.argv[2]], e.deps({
+      isTTY: () => true, loadTui: t.load,
+      loadPastRuns: (l) => { limit = l; return { runs: [aPastRun()], skipped }; },
+    }));
+    assert.equal(code, 0);
+    assert.equal(limit, 5);
+    assert.equal(t.opts.theme, "light");
+    assert.deepEqual(t.opts.notices, notices);
+    assert.equal(t.manager!.list()[0].past?.runId, "20260101-000000-old");
+  }
+});
+
+test("tui_past_theme_defaults_and_zero", async () => {
+  const e = env();
+  const t = optsTui();
+  let limit = -1;
+  await main(["--tui", "--skill", e.argv[2]], e.deps({
+    isTTY: () => true, loadTui: t.load, loadPastRuns: (l) => { limit = l; return { runs: [], skipped: 0 }; },
+  }));
+  assert.equal(limit, 20);
+  assert.equal(t.opts.theme, "auto");
+
+  const e2 = env();
+  let called = false;
+  await main(["--tui", "--past", "0", "--skill", e2.argv[2]], e2.deps({
+    isTTY: () => true, loadTui: optsTui().load, loadPastRuns: () => { called = true; return { runs: [], skipped: 0 }; },
+  }));
+  assert.equal(called, false);
+});
+
+/** An agent factory that blocks events.jsonl by making it a directory. */
+const sinkBlocker = (inner = result(true)) => (opts: AgentOptions): AgentLike => {
+  fs.mkdirSync(path.join(opts.workdir, "events.jsonl"), { recursive: true });
+  return { costUsd: 0, run: async () => inner };
+};
+
+test("tui_sink_warning_becomes_toast", async () => {
+  const e = env();
+  const toasts: ManagerEvent[] = [];
+  const load = async (): Promise<TuiModule> => ({
+    startTui({ manager }): TuiHandle {
+      manager.subscribe((ev) => { if (ev.type === "toast") toasts.push(ev); });
+      const id = manager.addTyped("do it");
+      const done = new Promise<void>((resolve) => {
+        const off = manager.subscribe((ev) => {
+          if (ev.type === "task:updated" && ev.task.state === "passed") { off(); setImmediate(resolve); }
+        });
+      });
+      manager.start(id);
+      return { done, restoreTerminal: () => {}, quit: () => {} };
+    },
+  });
+  await main(["--tui", "--skill", e.argv[2]], e.deps({
+    isTTY: () => true, loadTui: load, loadPastRuns: () => ({ runs: [], skipped: 0 }), createAgent: sinkBlocker(),
+  }));
+  const t = toasts.find((x) => x.type === "toast" && x.message.startsWith("could not write "));
+  assert.ok(t && t.type === "toast" && t.level === "error");
+});
+
+test("plain_sink_warning_on_stderr", async () => {
+  const e = env();
+  assert.equal(await main(e.argv, e.deps({ createAgent: sinkBlocker() })), 0);
+  const w = e.err.filter((l) => l.startsWith("warning: could not write "));
+  assert.equal(w.length, 1);
+  assert.ok(w[0].includes("events.jsonl"));
+  assert.ok(!e.out.some((l) => l.includes("could not write")));
+
+  const e2 = env();
+  fs.writeFileSync(path.join(e2.tmp, "a.md"), "task a\n");
+  fs.writeFileSync(path.join(e2.tmp, "b.md"), "task b\n");
+  assert.equal(await main(["-f", "a.md", "b.md", "--skill", e2.argv[2]], e2.deps({ createAgent: sinkBlocker() })), 0);
+  assert.equal(e2.err.filter((l) => l.startsWith("warning: could not write ")).length, 2);
+  assert.ok(!e2.out.some((l) => l.includes("could not write")));
 });
