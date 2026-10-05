@@ -3,7 +3,7 @@ import type { Decision } from "../../src/brain.ts";
 import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import { taskName } from "../../src/runs/manager.ts";
 import type {
-  AddResult, ManagerEvent, ManagerLike, Overrides, StartResult, Submission, TaskId, TaskSnapshot,
+  AddResult, Globals, ManagerEvent, ManagerLike, Overrides, StartResult, Submission, TaskId, TaskSnapshot,
 } from "../../src/runs/manager.ts";
 
 export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> = {}): TaskSnapshot {
@@ -24,6 +24,10 @@ export class FakeManager implements ManagerLike {
   stopAllResult: Promise<void> = Promise.resolve();
   /** What add() returns; by default it adds the typed task and reports it. */
   addResult: AddResult | null = null;
+  /** What globals() returns; setGlobals replaces its overrides. */
+  globalsValue: Globals = { base: snapshot(0, "").effective, overrides: {} };
+  /** Every setGlobals argument, in order. */
+  globalsSaved: Overrides[] = [];
   #listeners: Array<(e: ManagerEvent) => void> = [];
   #nextId: number;
 
@@ -71,6 +75,17 @@ export class FakeManager implements ManagerLike {
   setOverrides(id: TaskId, o: Overrides): void {
     this.log.push(`setOverrides:${id}`);
     this.overrides.push({ id, o });
+  }
+
+  globals(): Globals {
+    return { base: { ...this.globalsValue.base }, overrides: { ...this.globalsValue.overrides } };
+  }
+
+  setGlobals(o: Overrides): void {
+    this.log.push("setGlobals");
+    this.globalsSaved.push(o);
+    this.globalsValue = { ...this.globalsValue, overrides: { ...o } };
+    this.emit({ type: "globals:updated", globals: this.globals() });
   }
 
   remove(id: TaskId): boolean {

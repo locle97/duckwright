@@ -8,7 +8,7 @@ import { openForm, formKey } from "../../src/tui/form.ts";
 import { helpBindings, hintPrefix, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
 import { key } from "../../src/tui/keypress.ts";
-import { initialState, reduce } from "../../src/tui/state.ts";
+import { editingGlobals, initialState, reduce } from "../../src/tui/state.ts";
 import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle"): TaskSnapshot {
@@ -95,7 +95,7 @@ test("keys_noop_without_live_run", () => {
   assert.deepEqual(press(mk("running"), "n"), []);
   // Every task-directed key on an empty list does nothing.
   const empty = initialState(0);
-  for (const spec of ["return", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
+  for (const spec of ["return", "space", "o", "d", "p", "r", "n", ".", "s", "j", "k", "up", "down", "pageUp", "pageDown", "g", "G"]) {
     assert.deepEqual(press(empty, spec), [], `${spec} on empty list`);
   }
   const emptyDetail = reduce(empty, { type: "focus", target: "detail" });
@@ -104,15 +104,48 @@ test("keys_noop_without_live_run", () => {
   }
 });
 
-test("keys_return_starts_or_focuses", () => {
+test("keys_space_starts_return_shows_details", () => {
   for (const state of ["idle", "passed", "failed", "stopped"] as const) {
-    assert.deepEqual(press(mk(state), "return"), [{ kind: "manager", call: "start", id: 1 }], state);
+    assert.deepEqual(press(mk(state), "space"), [{ kind: "manager", call: "start", id: 1 }], state);
   }
   for (const state of ["running", "paused", "stopping"] as const) {
+    assert.deepEqual(press(mk(state), "space"), [], `${state}: already live`);
+  }
+  for (const state of ["idle", "running", "passed"] as const) {
     assert.deepEqual(press(mk(state), "return"), [ui({ type: "focus", target: "detail" })], state);
   }
 });
 
+test("keys_h_l_switch_tasks_and_options", () => {
+  const globals = { base: task(1).effective, overrides: {} };
+  const list = initialState(0, [task(1)], [], globals);
+  for (const k of ["h", "l"]) {
+    assert.deepEqual(press(list, k), [ui({ type: "focus", target: "options" })], `${k} from the tasks`);
+    assert.deepEqual(press(initialState(0, [], [], globals), k), [ui({ type: "focus", target: "options" })], `${k} with no tasks`);
+    assert.deepEqual(press(mk("idle"), k), [], `${k}: no globals yet`);
+  }
+  const opts = play(list, press(list, "l"));
+  assert.equal(opts.mode, "options");
+  for (const k of ["h", "l", "escape", "tab"]) assert.deepEqual(press(opts, k), [ui({ type: "focus", target: "list" })], `${k} from the options`);
+  assert.deepEqual(press(detailOf("running"), "l"), [], "the detail pane is not in the h/l cycle");
+  // j/k pick a field; return edits it in place, starting on that field.
+  assert.deepEqual(press(opts, "j"), [ui({ type: "optionsMove", delta: 1 })]);
+  assert.deepEqual(press(opts, "up"), [ui({ type: "optionsMove", delta: -1 })]);
+  const second = play(opts, press(opts, "down"));
+  assert.equal(second.optionsSelected, 1);
+  const editing = play(second, press(second, "return"));
+  assert.equal(editingGlobals(editing), true);
+  assert.equal(editing.form?.focus, 1);
+  // h is text while editing (a model name can hold one).
+  assert.notDeepEqual(press(editing, "h"), [ui({ type: "focus", target: "list" })]);
+  // Leaving the form goes back to the options pane, on the field it was on.
+  const back = play(editing, press(editing, "escape"));
+  assert.equal(back.mode, "options");
+  assert.equal(back.optionsSelected, 1);
+  assert.equal(footer(opts), "↑↓ j/k move · ⏎ edit · h/l tasks · ? help");
+  assert.ok(helpBindings(opts).some((h) => h.key === "h/l" && h.label === "tasks"));
+  assert.ok(helpBindings(list).some((h) => h.key === "h/l" && h.label === "options"));
+});
 test("keys_compose_submit_and_escape", () => {
   let s = reduce(mk("idle"), { type: "focus", target: "compose" });
   assert.equal(s.mode, "compose");
@@ -223,10 +256,10 @@ test("keys_too_small_screen", () => {
 });
 
 test("hints_per_mode_and_state", () => {
-  assert.equal(footer(mk("running")), "⏎ open · tab add · → details · p pause · s stop · ? help");
-  assert.equal(footer(mk("paused")), "⏎ open · tab add · → details · r resume · n step · s stop · ? help");
-  assert.equal(footer(mk("idle")), "⏎ run · tab add · o options · d remove · ? help");
-  assert.equal(footer(mk("stopping")), "⏎ open · tab add · → details · ? help");
+  assert.equal(footer(mk("running")), "⏎ details · tab add · p pause · s stop · ? help");
+  assert.equal(footer(mk("paused")), "⏎ details · tab add · r resume · n step · s stop · ? help");
+  assert.equal(footer(mk("idle")), "space run · ⏎ details · tab add · o options · d remove · ? help");
+  assert.equal(footer(mk("stopping")), "⏎ details · tab add · ? help");
   assert.equal(footer(initialState(0)), "tab add · ? help");
   assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back");
   const t = task(1);
@@ -241,13 +274,13 @@ test("hints_per_mode_and_state", () => {
 
 test("help_lists_mode_bindings", () => {
   const list = helpBindings(mk("idle")).map((h) => `${h.key} ${h.label}`);
-  for (const want of ["⏎ run", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
+  for (const want of ["space run", "⏎ details", "h/l options", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
     assert.ok(list.some((l) => l.startsWith(want)), `list help has ${want}: ${list.join("|")}`);
   }
   const detail = helpBindings(reduce(mk("idle"), { type: "focus", target: "detail" })).map((h) => `${h.key} ${h.label}`);
   assert.ok(detail.some((l) => l.includes("expand all")));
   assert.ok(detail.some((l) => l.includes("collapse all")));
-  assert.ok(!detail.some((l) => l.startsWith("⏎ run")));
+  assert.ok(!detail.some((l) => l.startsWith("space run")));
   assert.ok(detail.some((l) => l.startsWith("tab tasks")));
 });
 
@@ -445,4 +478,22 @@ test("keys_detail_tab_to_list", () => {
   assert.deepEqual(press(detailOf("running"), "tab"), [ui({ type: "focus", target: "list" })]);
   const noRun = reduce(mk("idle"), { type: "focus", target: "detail" });
   assert.deepEqual(press(noRun, "tab"), [ui({ type: "focus", target: "list" })]);
+});
+
+test("keys_global_options", () => {
+  const globals = { base: task(1).effective, overrides: { model: "opus" } };
+  for (const s of [initialState(0, [task(1)], [], globals), initialState(0, [], [], globals), detailOf("running")]) {
+    const g = s.globals === null ? reduce(s, { type: "manager", event: { type: "globals:updated", globals } }) : s;
+    const cmds = press(g, "O");
+    assert.deepEqual(cmds, [ui({ type: "form", next: openForm(null, globals.base, globals.overrides) })]);
+    const open = play(g, cmds);
+    assert.equal(editingGlobals(open), true);
+    assert.deepEqual(press(open, "return"), [
+      { kind: "saveGlobals", overrides: { model: "opus" } }, ui({ type: "form", next: null }),
+    ]);
+    assert.equal(editingGlobals(play(open, press(open, "escape"))), false);
+  }
+  assert.deepEqual(press(mk("idle"), "O"), [], "no globals yet: nothing to edit");
+  assert.ok(helpBindings(mk("idle")).some((h) => h.key === "O" && h.label === "global options"));
+  assert.ok(!hints(initialState(0, [task(1)], [], globals)).some((h) => h.key === "O"), "help only, not the footer");
 });

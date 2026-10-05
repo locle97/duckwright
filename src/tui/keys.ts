@@ -16,6 +16,7 @@ export type Command =
   | { kind: "openCompletion" }
   | { kind: "addSubmission"; mentions: Mention[]; typed: string | null }
   | { kind: "saveOverrides"; id: TaskId; overrides: Overrides }
+  | { kind: "saveGlobals"; overrides: Overrides }
   | { kind: "quit" }
   | { kind: "stopAllAndQuit" } | { kind: "forceExit" };
 
@@ -63,6 +64,11 @@ const SHARED: Binding[] = [
     hint: { key: "o", label: "options" }, footer: true,
   },
   {
+    match: char("O"), when: (c) => c.s.globals !== null,
+    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides) })] : []),
+    hint: { key: "O", label: "global options" }, footer: false,
+  },
+  {
     match: char("d"), when: (c) => hasTask(c) && !isLive(c.t),
     run: (c) => (c.t ? [ui({ type: "confirm", value: { kind: "remove", taskId: c.t.id } })] : []),
     hint: { key: "d", label: "remove" }, footer: true,
@@ -75,13 +81,11 @@ const SHARED: Binding[] = [
 const move = (delta: number) => (): Command[] => [ui({ type: "select", delta })];
 const LIST_ONLY: Binding[] = [
   { match: named("escape"), when: (c) => c.s.filter !== "", run: () => [ui({ type: "filterClear" })], hint: { key: "esc", label: "clear filter" }, footer: true },
-  {
-    match: named("return"), when: hasTask,
-    run: (c) => (c.t ? (isLive(c.t) ? [ui({ type: "focus", target: "detail" })] : [{ kind: "manager", call: "start", id: c.t.id }]) : []),
-    hint: { key: "⏎", label: "run" }, footer: true,
-  },
+  { match: char(" "), when: (c) => hasTask(c) && !isLive(c.t), run: manager("start"), hint: { key: "space", label: "run" }, footer: true },
+  { match: named("return"), when: hasTask, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "⏎", label: "details" }, footer: true },
   { match: named("tab"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "tab", label: "add" }, footer: true },
-  { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: true },
+  { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: false },
+  { match: char("h", "l"), when: (c) => c.s.globals !== null, run: () => [ui({ type: "focus", target: "options" })], hint: { key: "h/l", label: "options" }, footer: false },
   { match: anyOf(named("up"), char("k")), when: hasTask, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: anyOf(named("down"), char("j")), when: hasTask, run: move(1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
   { match: named("pageUp"), when: hasTask, run: move(-PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
@@ -107,8 +111,24 @@ const DETAIL_ONLY: Binding[] = [
   { match: named("escape"), when: () => true, run: () => [ui({ type: "escape" })], hint: { key: "esc", label: "back" }, footer: false },
 ];
 
-/** The binding table for a list or detail screen: mode-specific bindings first, then the shared ones. */
-function table(mode: "list" | "detail"): Binding[] {
+/** The options pane: pick a field, edit it in place; h/l go back to the tasks. */
+const OPTIONS: Binding[] = [
+  { match: anyOf(named("up"), char("k")), when: () => true, run: () => [ui({ type: "optionsMove", delta: -1 })], hint: { key: "↑↓ j/k", label: "move" }, footer: true },
+  { match: anyOf(named("down"), char("j")), when: () => true, run: () => [ui({ type: "optionsMove", delta: 1 })], hint: { key: "↑↓ j/k", label: "move" }, footer: true },
+  {
+    match: anyOf(named("return"), char("O")), when: (c) => c.s.globals !== null,
+    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides, c.s.optionsSelected) })] : []),
+    hint: { key: "⏎", label: "edit" }, footer: true,
+  },
+  { match: anyOf(char("h", "l"), named("escape"), named("tab")), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "h/l", label: "tasks" }, footer: true },
+  { match: char("a"), when: () => true, run: () => [ui({ type: "focus", target: "compose" })], hint: { key: "a", label: "add" }, footer: false },
+  { match: char("?"), when: () => true, run: () => [ui({ type: "help", open: true })], hint: { key: "?", label: "help" }, footer: true },
+  { match: char("q"), when: () => true, run: (c) => quitCommands(c.s, c.activeRuns), hint: { key: "q", label: "quit" }, footer: false },
+];
+
+/** The binding table for a list, detail or options screen: mode-specific bindings first, then the shared ones. */
+function table(mode: "list" | "detail" | "options"): Binding[] {
+  if (mode === "options") return OPTIONS;
   return mode === "list" ? [...LIST_ONLY, ...SHARED] : [...DETAIL_ONLY, ...SHARED];
 }
 
@@ -174,7 +194,11 @@ function formCommands(k: KeyPress, s: ViewState): Command[] {
   if (k.name === "escape") return [ui({ type: "form", next: null })];
   if (k.name === "return") {
     const r = formResult(f);
-    return r.ok ? [{ kind: "saveOverrides", id: f.taskId, overrides: r.overrides }, ui({ type: "form", next: null })] : [];
+    if (!r.ok) return [];
+    const save: Command = f.taskId === null
+      ? { kind: "saveGlobals", overrides: r.overrides }
+      : { kind: "saveOverrides", id: f.taskId, overrides: r.overrides };
+    return [save, ui({ type: "form", next: null })];
   }
   const next = formKey(f, k);
   return next === f ? [] : [ui({ type: "form", next })];
@@ -211,7 +235,8 @@ export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[]
     case "quitting":
       return [];
     case "list":
-    case "detail": {
+    case "detail":
+    case "options": {
       const c = ctx(s, activeRuns);
       const b = table(s.mode).find((x) => x.match(k) && x.when(c));
       return b ? b.run(c) : [];
@@ -256,12 +281,10 @@ export function hints(s: ViewState): Hint[] {
     case "quitting":
       return [];
     case "list":
-    case "detail": {
+    case "detail":
+    case "options": {
       const c = ctx(s, 0);
-      const live = table(s.mode).filter((b) => b.footer && b.when(c)).map((b) => b.hint);
-      // Return opens a live run but starts anything else; the table's hint says "run".
-      const open = s.mode === "list" && isLive(c.t);
-      return dedupe(live.map((h) => (open && h.key === "⏎" ? { key: "⏎", label: "open" } : h)));
+      return dedupe(table(s.mode).filter((b) => b.footer && b.when(c)).map((b) => b.hint));
     }
   }
 }
@@ -269,14 +292,12 @@ export function hints(s: ViewState): Hint[] {
 /** Every binding of the screen the help overlay was opened from, regardless of the current task. */
 export function helpBindings(s: ViewState): Hint[] {
   const mode = s.focus;
-  const rows = table(mode).map((b) => b.hint);
-  const extra: Hint[] = mode === "list" ? [{ key: "⏎", label: "open run (live task)" }] : [];
-  return dedupe([...rows, ...extra]);
+  return dedupe(table(mode).map((b) => b.hint));
 }
 
 /** Raw text placed before the footer hints: the filter being typed, or the active filter. */
 export function hintPrefix(s: ViewState): string {
   if (s.mode === "filter") return `/${s.filterDraft ?? ""}▌  `;
-  if ((s.mode === "list" || s.mode === "detail") && s.filter !== "") return `filter "${s.filter}" · `;
+  if ((s.mode === "list" || s.mode === "detail" || s.mode === "options") && s.filter !== "") return `filter "${s.filter}" · `;
   return "";
 }

@@ -143,18 +143,21 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 
 `duckwright --tui` opens a workspace in the terminal. You queue tasks, start several at once, and watch each step's goal, actions, results, and running cost live. Pass the usual options (`--model`, `--max-steps`, ...) as defaults for every task, and `--max-parallel N` to cap concurrent runs.
 
-**Past runs.** Runs saved in `runs/` appear in the sidebar with a muted name, newest `--past N` of them (default 20). They are read-only: select one to see its timeline, and press `⏎` to run it again with the current flags.
+**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, export, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
+
+**Past runs.** Runs saved in `runs/` appear in the sidebar with a muted name, newest `--past N` of them (default 20). They are read-only: select one to see its timeline, and press `space` to run it again with the current flags.
 
 **Filter.** Press `/` and type to narrow the sidebar by task name. `⏎` keeps the filter, `esc` clears it.
 
 **Themes.** `--theme auto` picks dark or light from `COLORFGBG`; `COLORTERM=truecolor` enables the full-colour palette. With `NO_COLOR` set, no colours are used and the focused pane gets a bold border instead.
 
-Five keys to learn first:
+Six keys to learn first:
 
 | Key | Does |
 | --- | --- |
 | `a` | Add a task |
-| `⏎` | Start the selected task |
+| `space` | Start the selected task |
+| `⏎` | Show the selected task's details |
 | `p` | Pause or resume it |
 | `s` | Stop it |
 | `q` | Quit (asks first if runs are active) |

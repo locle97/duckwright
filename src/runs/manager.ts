@@ -17,6 +17,8 @@ export type TaskId = number;
 export type TaskState = "idle" | "running" | "paused" | "passed" | "failed" | "stopping" | "stopped";
 export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; export?: boolean; snapshot?: SnapshotMode }
 export interface Effective { model: string; maxSteps: number; headed: boolean; export: boolean; snapshot: SnapshotMode }
+/** The options every task's next run starts from: `base` is the defaults and flags, `overrides` the edits on top. */
+export interface Globals { base: Effective; overrides: Overrides }
 export type TaskSource = { kind: "typed" } | { kind: "file"; path: string };
 /** One submission of the add box: mentioned paths in order, and the leftover typed task. */
 export interface Submission { mentions: string[]; typed: string | null }
@@ -36,7 +38,8 @@ export type ManagerEvent =
   | { type: "task:added"; task: TaskSnapshot }
   | { type: "task:updated"; task: TaskSnapshot }
   | { type: "task:removed"; taskId: TaskId }
-  | { type: "toast"; level: "info" | "error"; message: string };
+  | { type: "toast"; level: "info" | "error"; message: string }
+  | { type: "globals:updated"; globals: Globals };
 export type StartResult = { ok: true; runId: string } | { ok: false; reason: string };
 
 export interface ManagerLike {
@@ -45,6 +48,8 @@ export interface ManagerLike {
   addTyped(text: string): TaskId;
   add(sub: Submission): AddResult;
   setOverrides(id: TaskId, o: Overrides): void;
+  globals(): Globals;
+  setGlobals(o: Overrides): void;
   remove(id: TaskId): boolean;
   start(id: TaskId): StartResult;
   pause(id: TaskId): void;
@@ -74,6 +79,10 @@ export function taskName(text: string, max = 40): string {
   const first = [...(text.split(/\r?\n/)[0] ?? "")];
   const body = first.length > max ? [...first.slice(0, Math.max(0, max - 1)), "…"] : first;
   return `"${body.join("")}"`;
+}
+
+function effectiveOf(a: RunArgs): Effective {
+  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, export: a.export, snapshot: a.snapshot };
 }
 
 interface RunRecord {
@@ -115,6 +124,8 @@ export class RunManager implements ManagerLike {
   /** Removed tasks that ran: out of the list, but their runs stay in the quit summary. */
   #retired: Task[] = [];
   #nextId = 1;
+  /** Global options: above the flags and front matter, below each task's own overrides. */
+  #globals: Overrides = {};
   /** Set by stopAll: no run starts after quitting began. */
   #closing = false;
   #listeners: Array<(e: ManagerEvent) => void> = [];
@@ -201,6 +212,19 @@ export class RunManager implements ManagerLike {
     if (!task) return;
     task.overrides = { ...o };
     this.#updated(task);
+  }
+
+  globals(): Globals {
+    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill);
+    if (parsed.kind !== "args") throw new Error("argv does not describe a run");
+    return { base: effectiveOf(parsed.args), overrides: { ...this.#globals } };
+  }
+
+  /** Replace the global options; every task's effective settings follow. */
+  setGlobals(o: Overrides): void {
+    this.#globals = { ...o };
+    this.#emit({ type: "globals:updated", globals: this.globals() });
+    for (const t of this.#tasks) this.#updated(t);
   }
 
   remove(id: TaskId): boolean {
@@ -353,12 +377,13 @@ export class RunManager implements ManagerLike {
     const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, task.fileSettings);
     if (parsed.kind !== "args") throw new Error("argv does not describe a run");
     const args = { ...parsed.args };
-    const o = task.overrides;
-    if (o.model !== undefined) args.model = o.model;
-    if (o.maxSteps !== undefined) args.maxSteps = o.maxSteps;
-    if (o.headed !== undefined) args.headed = o.headed;
-    if (o.export !== undefined) args.export = o.export;
-    if (o.snapshot !== undefined) args.snapshot = o.snapshot;
+    for (const o of [this.#globals, task.overrides]) {
+      if (o.model !== undefined) args.model = o.model;
+      if (o.maxSteps !== undefined) args.maxSteps = o.maxSteps;
+      if (o.headed !== undefined) args.headed = o.headed;
+      if (o.export !== undefined) args.export = o.export;
+      if (o.snapshot !== undefined) args.snapshot = o.snapshot;
+    }
     return args;
   }
 
@@ -368,7 +393,7 @@ export class RunManager implements ManagerLike {
     const snap: TaskSnapshot = {
       id: task.id, text: task.text, name: task.name, source: { ...task.source }, state: task.state,
       overrides: { ...task.overrides },
-      effective: { model: a.model, maxSteps: a.maxSteps, headed: a.headed, export: a.export, snapshot: a.snapshot },
+      effective: effectiveOf(a),
       error: task.error, runId: latest ? latest.handle.id : (task.past?.id ?? null), runCount: task.runs.length,
       createdAt: task.createdAt,
     };

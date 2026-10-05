@@ -86,6 +86,38 @@ test("manager_layering_flags_then_overrides", () => {
   assert.equal(eff.maxSteps, 7);
 });
 
+test("manager_globals_layering", () => {
+  const { mgr, events } = setup({ argv: ["--model", "opus", "--max-steps", "9"] });
+  const a = mgr.addTyped("a");
+  const b = mgr.addTyped("b");
+  mgr.setOverrides(b, { model: "haiku" });
+  assert.deepEqual(mgr.globals(), {
+    base: { model: "opus", maxSteps: 9, headed: false, export: false, snapshot: "hybrid" }, overrides: {},
+  });
+  events.length = 0;
+  mgr.setGlobals({ model: "sonnet", headed: true });
+  assert.deepEqual(mgr.globals().overrides, { model: "sonnet", headed: true });
+  assert.equal(mgr.globals().base.model, "opus", "the base stays the flags");
+  assert.equal(mgr.effectiveArgs(a).model, "sonnet", "globals beat the flags");
+  assert.equal(mgr.effectiveArgs(a).maxSteps, 9);
+  assert.equal(mgr.effectiveArgs(a).headed, true);
+  assert.equal(mgr.effectiveArgs(b).model, "haiku", "a task's own options beat the globals");
+  assert.equal(mgr.list()[0].effective.model, "sonnet");
+  assert.deepEqual(events.map((e) => e.type), ["globals:updated", "task:updated", "task:updated"]);
+  const g = events[0];
+  assert.ok(g.type === "globals:updated" && g.globals.overrides.model === "sonnet");
+});
+
+test("manager_globals_beat_front_matter", () => {
+  const dir = tree({ "f.md": "---\nmodel: opus\n---\nThe body" });
+  const { mgr } = setup({ cwd: dir });
+  mgr.add({ mentions: [`${dir}/f.md`], typed: null });
+  mgr.setGlobals({ model: "haiku" });
+  assert.equal(mgr.list()[0].effective.model, "haiku");
+  mgr.setGlobals({});
+  assert.equal(mgr.list()[0].effective.model, "opus");
+});
+
 test("manager_preflight_failure_keeps_idle", () => {
   const { mgr, fakes, events } = setup({ preflight: () => "no browser" });
   const id = mgr.addTyped("t");
