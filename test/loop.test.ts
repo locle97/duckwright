@@ -4,6 +4,9 @@ import { test } from "node:test";
 
 import { BrainError } from "../src/brain.ts";
 import type { Decision } from "../src/brain.ts";
+import { RunControl } from "../src/control.ts";
+import { RunEvents } from "../src/events.ts";
+import type { RunEvent } from "../src/events.ts";
 import { Agent } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { ProcResult } from "../src/proc.ts";
@@ -291,4 +294,90 @@ test("brain failure after an abort is an interrupt", async () => {
   const a = agent(new FakePW(), brain, { signal: ac.signal });
   await assert.rejects(a.run(), AbortedError);
   assert.equal(a.costUsd, 0.1);
+});
+
+const done = () => dec([["done", ["success", "x"]]]);
+const collect = (events: RunEvents) => {
+  const seen: RunEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  return seen;
+};
+
+test("loop_event_order_normal_step", async () => {
+  const events = new RunEvents();
+  const seen = collect(events);
+  await agent(new FakePW(), new FakeBrain([done()]), { events }).run();
+  assert.deepEqual(seen.map((e) => e.type), [
+    "step:start", "phase", "phase", "decision", "phase", "action:start", "action:result", "step:end",
+  ]);
+  assert.deepEqual(seen.flatMap((e) => (e.type === "phase" ? [e.phase] : [])), ["observing", "thinking", "acting"]);
+});
+
+test("loop_event_order_brain_error", async () => {
+  const events = new RunEvents();
+  const seen = collect(events);
+  await agent(new FakePW(), new FakeBrain([new BrainError("x", 0.25), done()]), { events }).run();
+  const first = seen.slice(0, 5);
+  assert.deepEqual(first.map((e) => e.type), ["step:start", "phase", "phase", "brain:error", "step:end"]);
+  const [, , , be, end] = first;
+  assert.ok(be.type === "brain:error" && be.failures === 1 && be.cost === 0.25);
+  assert.ok(end.type === "step:end" && end.cost === 0.25);
+});
+
+test("loop_step_costs_sum", async () => {
+  const events = new RunEvents();
+  const seen = collect(events);
+  const r = await agent(new FakePW(), new FakeBrain([new BrainError("x", 0.25), dec([["hover", ["e1"]]]), done()]), { events }).run();
+  const sum = seen.reduce((s, e) => s + (e.type === "step:end" ? e.cost : 0), 0);
+  assert.equal(sum, r.costUsd);
+});
+
+test("loop_pause_holds_before_observe", async () => {
+  const events = new RunEvents();
+  const seen = collect(events);
+  const control = new RunControl(new AbortController(), events);
+  const pw = new SnapCounter();
+  control.pause();
+  const p = agent(pw, new FakeBrain([done()]), { events, control }).run();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pw.snaps, 0);
+  assert.ok(!seen.some((e) => e.type === "step:start"));
+  control.resume();
+  assert.equal((await p).success, true);
+});
+
+class SnapCounter extends FakePW {
+  snaps = 0;
+  override async snapshot(p: string): Promise<string> {
+    this.snaps += 1;
+    return super.snapshot(p);
+  }
+}
+
+test("loop_step_runs_exactly_one", async () => {
+  const events = new RunEvents();
+  const seen = collect(events);
+  const control = new RunControl(new AbortController(), events);
+  control.pause();
+  const brain = new FakeBrain([dec([["hover", ["e1"]]]), done()]);
+  const p = agent(new FakePW(), brain, { events, control }).run();
+  control.step();
+  while (!seen.some((e) => e.type === "step:end")) await new Promise((r) => setImmediate(r));
+  assert.equal(control.state, "paused");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(seen.filter((e) => e.type === "step:start").length, 1);
+  control.resume();
+  await p;
+});
+
+test("loop_stop_while_paused_aborts", async () => {
+  const ac = new AbortController();
+  const control = new RunControl(ac);
+  const pw = new FakePW();
+  control.pause();
+  const p = agent(pw, new FakeBrain([done()]), { control, signal: ac.signal }).run();
+  await new Promise((r) => setImmediate(r));
+  control.stop();
+  await assert.rejects(p, AbortedError);
+  assert.equal(pw.closed, 1);
 });

@@ -55,48 +55,53 @@ export interface Executed {
   done: { success: boolean; answer: string } | null;
 }
 
+export interface ExecuteHooks {
+  start?(index: number): void;
+  result?(index: number, result: string, code: string | null): void;
+}
+
 /**
  * Run allowed actions. If `codes` is given, it is extended with one entry per
  * action: the Playwright code playwright-cli ran for it, or null if none ran.
  */
 export async function execute(
-  pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[],
+  pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
   let skip: string | null = null;
   const ran = new Map<number, string>();
-  for (const [i, a] of actions.entries()) {
+  const handle = async (i: number, a: Action): Promise<void> => {
     const rejected = rejection(a);
     if (rejected !== null) {
       results.push(rejected);
-      continue;
+      return;
     }
     if (skip) {
       results.push(skip);
-      continue;
+      return;
     }
     if (a.cmd === "done") {
       if (!a.args.length || (a.args[0] !== "success" && a.args[0] !== "failure")) {
         const got = a.args.map((x) => JSON.stringify(x)).join(", ");
         results.push(`error: done needs ["success"|"failure", "<answer>"], got [${got}]`);
-        continue;
+        return;
       }
       const success = a.args[0] === "success";
       if (success && results.some((r) => r.startsWith("error:"))) {
         results.push(EARLIER_FAILED);
-        continue;
+        return;
       }
       done = { success, answer: a.args.length > 1 ? a.args[1] : "" };
       results.push("done");
       skip = "skipped: done";
-      continue;
+      return;
     }
     if (a.cmd === "expect") {
       const [result, code] = await runExpect(pw, a.args);
       results.push(clip(result));
       if (code !== null) ran.set(i, code);
-      continue;
+      return;
     }
     const res = await pw.run(a.cmd, a.args);
     if (res.code === 0) {
@@ -110,6 +115,11 @@ export async function execute(
     if (PAGE_CHANGING.has(a.cmd) && (res.code === 0 || res.code === -1)) {
       skip = "skipped: page may have changed";
     }
+  };
+  for (const [i, a] of actions.entries()) {
+    hooks?.start?.(i);
+    await handle(i, a);
+    hooks?.result?.(i, results[results.length - 1], ran.get(i) ?? null);
   }
   codes?.push(...actions.map((_, i) => ran.get(i) ?? null));
   return { results, done };
