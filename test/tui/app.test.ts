@@ -269,3 +269,32 @@ test("from_ink_maps_keys", () => {
   assert.equal(fromInk("", { ...NO_KEY, delete: true }).name, "delete");
   assert.equal(fromInk("", { ...NO_KEY, tab: true, shift: true }).shift, true);
 });
+
+test("app_keys_without_rerender_between_them", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1" })]);
+  m.active = 1;
+  const quits: Array<Error | undefined> = [];
+  const r = render(h(App, { manager: m, size: { columns: 100, rows: 24 }, tickMs: 10, onQuit: (e?: Error) => quits.push(e), onForceExit: () => {} }));
+  await settle();
+  for (const k of ["a", "h", "e", "l", "l", "o", "\r", "x", "\r"]) r.stdin.write(k);
+  await settle();
+  assert.deepEqual(m.log, ["addTyped:hello", "addTyped:x"]);
+  r.stdin.write("\x1b"); // alone: Ink reads an escape followed at once by "q" as alt+q
+  await settle();
+  for (const k of ["q", "y"]) r.stdin.write(k);
+  await settle();
+  assert.deepEqual(m.log.slice(2), ["stopAll"]);
+  assert.deepEqual(quits, [undefined]);
+});
+
+test("app_manager_throw_on_key_stops_all", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1" })]);
+  m.pause = () => {
+    throw new Error("pause exploded");
+  };
+  const t = mount(m);
+  await settle();
+  await t.type("p");
+  assert.deepEqual(m.log, ["stopAll", "onQuit"]);
+  assert.equal(t.quits[0]?.message, "pause exploded");
+});

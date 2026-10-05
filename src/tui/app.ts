@@ -2,7 +2,7 @@
 // runs the keymap's commands, and lays the panes out for the terminal size.
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { Key as InkKey } from "ink";
-import { Component, createElement as h, useEffect, useReducer, useRef } from "react";
+import { Component, createElement as h, useEffect, useReducer, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { ManagerLike } from "../runs/manager.ts";
@@ -19,7 +19,7 @@ import type { Command } from "./keys.ts";
 import { sanitize } from "./sanitize.ts";
 import { Sidebar } from "./sidebar.ts";
 import { initialState, reduce } from "./state.ts";
-import type { ViewState } from "./state.ts";
+import type { UiAction, ViewState } from "./state.ts";
 import { ROLE } from "./theme.ts";
 import { Toasts } from "./toast.ts";
 
@@ -56,9 +56,19 @@ export function fromInk(input: string, key: InkKey): KeyPress {
 
 function Workspace(p: AppProps): ReactElement {
   const { manager } = p;
-  const [s, dispatch] = useReducer(reduce, undefined, () => initialState(Date.now(), manager.list()));
-  const state = useRef<ViewState>(s);
-  state.current = s;
+  // The view state lives in a ref that `dispatch` updates at once, so a key that arrives before
+  // React re-renders (held keys, split pastes) is mapped against the state the previous key left.
+  const state = useRef<ViewState | null>(null);
+  if (state.current === null) state.current = initialState(Date.now(), manager.list());
+  const s = state.current;
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const dispatch = (a: UiAction): void => {
+    state.current = reduce(state.current ?? s, a);
+    rerender();
+  };
+  // A synchronous throw while running a key's commands is rethrown in render, for the crash guard.
+  const [thrown, setThrown] = useState<Error | null>(null);
+  if (thrown !== null) throw thrown;
   const toastsSeen = useRef(0);
   const quitting = useRef(false);
   const terminal = useWindowSize();
@@ -118,7 +128,11 @@ function Workspace(p: AppProps): ReactElement {
   };
 
   useInput((input, key) => {
-    for (const c of keymap(fromInk(input, key), state.current, manager.activeCount())) run(c);
+    try {
+      for (const c of keymap(fromInk(input, key), state.current ?? s, manager.activeCount())) run(c);
+    } catch (e) {
+      setThrown(e instanceof Error ? e : new Error(String(e)));
+    }
   });
 
   if (columns < MIN_COLUMNS || rows < MIN_ROWS) {
