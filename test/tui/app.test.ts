@@ -542,6 +542,17 @@ test("app_past_task_shows_timeline", async () => {
   assert.doesNotMatch(f, /running/);
 });
 
+test("app_past_run_id_is_sanitized", async () => {
+  const d = decision("open the page", [["goto", "https://x.test"]]);
+  const events = [ev.start(), ev.step(1), ev.decision(1, d, 0.25), ev.stepEnd(1, d, ["ok"]), ev.end({ ...OUTCOME, steps: 1 })];
+  const id = "20261001-100000-b\x1b[31mX";
+  const m = new FakeManager([snapshot(1, "Past one", { runId: id, past: { runId: id, events } })]);
+  const t = mount(m);
+  await settle();
+  assert.doesNotMatch(t.frame(), /\x1b/);
+  assert.match(t.frame(), /past run 20261001-100000-b/);
+});
+
 test("app_filter_narrows_sidebar", async () => {
   const m = new FakeManager([snapshot(1, "alpha"), snapshot(2, "beta"), snapshot(3, "gamma")]);
   const t = mount(m);

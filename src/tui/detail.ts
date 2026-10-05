@@ -60,7 +60,7 @@ function runHeader(t: TaskSnapshot, run: RunView, now: number, theme: Theme): Re
   const icon = theme.taskIcon(state);
   const last = run.steps[run.steps.length - 1];
   const paused = run.pausedMs + (run.pausedSince !== null ? now - run.pausedSince : 0);
-  const first = run.past ? `past run ${run.runId}` : `step ${last ? last.step : 0}/${run.maxSteps}`;
+  const first = run.past ? `past run ${sanitize(run.runId)}` : `step ${last ? last.step : 0}/${run.maxSteps}`;
   const parts = [first, `$${run.cost.toFixed(3)}`];
   if (run.outcome === null) parts.push(duration(now - run.startedAt - paused));
   if (run.pausedSince !== null) parts.push(`paused ${duration(paused)}`);

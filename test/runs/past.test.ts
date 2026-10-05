@@ -186,3 +186,16 @@ test("past_task_source", () => {
   }
   assert.deepEqual(e.source, { kind: "file", path: "t.md" });
 });
+
+test("past_run_end_outcome_validated", () => {
+  const good = lines(startEv(), endEv(outcome()));
+  assert.equal(readEventsJsonl(good)?.length, 2);
+  const bad = (o: unknown) => JSON.stringify(startEv()) + "\n" + JSON.stringify({ type: "run:end", at: 2, outcome: o }) + "\n";
+  assert.equal(readEventsJsonl(JSON.stringify({ type: "run:end", at: 1 }) + "\n"), null);
+  assert.equal(readEventsJsonl(bad({ ...outcome(), status: "weird" })), null);
+  assert.equal(readEventsJsonl(bad({ ...outcome(), costUsd: "1" })), null);
+  assert.equal(readEventsJsonl(bad({ ...outcome(), steps: null })), null);
+  assert.equal(readEventsJsonl(bad({ ...outcome(), warnings: "x" })), null);
+  const step = JSON.stringify({ type: "step:start", at: 1, step: "1" });
+  assert.equal(readEventsJsonl(step + "\n" + JSON.stringify(endEv(outcome())) + "\n"), null);
+});

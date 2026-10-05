@@ -46,11 +46,11 @@ export interface AppProps {
   tickMs?: number;
   /** Aborting it quits as a confirmed quit does: stop every run, then leave. */
   quitSignal?: AbortSignal;
-  /** After quit, after stopAll on a confirmed quit, or after a render crash (with its error). */
   /** Colours; default the dark 16-colour theme. */
   theme?: Theme;
   /** Shown as info toasts at start. */
   notices?: string[];
+  /** After quit, after stopAll on a confirmed quit, or after a render crash (with its error). */
   onQuit(error?: Error): void;
   onForceExit(): void;
 }

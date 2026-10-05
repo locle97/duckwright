@@ -58,6 +58,17 @@ function validHistory(d: unknown): d is HistoryData {
     && isStrings(h.results));
 }
 
+function validOutcome(o: unknown): boolean {
+  if (!isObject(o)) return false;
+  if (o.status !== "pass" && o.status !== "fail" && o.status !== "stop") return false;
+  if (o.exitCode !== 0 && o.exitCode !== 1 && o.exitCode !== 130) return false;
+  if (typeof o.success !== "boolean" || typeof o.answer !== "string") return false;
+  if (typeof o.steps !== "number" || typeof o.costUsd !== "number") return false;
+  if (o.historyPath !== null && typeof o.historyPath !== "string") return false;
+  if (o.error !== null && typeof o.error !== "string") return false;
+  return isObject(o.export) && isStrings(o.warnings);
+}
+
 /** Parse an events.jsonl; null unless every line is a RunEvent and the last is run:end. */
 export function readEventsJsonl(text: string): RunEvent[] | null {
   const ls = text.split("\n");
@@ -72,9 +83,13 @@ export function readEventsJsonl(text: string): RunEvent[] | null {
       return null;
     }
     if (!isObject(v) || typeof v.type !== "string" || !EVENT_TYPES.has(v.type) || typeof v.at !== "number") return null;
+    if (v.type !== "run:start" && v.type !== "run:end" && v.type !== "control" && v.type !== "step:end"
+      && typeof v.step !== "number") return null;
+    if (v.type === "step:end" && !(isObject(v.record) && typeof v.record.step === "number")) return null;
     out.push(v as unknown as RunEvent);
   }
-  return out[out.length - 1].type === "run:end" ? out : null;
+  const last = out[out.length - 1];
+  return last.type === "run:end" && validOutcome(last.outcome) ? out : null;
 }
 
 export function outcomeFromHistory(h: HistoryData, historyPath: string): RunOutcome {
