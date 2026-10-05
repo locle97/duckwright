@@ -10,9 +10,12 @@ const settle = (ms = 60): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 class FakeStdin extends EventEmitter {
   isTTY = true;
+  isRaw = false;
   #data: string | null = null;
   setEncoding(): void {}
-  setRawMode(): void {}
+  setRawMode(mode: boolean): void {
+    this.isRaw = mode;
+  }
   resume(): void {}
   pause(): void {}
   ref(): void {}
@@ -102,11 +105,16 @@ test("starttui_restore_idempotent", async () => {
 test("starttui_crash_prints_error_before_done", async () => {
   const broken = { ...snapshot(1, "First"), effective: undefined } as unknown as ReturnType<typeof snapshot>;
   const t = setup(new FakeManager([broken]));
+  let errAtDone = "";
+  void t.handle.done.then(() => {
+    errAtDone = t.stderr.writes.join("");
+  });
   await t.handle.done;
+  await settle(0);
   const err = t.stderr.writes.join("");
+  assert.match(errAtDone, /tui error: /);
   assert.match(err, /tui error: /);
   assert.equal(restores(t.stdout), 1);
-  assert.ok(t.stdout.writes.lastIndexOf(RESTORE) < t.stdout.writes.length);
 });
 
 test("starttui_sigint_during_crash_window_force_exits", async () => {
@@ -123,17 +131,44 @@ test("starttui_sigint_during_crash_window_force_exits", async () => {
 test("starttui_setup_failure_restores_terminal", () => {
   const stdout = new FakeOut();
   const before = process.listenerCount("SIGINT");
-  // Ink enters the alternate screen first, then subscribes to resizes: fail there.
-  stdout.on = (): never => {
-    throw new Error("setup failed");
-  };
+  // Ink reads the window size while constructing, in or out of CI: fail there.
+  Object.defineProperty(stdout, "columns", {
+    get(): never {
+      throw new Error("setup failed");
+    },
+  });
   assert.throws(() => startTui({
     manager: new FakeManager(),
     stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
     stdout: stdout as unknown as NodeJS.WriteStream,
     stderr: new FakeOut() as unknown as NodeJS.WriteStream,
   }), /setup failed/);
-  assert.equal(stdout.writes[0], "\x1b[?1049h");
   assert.equal(restores(stdout), 1);
   assert.equal(process.listenerCount("SIGINT"), before);
+});
+
+test("starttui_sigint_while_healthy_does_not_exit", async () => {
+  const t = setup();
+  await settle();
+  assert.equal(t.stdin.isRaw, true);
+  process.emit("SIGINT");
+  assert.deepEqual(t.exits, []);
+  assert.equal(restores(t.stdout), 0);
+  t.stdin.type("q");
+  await t.handle.done;
+});
+
+test("starttui_force_exit_survives_throwing_unmount", async () => {
+  const broken = { ...snapshot(1, "First"), effective: undefined } as unknown as ReturnType<typeof snapshot>;
+  const m = new FakeManager([broken]);
+  m.stopAllResult = new Promise(() => {});
+  const t = setup(m);
+  await settle();
+  // Ink unsubscribes from resizes while unmounting: make that throw.
+  t.stdout.off = (): never => {
+    throw new Error("unmount failed");
+  };
+  assert.throws(() => process.emit("SIGINT"), /exit sentinel/);
+  assert.deepEqual(t.exits, [130]);
+  assert.equal(restores(t.stdout), 1);
 });

@@ -33,7 +33,12 @@ export function startTui(o: StartTuiOptions): TuiHandle {
 
   // After a render crash the app takes no keys, so Ink drops raw mode and a Ctrl-C reaches the
   // process as SIGINT. Treat it as a force exit, so the terminal is never left on the alternate screen.
-  const onSigint = (): void => forceExit();
+  // While the app is healthy stdin is raw, so any SIGINT then is an outside signal and is left to
+  // bin.ts's clean abort.
+  const onSigint = (): void => {
+    if (stdin.isRaw === true) return;
+    forceExit();
+  };
   const stopWatchingSigint = (): void => {
     process.off("SIGINT", onSigint);
   };
@@ -41,7 +46,11 @@ export function startTui(o: StartTuiOptions): TuiHandle {
   let instance: ReturnType<typeof render> | null = null;
   const forceExit = (): void => {
     stopWatchingSigint();
-    instance?.unmount();
+    try {
+      instance?.unmount();
+    } catch {
+      // The terminal is restored and the process exits regardless.
+    }
     restoreTerminal();
     exit(130);
   };
