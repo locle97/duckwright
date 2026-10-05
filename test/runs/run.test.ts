@@ -191,3 +191,31 @@ test("run_makerundir_failure_settles", async () => {
   assert.ok(o.error);
   assert.equal(ends.length, 1);
 });
+
+test("run_writes_events_jsonl", async () => {
+  const { spec, deps } = setup(agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()], 0.5); }));
+  const h = startRun(spec, deps);
+  const seen: RunEvent[] = [];
+  h.events.subscribe((e) => seen.push(e));
+  await h.done;
+  const lines = fs.readFileSync(path.join(h.workdir, "events.jsonl"), "utf8").trimEnd().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines, JSON.parse(JSON.stringify(seen)));
+  assert.equal(lines[lines.length - 1].type, "run:end");
+});
+
+test("run_failing_sink_keeps_outcome", async () => {
+  const body = async (opts: AgentOptions) => { step(opts, rec()); return result(true, [rec()], 0.5); };
+  const warnings: string[] = [];
+  const bad = setup((opts) => {
+    fs.mkdirSync(path.join(opts.workdir, "events.jsonl"));
+    return agentWith(body)(opts);
+  });
+  bad.deps.onWarning = (m) => warnings.push(m);
+  const good = setup(agentWith(body));
+  const { historyPath: _a, ...o1 } = await startRun(bad.spec, bad.deps).done;
+  const { historyPath: _b, ...o2 } = await startRun(good.spec, good.deps).done;
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].startsWith("could not write "));
+  assert.ok(warnings[0].includes("events.jsonl"));
+  assert.deepEqual(o1, o2);
+});
