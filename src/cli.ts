@@ -1,42 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
-import { Brain } from "./brain.ts";
 import { ExportError, exportRun } from "./export.ts";
-import type { HistoryData } from "./export.ts";
 import { Agent } from "./loop.ts";
-import type { AgentOptions, RunResult } from "./loop.ts";
-import { pageDir } from "./observe.ts";
+import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
-import { AbortedError } from "./proc.ts";
-import { stepLine } from "./prompt.ts";
-import type { StepRecord } from "./prompt.ts";
-import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
-import { makeRunDir } from "./rundir.ts";
+import { attachPlain, printOutcome } from "./report/plain.ts";
+import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
+import type { AgentLike, PromptPaths } from "./runs/run.ts";
 import { fixed4 } from "./text.ts";
 import { TaskFileError, loadTaskFile, taskPaths } from "./taskfile.ts";
 
-export interface PromptPaths {
-  system: string;
-  defaultSkill: string;
-  // How the agent reads the page: pasted into the prompt, or grepped from the saved file.
-  snapshotFull: string;
-  snapshotGrep: string;
-  snapshotHybrid: string;
-}
-
-// ../prompts from both src/ (tests) and dist/ (installed).
-const PROMPTS_DIR = fileURLToPath(new URL("../prompts/", import.meta.url));
-export const PROMPTS: PromptPaths = {
-  system: path.join(PROMPTS_DIR, "system.md"),
-  defaultSkill: path.join(PROMPTS_DIR, "playwright-cli.md"),
-  snapshotFull: path.join(PROMPTS_DIR, "snapshot-full.md"),
-  snapshotGrep: path.join(PROMPTS_DIR, "snapshot-grep.md"),
-  snapshotHybrid: path.join(PROMPTS_DIR, "snapshot-hybrid.md"),
-};
+export { PROMPTS, historyJson };
+export type { AgentLike, PromptPaths };
 
 export function version(): string {
   try {
@@ -45,11 +23,6 @@ export function version(): string {
   } catch {
     return "unknown";
   }
-}
-
-export interface AgentLike {
-  costUsd: number;
-  run(): Promise<RunResult>;
 }
 
 export interface CliDeps {
@@ -111,36 +84,6 @@ function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
   return preflight(deps, args.skill, statePath(args));
 }
 
-export function historyJson(
-  task: string, success: boolean, answer: string, steps: number, costUsd: number,
-  history: StepRecord[], taskFile: string | null = null,
-): HistoryData {
-  return {
-    task,
-    task_file: taskFile,
-    success,
-    answer,
-    steps,
-    cost_usd: costUsd,
-    history: history.map((r) => ({
-      step: r.step,
-      evaluation_previous_goal: r.decision.evaluationPreviousGoal,
-      memory: r.decision.memory,
-      next_goal: r.decision.nextGoal,
-      actions: r.decision.actions.map((a, i) => ({
-        cmd: a.cmd,
-        args: [...a.args],
-        code: i < r.codes.length ? r.codes[i] : null,
-      })),
-      results: [...r.results],
-    })),
-  };
-}
-
-function writeHistory(file: string, data: HistoryData): void {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
 function exportSpec(deps: CliDeps, run: string, out: string | null = null): string {
   const { path: p, warnings } = exportRun(run, out);
   for (const w of warnings) deps.stderr(`warning: ${w}`);
@@ -171,65 +114,11 @@ function exportMain(deps: CliDeps, argv: string[]): number {
 async function runOne(
   deps: CliDeps, args: RunArgs, taskFile: string | null,
 ): Promise<[code: number, history: string, cost: number]> {
-  const task = args.task!;
-  const workdir = makeRunDir("runs", taskFile);
-  const historyPath = path.join(workdir, "history.json");
-  const collected: StepRecord[] = [];
-  const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
-  const brain = new Brain({
-    systemFiles: [deps.prompts.system, modeMd, args.skill],
-    model: args.model,
-    snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
-    signal: deps.signal,
-  });
-  const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal: deps.signal });
-  const agent = deps.createAgent({
-    task, pw, brain, workdir,
-    maxSteps: args.maxSteps, headed: args.headed, state: statePath(args),
-    onStep: (rec) => {
-      collected.push(rec);
-      deps.stdout(stepLine(rec));
-    },
-    snapshotMode: args.snapshot,
-    signal: deps.signal,
-  });
-  const fail = (answer: string, code: number): [number, string, number] => {
-    writeHistory(historyPath, historyJson(task, false, answer, collected.length, agent.costUsd, collected, taskFile));
-    deps.stderr(answer);
-    return [code, historyPath, agent.costUsd];
-  };
-
-  let result: RunResult;
-  try {
-    result = await agent.run();
-  } catch (e) {
-    // Ctrl-C reaches the child too, so its failure can arrive before the abort does.
-    if (e instanceof AbortedError || deps.signal.aborted) return fail("interrupted", 130);
-    if (e instanceof PlaywrightError) return fail(`playwright error: ${e.message}`, 1);
-    return fail(e instanceof Error ? `error: ${e.name}: ${e.message}` : `error: ${String(e)}`, 1);
-  }
-
-  writeHistory(historyPath, historyJson(
-    task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile,
-  ));
-  deps.stdout(`Result: ${result.success ? "success" : "failure"}`);
-  deps.stdout(`Answer: ${result.answer}`);
-  deps.stdout(`Steps: ${result.steps}  Cost: $${fixed4(result.costUsd)}`);
-  deps.stdout(`History: ${historyPath}`);
-  if (args.export) {
-    if (!result.success) {
-      deps.stdout("Test: not exported (run did not succeed)");
-    } else {
-      try {
-        deps.stdout(`Test: ${exportSpec(deps, workdir)}`);
-      } catch (e) {
-        // The run itself succeeded; a failed export does not change that.
-        if (!(e instanceof ExportError)) throw e;
-        deps.stderr(`export failed: ${e.message}`);
-      }
-    }
-  }
-  return [result.success ? 0 : 1, historyPath, result.costUsd];
+  const handle = startRun({ task: args.task!, taskFile, args }, deps);
+  attachPlain(handle.events, deps.stdout);
+  const o = await handle.done;
+  printOutcome(o, deps.stdout, deps.stderr);
+  return [o.exitCode, o.historyPath ?? "-", o.costUsd];
 }
 
 /** Preflight every task, then run them in order and print a summary. */

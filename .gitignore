@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-runs/
+/runs/
 *.egg-info/
 .playwright-cli/
 auth.json

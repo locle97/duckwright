@@ -99,7 +99,7 @@ test("playwright_error_history_shape", async () => {
     codes: ["await page.getByRole('button', { name: 'Go' }).click();"],
   };
   const createAgent = agentWith(async (opts) => {
-    opts.onStep!(r);
+    opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
     throw new PlaywrightError("snapshot died");
   });
   assert.equal(await main(e.argv, e.deps({ createAgent })), 1);
@@ -137,7 +137,8 @@ test("abort writes interrupted history and exits 130", async () => {
   const e = env();
   const ac = new AbortController();
   const createAgent = agentWith(async (opts, agent) => {
-    assert.equal(opts.signal, ac.signal);
+    // The agent gets a per-run signal that follows the process one.
+    assert.equal(opts.signal!.aborted, false);
     agent.costUsd = 0.02;
     ac.abort();
     throw new AbortedError();
@@ -331,7 +332,7 @@ function fakeRun(success = true, actions?: Action[], codes?: (string | null)[]) 
   const acts = actions ?? [{ cmd: "goto", args: ["u"] }, { cmd: "expect", args: ["url", "u"] }];
   const r = rec(acts, acts.map(() => "ok"), codes ?? [GOTO, EXPECT]);
   return agentWith(async (opts) => {
-    opts.onStep!(r);
+    opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
     return result(success, [r]);
   });
 }
