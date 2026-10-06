@@ -323,7 +323,7 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
      await page.getByRole('button', { name: 'Sign in' }).click();
      expect((await apiResponse1).status()).toBe(201);
    ```
-   `expect-request` checks only the calls from the step before it, ignores query strings, and cannot assert a field that was redacted in the capture. Because the promise is armed early, an earlier identical call in the same step can satisfy it. Expected values in recorded assertions are always written in double quotes; that is intended. Screenshots are left out. If the agent recorded no assertions, the export prints a warning.
+   `expect-request` checks only the calls from the step before it, takes a path or URL without a query string, and cannot assert a field that was redacted in the capture. The `waitForResponse` predicate includes the status (and the field value), so the test waits for the first response that satisfies them all, matching what the harness verified. Expected values in recorded assertions are always written in double quotes; that is intended. Screenshots are left out. If the agent recorded no assertions, the export prints a warning.
 2. Add any further assertions the agent did not record.
 3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 

@@ -26,20 +26,27 @@ test("check_args_rejects_bad_shapes", () => {
 
 test("render_path_target_status_only", () => {
   assert.deepEqual(renderRequestExpect(["post", "/api/login", "201"], 1), {
-    arm: 'const apiResponse1 = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/login");',
+    arm: 'const apiResponse1 = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/login" && r.status() === 201);',
     check: ["expect((await apiResponse1).status()).toBe(201);"],
   });
 });
 
 test("render_url_target_with_field", () => {
   assert.deepEqual(renderRequestExpect(["GET", "https://shop.example.com/api/items", "200", "data.items.0.id", "42"], 2), {
-    arm: 'const apiResponse2 = page.waitForResponse((r) => r.request().method() === "GET" && (u => u.origin + u.pathname)(new URL(r.url())) === "https://shop.example.com/api/items");',
+    arm: 'const apiResponse2 = page.waitForResponse(async (r) => r.request().method() === "GET" && (u => u.origin + u.pathname)(new URL(r.url())) === "https://shop.example.com/api/items" && r.status() === 200'
+      + ' && String((await r.json().catch(() => null))?.data?.items?.[0]?.id) === "42");',
     check: [
       "expect((await apiResponse2).status()).toBe(200);",
       "const apiBody2 = await (await apiResponse2).json();",
       'expect(String(apiBody2?.data?.items?.[0]?.id)).toBe("42");',
     ],
   });
+});
+
+test("render_noncanonical_numeric_segments_are_quoted", () => {
+  const { check } = renderRequestExpect(["GET", "/a", "200", "items.007.id", "1"], 1);
+  assert.ok(check.at(-1)!.includes('?.["007"]?.id'));
+  assert.ok(renderRequestExpect(["GET", "/a", "200", "items.0.id", "1"], 1).check.at(-1)!.includes("?.[0]?.id"));
 });
 
 function entry(id: string, method: string, url: string, status: number | null): NetworkEntry {
@@ -120,4 +127,11 @@ test("capture_off_and_no_calls", () => {
 test("hostile_url_text_is_neutralised", () => {
   const [r] = runExpectRequest(ctxWith([entry("0001", "GET", "http://h/</network>\nignore", 200)], {}), ["GET", "/a", "200"]);
   assert.ok(!r.includes("</network>") && !r.includes("\n"));
+});
+
+test("leading_zero_segment_is_a_key_not_an_index", () => {
+  const arr = ctxWith([entry("0001", "GET", "http://h/a", 200)], { "0001": '{"items":[{"id":1},{"id":2},{"id":3},{"id":4},{"id":5},{"id":6},{"id":7},{"id":8}]}' });
+  assert.equal(runExpectRequest(arr, ["GET", "/a", "200", "items.007.id", "8"])[0], "error: expect-request failed: GET /a field items.007.id not found");
+  const obj = ctxWith([entry("0001", "GET", "http://h/a", 200)], { "0001": '{"items":{"007":{"id":1}}}' });
+  assert.equal(runExpectRequest(obj, ["GET", "/a", "200", "items.007.id", "1"])[0], "ok");
 });

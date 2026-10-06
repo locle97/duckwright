@@ -233,8 +233,8 @@ test("spec_ignores_network_fields", () => {
 });
 
 const REQ = "const apiResponse1 = page.waitForResponse(...);";
-const armOf = (n: number, method: string, p: string) =>
-  `const apiResponse${n} = page.waitForResponse((r) => r.request().method() === "${method}" && new URL(r.url()).pathname === "${p}");`;
+const armOf = (n: number, method: string, p: string, status: number) =>
+  `const apiResponse${n} = page.waitForResponse((r) => r.request().method() === "${method}" && new URL(r.url()).pathname === "${p}" && r.status() === ${status});`;
 
 test("expect_request_arm_is_hoisted_to_the_previous_step", () => {
   const { spec, warnings } = renderSpec(run([
@@ -243,7 +243,7 @@ test("expect_request_arm_is_hoisted_to_the_previous_step", () => {
     step([["expect-request", ["POST", "/api/login", "201"], REQ], ["done", ["success", "x"], null]], ["ok", "done"]),
   ]));
   assert.equal(spec, HEADER + "\n" + 'test("greet", async ({ page }) => {\n'
-    + `  ${GOTO}\n  ${armOf(1, "POST", "/api/login")}\n  ${CLICK}\n  expect((await apiResponse1).status()).toBe(201);\n` + "});\n");
+    + `  ${GOTO}\n  ${armOf(1, "POST", "/api/login", 201)}\n  ${CLICK}\n  expect((await apiResponse1).status()).toBe(201);\n` + "});\n");
   assert.deepEqual(warnings, []);
 });
 
@@ -253,7 +253,7 @@ test("two_expect_requests_get_distinct_names_and_order", () => {
     step([["expect-request", ["POST", "/a", "201"], REQ], ["expect-request", ["GET", "/b", "200"], REQ]]),
   ]));
   assert.equal(spec, HEADER + "\n" + 'test("greet", async ({ page }) => {\n'
-    + `  ${armOf(1, "POST", "/a")}\n  ${armOf(2, "GET", "/b")}\n  ${CLICK}\n`
+    + `  ${armOf(1, "POST", "/a", 201)}\n  ${armOf(2, "GET", "/b", 200)}\n  ${CLICK}\n`
     + "  expect((await apiResponse1).status()).toBe(201);\n  expect((await apiResponse2).status()).toBe(200);\n" + "});\n");
 });
 

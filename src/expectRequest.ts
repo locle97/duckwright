@@ -37,9 +37,12 @@ export function checkRequestArgs(args: string[]): string | null {
   return null;
 }
 
+// A leading zero would be an octal or invalid literal in the spec, so only canonical integers are bare.
+const CANONICAL_INDEX = /^(0|[1-9]\d*)$/;
+
 function accessor(seg: string): string {
   if (/^[A-Za-z_$][\w$]*$/.test(seg)) return `?.${seg}`;
-  if (/^\d+$/.test(seg)) return `?.[${seg}]`;
+  if (CANONICAL_INDEX.test(seg)) return `?.[${seg}]`;
   return `?.[${q(seg)}]`;
 }
 
@@ -54,16 +57,24 @@ export function renderRequestExpect(args: string[], n: number): { arm: string; c
     ? `new URL(r.url()).pathname === ${q(target)}`
     : `(u => u.origin + u.pathname)(new URL(r.url())) === ${q(url.origin + url.pathname)}`;
   const res = `apiResponse${n}`;
+  const accessors = field === undefined ? "" : field.split(".").map(accessor).join("");
+  // The predicate carries every condition the harness verified, so the promise resolves on the
+  // call that satisfies them, not merely the first one to match method and path.
+  const matchStatus = `${urlTest} && r.status() === ${status}`;
+  const predicate = field === undefined
+    ? `(r) => r.request().method() === ${q(method.toUpperCase())} && ${matchStatus}`
+    : `async (r) => r.request().method() === ${q(method.toUpperCase())} && ${matchStatus}`
+      + ` && String((await r.json().catch(() => null))${accessors}) === ${q(expected)}`;
   const check = [`expect((await ${res}).status()).toBe(${status});`];
   if (field !== undefined) {
     const body = `apiBody${n}`;
     check.push(
       `const ${body} = await (await ${res}).json();`,
-      `expect(String(${body}${field.split(".").map(accessor).join("")})).toBe(${q(expected)});`,
+      `expect(String(${body}${accessors})).toBe(${q(expected)});`,
     );
   }
   return {
-    arm: `const ${res} = page.waitForResponse((r) => r.request().method() === ${q(method.toUpperCase())} && ${urlTest});`,
+    arm: `const ${res} = page.waitForResponse(${predicate});`,
     check,
   };
 }
@@ -107,7 +118,7 @@ function readField(workdir: string, id: string, field: string): { value: string 
   }
   for (const seg of field.split(".")) {
     if (isSecretKey(seg)) return { problem: `field ${field} is redacted in the capture; it cannot be asserted` };
-    if (Array.isArray(cur) && /^\d+$/.test(seg)) cur = cur[Number(seg)];
+    if (Array.isArray(cur) && CANONICAL_INDEX.test(seg)) cur = cur[Number(seg)];
     else if (typeof cur === "object" && cur !== null && Object.hasOwn(cur, seg)) cur = (cur as Record<string, unknown>)[seg];
     else return { problem: `field ${field} not found` };
     if (cur === undefined) return { problem: `field ${field} not found` };
