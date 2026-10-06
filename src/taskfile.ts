@@ -15,6 +15,7 @@ export type TaskSettings = Partial<{
   session: string;
   state: string;
   export: boolean;
+  network: boolean;
   snapshot: SnapshotMode;
 }>;
 
@@ -30,6 +31,7 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   session: ["session", "str"],
   state: ["state", "path"],
   export: ["export", "bool"],
+  network: ["network", "bool"],
   snapshot: ["snapshot", "snapshot"],
 };
 const FENCE = "---";

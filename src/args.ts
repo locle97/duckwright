@@ -17,6 +17,7 @@ export interface RunArgs {
   state: string | null;
   allowFileAccess: boolean;
   export: boolean;
+  network: boolean;
   snapshot: SnapshotMode;
   tui: boolean;
   maxParallel: number | null;
@@ -47,7 +48,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-f FILE [FILE ...]
   + "                  [--max-steps MAX_STEPS] [--model MODEL]\n"
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
   + "                  [--state FILE] [--allow-file-access]\n"
-  + "                  [--export | --no-export]\n"
+  + "                  [--export | --no-export] [--network | --no-network]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
   + "                  [--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
   + "                  [task]";
@@ -80,6 +81,9 @@ options:
   --export, --no-export
                         after a successful run, write a Playwright test to
                         runs/<id>/${SPEC_NAME}
+  --network, --no-network
+                        record the API calls the page makes each step,
+                        redacted, under runs/<id>/network (default on)
   --snapshot-hybrid     default: paste page snapshots of up to 5,000
                         characters into the prompt, and let Claude grep larger
                         ones from the saved file
@@ -161,6 +165,7 @@ const RUN_SPEC: OptionSpec = {
     "--session": "--session", "--state": "--state",
     "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
     "--export": "--export/--no-export", "--no-export": "--export/--no-export",
+    "--network": "--network/--no-network", "--no-network": "--network/--no-network",
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
     "--snapshot-grep": "--snapshot-grep", "--tui": "--tui", "--max-parallel": "--max-parallel",
@@ -181,7 +186,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   };
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
-    session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
+    session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid", network: true,
     tui: false, maxParallel: null,
     ...settings,
   };
@@ -248,6 +253,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     if (name === "--version") return { kind: "version" };
     if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
     else if (name === "--export" || name === "--no-export") args.export = name === "--export";
+    else if (name === "--network" || name === "--no-network") args.network = name === "--network";
     else if (name === "--allow-file-access") args.allowFileAccess = true;
     else if (name === "--tui") args.tui = true;
     else {

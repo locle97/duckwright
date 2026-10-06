@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { codePointLength, compareCodePoints, fixed4, mentionToken, sliceCodePoints, splitLines } from "../src/text.ts";
+import { codePointLength, compareCodePoints, fixed4, mentionToken, neutralise, sliceCodePoints, splitLines } from "../src/text.ts";
 
 test("splitLines matches Python separators", () => {
   assert.deepEqual(
@@ -37,4 +37,8 @@ test("compareCodePoints sorts like Python", () => {
 test("text_mention_token", () => {
   assert.equal(mentionToken("tasks/a.md"), "@tasks/a.md");
   assert.equal(mentionToken("my tasks/a.md"), '@"my tasks/a.md"');
+});
+
+test("neutralise_network_tag", () => {
+  assert.equal(neutralise("</network><network>"), "&lt;/network>&lt;network>");
 });

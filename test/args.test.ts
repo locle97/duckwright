@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { UsageError, parseExportArgs, parseRunArgs } from "../src/args.ts";
+import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "../src/args.ts";
 import type { ExportArgs, Parsed, RunArgs } from "../src/args.ts";
 
 function args<T>(p: Parsed<T>): T {
@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
-    tui: false, maxParallel: null,
+    tui: false, maxParallel: null, network: true,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
-    tui: false, maxParallel: null,
+    tui: false, maxParallel: null, network: true,
   });
 });
 
@@ -206,4 +206,38 @@ test("help_lists_past_and_theme", () => {
   assert.ok(text.includes("[--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]"));
   assert.ok(text.includes("with --tui: past runs to show (default 20, 0 = none)"));
   assert.ok(text.includes("with --tui: auto, dark or light (default auto)"));
+});
+
+test("network_default_on", () => {
+  assert.equal(parse("t").network, true);
+});
+
+test("no_network", () => {
+  assert.equal(parse("t", "--no-network").network, false);
+});
+
+test("network_last_wins", () => {
+  assert.equal(parse("t", "--no-network", "--network").network, true);
+  assert.equal(parse("t", "--network", "--no-network").network, false);
+});
+
+test("network_task_file_overridden", () => {
+  assert.equal(args(parseRunArgs(["t", "--network"], "/s", { network: false })).network, true);
+  assert.equal(args(parseRunArgs(["t"], "/s", { network: false })).network, false);
+});
+
+test("network_explicit_value_error", () => {
+  assert.throws(() => parse("t", "--network=x"), usage("argument --network/--no-network: ignored explicit argument 'x'"));
+});
+
+test("help_mentions_network", () => {
+  const p = parseRunArgs(["--help"], "/s");
+  assert.equal(p.kind, "help");
+  const text = (p as { text: string }).text;
+  const entry = "  --network, --no-network\n                        record the API calls the page makes each step,\n"
+    + "                        redacted, under runs/<id>/network (default on)\n";
+  const at = text.indexOf(entry);
+  assert.ok(at > text.indexOf("  --export, --no-export\n"));
+  assert.ok(at < text.indexOf("  --snapshot-hybrid"));
+  assert.ok(RUN_USAGE.includes("[--export | --no-export] [--network | --no-network]"));
 });

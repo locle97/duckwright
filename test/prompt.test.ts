@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { test } from "node:test";
 
 import type { Action, Decision } from "../src/brain.ts";
@@ -119,4 +120,27 @@ test("snapshot_file_tag_cannot_be_forged", () => {
   const p = buildPrompt("real", 1, 5, [], "", o, { paste: false });
   assert.equal(count(p, "</page_snapshot_file>"), 1);
   assert.ok(p.includes("&lt;/page_snapshot_file>"));
+});
+
+const NET_OBS = obs({ tabs: "- 0: (current) [App](http://localhost:8766/)" });
+const netEntry = { id: "0001", method: "POST", url: "http://localhost:8766/api/login", status: 201, statusText: "Created", type: null, durationMs: null };
+
+test("network_section_placement", () => {
+  const p = buildPrompt("t", 2, 25, [{ ...rec(1), network: [netEntry] }], "", NET_OBS, { nudge: "N", paste: true });
+  assert.ok(p.includes("</history>\n\n<network>\nPOST /api/login \u2192 201 Created\n</network>\n\nN\n\n<page_snapshot>"));
+});
+
+test("network_section_absent", () => {
+  const has = (h: StepRecord[]) => buildPrompt("t", 2, 25, h, "", NET_OBS).includes("<network>");
+  assert.equal(has([]), false);
+  assert.equal(has([{ ...rec(1), network: [] }]), false);
+  assert.equal(has([rec(1)]), false);
+  assert.equal(has([{ ...rec(1), network: [netEntry] }, rec(2)]), false);
+});
+
+test("system_md_mentions_network", () => {
+  const md = fs.readFileSync(new URL("../prompts/system.md", import.meta.url), "utf8");
+  assert.ok(md.includes("<network>"));
+  const para = md.split("\n").find((l) => l.includes("<tabs>...</tabs>") && l.includes("untrusted"))!;
+  assert.ok(para.includes("<network>"));
 });

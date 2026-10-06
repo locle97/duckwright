@@ -88,6 +88,8 @@ export function historyJson(
         code: i < r.codes.length ? r.codes[i] : null,
       })),
       results: [...r.results],
+      ...(r.network ? { network: r.network } : {}),
+      ...(r.networkErrors?.length ? { network_errors: [...r.networkErrors] } : {}),
     })),
   };
 }
@@ -151,7 +153,7 @@ async function execute(
     agent = deps.createAgent({
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
-      snapshotMode: args.snapshot,
+      snapshotMode: args.snapshot, network: args.network,
       signal, events, control,
     });
     events.emit({
