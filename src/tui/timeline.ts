@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 
 import type { RunOutcome } from "../events.ts";
 import { fixed4 } from "../text.ts";
+import { callFailed, formatCall, MAX_CALLS } from "./netline.ts";
 import { sanitize } from "./sanitize.ts";
 import type { RunView, StepView } from "./state.ts";
 import { PHASE_LABEL, spinnerFrame } from "./theme.ts";
@@ -50,6 +51,15 @@ function detailRows(v: StepView, i: number, now: number, theme: Theme): Line[] {
     else if (a.result !== null) items.push([`${action} → `, sanitize(a.result)]);
     else items.push([h(Text, { color: theme.role.muted }, action)]);
   });
+  v.network.slice(0, MAX_CALLS).forEach((c) => {
+    const text = sanitize(formatCall(c));
+    items.push([label("net  "), callFailed(c) ? h(Text, { color: theme.role.error }, text) : text]);
+  });
+  if (v.network.length > MAX_CALLS) items.push([label("net  "), `…and ${v.network.length - MAX_CALLS} more`]);
+  if (v.networkErrors.length > 0) {
+    const more = v.networkErrors.length > 1 ? ` (+${v.networkErrors.length - 1} more)` : "";
+    items.push([h(Text, { color: theme.role.error }, `net error  ${sanitize(v.networkErrors[0]!)}${more}`)]);
+  }
   if (v.error !== null) items.push([h(Text, { color: theme.role.error }, `error  ${sanitize(v.error)}`)]);
   return items.map((parts, j) => ({
     key: `s${i}d${j}`, step: i, el: row(`  ${j === items.length - 1 ? "└" : "├"} `, ...parts),
