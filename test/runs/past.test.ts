@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import type { HistoryData } from "../../src/export.ts";
-import { loadPastRuns, readEventsJsonl } from "../../src/runs/past.ts";
+import { eventsFromHistory, loadPastRuns, readEventsJsonl } from "../../src/runs/past.ts";
 import { historyJson } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
 
@@ -251,4 +251,15 @@ test("past_loads_history_with_network", () => {
   const r = loadPastRuns({ runsDir: runs, limit: 5 });
   assert.equal(r.runs.length, 1);
   assert.equal(r.skipped, 0);
+});
+
+test("past_events_from_history_carry_network", () => {
+  const h = hist();
+  const entry = { id: "0001", method: "GET", url: "http://h/", status: 200, statusText: "OK", type: "fetch", durationMs: 1 };
+  h.history[0].network = [entry];
+  h.history[0].network_errors = ["requests: x"];
+  const end = eventsFromHistory(h, "/w", 1).filter((e) => e.type === "step:end") as Extract<RunEvent, { type: "step:end" }>[];
+  assert.deepEqual(end[0].record.network, [entry]);
+  assert.deepEqual(end[0].record.networkErrors, ["requests: x"]);
+  if (end.length > 1) assert.equal(end[1].record.network, undefined);
 });
