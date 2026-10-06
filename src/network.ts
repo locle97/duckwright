@@ -1,6 +1,11 @@
+import fs from "node:fs";
 import path from "node:path";
 
+import { AbortedError } from "./proc.ts";
+import type { PlaywrightCLI } from "./pw.ts";
+import { redactBody, redactHeaders, redactUrl } from "./redact.ts";
 import type { Header } from "./redact.ts";
+import { codePointLength, sliceCodePoints } from "./text.ts";
 
 export type { Header } from "./redact.ts";
 
@@ -105,4 +110,137 @@ export function parseRequestDetails(stdout: string, n: number): RequestDetails {
     }
   }
   return d;
+}
+
+function clip(s: string): string {
+  return codePointLength(s) > 300 ? sliceCodePoints(s, 300) : s;
+}
+
+function message(r: { stdout: string; stderr: string }): string {
+  return clip(r.stderr.trim() || r.stdout.trim());
+}
+
+/** Runs one command; returns stdout on exit 0, else records "<label>: <message>" and returns null. */
+async function runCmd(pw: PlaywrightCLI, cmd: string, args: string[], label: string, errors: string[]): Promise<string | null> {
+  try {
+    const r = await pw.run(cmd, args);
+    if (r.code === 0) return r.stdout;
+    errors.push(`${label}: ${message(r)}`);
+  } catch (e) {
+    if (e instanceof AbortedError) throw e;
+    errors.push(`${label}: ${clip(e instanceof Error ? e.message : String(e))}`);
+  }
+  return null;
+}
+
+export async function clearRequests(pw: PlaywrightCLI): Promise<string | null> {
+  const errors: string[] = [];
+  await runCmd(pw, "requests", ["--clear"], "requests --clear", errors);
+  return errors[0] ?? null;
+}
+
+function contentType(headers: Header[]): string | null {
+  return headers.find((h) => h.name.toLowerCase() === "content-type")?.value ?? null;
+}
+
+function emptyDetails(): RequestDetails {
+  return { type: null, mimeType: null, durationMs: null, requestHeaders: [], responseHeaders: [], hasRequestBody: false, hasResponseBody: false };
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+export async function captureStep(
+  pw: PlaywrightCLI, workdir: string, step: number, nextId: number,
+): Promise<{ entries: NetworkEntry[]; errors: string[]; nextId: number }> {
+  const entries: NetworkEntry[] = [];
+  const errors: string[] = [];
+  const listOut = await runCmd(pw, "requests", [], "requests", errors);
+  const listed = listOut === null ? [] : parseRequestList(listOut);
+
+  for (const l of listed) {
+    const id = requestId(nextId++);
+    const dir = path.join(networkDir(workdir), id);
+    let d = emptyDetails();
+    const detailsOut = await runCmd(pw, "request", [String(l.n)], `request ${l.n}`, errors);
+    if (detailsOut !== null) d = parseRequestDetails(detailsOut, l.n);
+
+    let dirOk = true;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      dirOk = false;
+      errors.push(`write ${id}: ${errMsg(e)}`);
+    }
+
+    const write = (name: string, data: string | Buffer): void => {
+      try {
+        fs.writeFileSync(path.join(dir, name), data);
+      } catch (e) {
+        errors.push(`write ${id}: ${errMsg(e)}`);
+      }
+    };
+
+    let requestBody = "";
+    let responseFile: { name: string; data: string | Buffer } | null = null;
+    if (dirOk) {
+      if (d.hasRequestBody) {
+        const out = await runCmd(pw, "request-body", [String(l.n)], `request-body ${l.n}`, errors);
+        if (out !== null) requestBody = stripResult(out).replace(/\r?\n$/, "");
+      }
+      if (d.hasResponseBody) {
+        const raw = path.join(dir, "response-body.raw");
+        const out = await runCmd(pw, "response-body", [String(l.n), `--filename=${raw}`], `response-body ${l.n}`, errors);
+        if (out !== null) {
+          try {
+            if (!fs.existsSync(raw)) {
+              errors.push(`response-body ${l.n}: no file written`);
+            } else {
+              const bytes = fs.readFileSync(raw);
+              if (bytes.length > 0) {
+                let text: string | null = null;
+                if (!bytes.includes(0)) {
+                  try {
+                    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+                  } catch {
+                    text = null;
+                  }
+                }
+                if (text !== null) {
+                  responseFile = { name: "response-body.txt", data: redactBody(text, contentType(d.responseHeaders)) };
+                } else {
+                  fs.renameSync(raw, path.join(dir, "response-body.bin"));
+                }
+              }
+            }
+          } catch (e) {
+            errors.push(`write ${id}: ${errMsg(e)}`);
+          } finally {
+            try {
+              fs.rmSync(raw, { force: true, recursive: true });
+            } catch {
+              // best effort
+            }
+          }
+        }
+      }
+    }
+
+    const url = redactUrl(l.url);
+    if (dirOk) {
+      write("request.json", JSON.stringify({ id, step, method: l.method, url, headers: redactHeaders(d.requestHeaders) }, null, 2));
+      write("response.json", JSON.stringify({
+        status: l.status, statusText: l.statusText, type: d.type, mimeType: d.mimeType,
+        durationMs: d.durationMs, headers: redactHeaders(d.responseHeaders),
+      }, null, 2));
+      if (requestBody !== "") write("request-body.txt", redactBody(requestBody, contentType(d.requestHeaders)));
+      if (responseFile) write(responseFile.name, responseFile.data);
+    }
+    entries.push({ id, method: l.method, url, status: l.status, statusText: l.statusText, type: d.type, durationMs: d.durationMs });
+  }
+
+  const clearErr = await clearRequests(pw);
+  if (clearErr !== null) errors.push(clearErr);
+  return { entries, errors, nextId };
 }
