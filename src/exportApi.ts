@@ -34,6 +34,26 @@ function readHeaders(file: string): Header[] | null {
   }
 }
 
+const bad = (what: string): never => {
+  throw new ExportError(`not a duckwright history: invalid network entry: ${what}`, 2);
+};
+
+/** The step's network entries, checked: history.json is user-editable, and entries reach generated code. */
+function networkOf(rec: { network?: unknown }): NetworkEntry[] {
+  if (rec.network === undefined) return [];
+  if (!Array.isArray(rec.network)) return bad("'network' must be a list");
+  for (const en of rec.network as unknown[]) {
+    if (typeof en !== "object" || en === null) return bad("'network' entries must be objects");
+    const e = en as Record<string, unknown>;
+    if (typeof e.id !== "string") bad("'id' must be a string");
+    if (typeof e.method !== "string") bad("'method' must be a string");
+    if (typeof e.url !== "string") bad("'url' must be a string");
+    if (e.status !== null && !Number.isInteger(e.status)) bad("'status' must be an integer or null");
+    if (e.type !== null && typeof e.type !== "string") bad("'type' must be a string or null");
+  }
+  return rec.network as NetworkEntry[];
+}
+
 /** Render a successful run's captured API calls as a @playwright/test spec using `request`. */
 export function renderApiSpec(data: HistoryData, runDir: string): { spec: string; warnings: string[] } {
   if (!data.success) throw new ExportError("run did not succeed; only successful runs can be exported", 1);
@@ -42,7 +62,7 @@ export function renderApiSpec(data: HistoryData, runDir: string): { spec: string
   let n = 0;
   let authRedacted = false;
   for (const rec of data.history) {
-    for (const en of (rec.network ?? []) as NetworkEntry[]) {
+    for (const en of networkOf(rec)) {
       if (en.type === null || !API_TYPES.has(en.type)) continue;
       if (en.status === null) {
         warnings.push(`call ${en.id} ${en.method} failed in the capture; skipped`);

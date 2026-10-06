@@ -115,3 +115,20 @@ test("redactions_warn_and_never_leak", () => {
   assert.match(warnings.join("\n"), /body.*\[REDACTED\]/);
   assert.match(warnings.join("\n"), /url.*\[REDACTED\]/i);
 });
+
+const badHistory = (re: RegExp) => (e: unknown) => e instanceof ExportError && e.exitCode === 2 && re.test(e.message);
+
+test("malformed_network_entries_rejected_with_exit_2", () => {
+  const bad = (network: unknown) => {
+    const data = run([]);
+    data.history = [{ step: 1, evaluation_previous_goal: "", memory: "", next_goal: "", actions: [], results: [], network } as never];
+    return () => renderApiSpec(data, tmpDir());
+  };
+  const ok = entry("0001", "GET", "http://a/x", 200);
+  assert.throws(bad({ a: 1 }), badHistory(/network/));
+  assert.throws(bad([{ ...ok, status: "200); require('fs'); (1" }]), badHistory(/status/));
+  assert.throws(bad([{ ...ok, method: undefined }]), badHistory(/method/));
+  assert.throws(bad([{ ...ok, url: 5 }]), badHistory(/url/));
+  assert.throws(bad([{ ...ok, id: null }]), badHistory(/id/));
+  assert.throws(bad([null]), badHistory(/network/));
+});
