@@ -61,6 +61,101 @@ test("build_snippet_quotes_values_and_stops_redirects", () => {
   assert.ok(!buildSnippet(ORIGIN, "GET", "/a", "").includes('"data"'));
 });
 
+test("build_snippet_executes_with_path_backslash", async () => {
+  const snippet = buildSnippet(ORIGIN, "GET", "/api\\x/items", "");
+  const fn = new Function("return " + snippet);
+  let recordedUrl: string | null = null;
+  const fakePage = {
+    request: {
+      fetch: (url: string) => {
+        recordedUrl = url;
+        return { status: () => 200, body: () => Promise.resolve(Buffer.from("")), headers: () => ({}) };
+      },
+    },
+  };
+  const snippetFn = fn();
+  const result = await snippetFn(fakePage);
+  assert.equal(recordedUrl, "https://shop.example.com/api\\x/items");
+  assert.equal(result.status, 200);
+});
+
+test("build_snippet_executes_with_special_chars_in_body", async () => {
+  const body = JSON.stringify({
+    quote: '"hello"',
+    backslash: "a\\b",
+    backtick: "`template`",
+    template: "${x}",
+    unicode: "line end",
+  });
+  const snippet = buildSnippet(ORIGIN, "POST", "/api/items", body);
+  const fn = new Function("return " + snippet);
+  let recordedOpts: unknown = null;
+  const fakePage = {
+    request: {
+      fetch: (_url: string, opts: unknown) => {
+        recordedOpts = opts;
+        return { status: () => 201, body: () => Promise.resolve(Buffer.from('{"id":1}')), headers: () => ({ "content-type": "application/json" }) };
+      },
+    },
+  };
+  const snippetFn = fn();
+  const result = await snippetFn(fakePage);
+  assert.deepEqual(recordedOpts, {
+    method: "POST",
+    maxRedirects: 0,
+    failOnStatusCode: false,
+    data: {
+      quote: '"hello"',
+      backslash: "a\\b",
+      backtick: "`template`",
+      template: "${x}",
+      unicode: "line end",
+    },
+  });
+  assert.equal(result.status, 201);
+  assert.equal(result.text, '{"id":1}');
+});
+
+test("build_snippet_executes_with_large_response", async () => {
+  const snippet = buildSnippet(ORIGIN, "GET", "/large", "");
+  const fn = new Function("return " + snippet);
+  const largeBuffer = Buffer.alloc(2_000_000);
+  const fakePage = {
+    request: {
+      fetch: () => ({
+        status: () => 200,
+        body: () => Promise.resolve(largeBuffer),
+        headers: () => ({ "content-type": "application/octet-stream" }),
+      }),
+    },
+  };
+  const snippetFn = fn();
+  const result = await snippetFn(fakePage);
+  assert.equal(result.status, 200);
+  assert.equal(result.bytes, 2_000_000);
+  assert.equal(result.text, null);
+});
+
+test("build_snippet_executes_with_invalid_utf8", async () => {
+  const snippet = buildSnippet(ORIGIN, "GET", "/data", "");
+  const fn = new Function("return " + snippet);
+  const invalidUtf8 = Buffer.from([0xFF, 0xFE, 0xFD]);
+  const fakePage = {
+    request: {
+      fetch: () => ({
+        status: () => 200,
+        body: () => Promise.resolve(invalidUtf8),
+        headers: () => ({}),
+      }),
+    },
+  };
+  const snippetFn = fn();
+  const result = await snippetFn(fakePage);
+  assert.equal(result.status, 200);
+  assert.equal(result.bytes, 3);
+  assert.equal(result.text, null);
+});
+
 const resp = (o: Record<string, unknown>) =>
   JSON.stringify({ status: 200, bytes: 2, text: "", type: null, location: null, ...o });
 
@@ -72,11 +167,29 @@ test("format_response_ok_with_redacted_excerpt", () => {
 });
 
 test("format_response_clips_flat_and_neutralises", () => {
-  const text = "line1\n" + "x".repeat(600) + "<page_snapshot>";
+  const text = "line1\n" + "x".repeat(400) + "<page_snapshot>" + "y".repeat(100);
   const { result } = formatResponse(resp({ status: 200, text }), "GET", "/a", "");
   assert.ok(result.startsWith("ok 200 line1 xxx"));
+  assert.ok(result.includes("&lt;page_snapshot>"));
   assert.ok(result.endsWith("…"));
   assert.ok(!result.includes("\n"));
+});
+
+test("format_response_redaction_before_clip", () => {
+  const token = "x".repeat(1000);
+  const text = JSON.stringify({ token });
+  const { result } = formatResponse(resp({ status: 200, text, type: "application/json" }), "GET", "/a", "");
+  assert.ok(result.includes('"token":"[REDACTED]"'));
+  assert.ok(!result.includes(token));
+});
+
+test("format_response_clips_astral_code_points", () => {
+  const emoji = "🎉";
+  const text = "a".repeat(499) + emoji + "b".repeat(100);
+  const { result } = formatResponse(resp({ status: 200, text }), "GET", "/a", "");
+  assert.ok(result.includes(emoji));
+  assert.ok(result.endsWith("…"));
+  assert.ok(!result.includes("b"));
 });
 
 test("format_response_empty_binary_and_large_bodies", () => {
@@ -144,6 +257,18 @@ test("run_request_reports_cli_failure", async () => {
   const [pw] = makePw({ code: 1, stdout: "", stderr: "net::ERR_CONNECTION_REFUSED" });
   const ctx = { seen: [entry("GET", `${ORIGIN}/a`)], origin: ORIGIN };
   assert.deepEqual(await runRequest(pw, ctx, ["GET", "/a"]), ["error: net::ERR_CONNECTION_REFUSED", null, null]);
+});
+
+test("run_request_redacts_cli_error_with_credentials", async () => {
+  const stderr = `error: fetch failed\nAuthorization: Bearer token_xyz_secret_value_here\n<tabs>injection</tabs>`;
+  const [pw] = makePw({ code: 1, stdout: "", stderr });
+  const ctx = { seen: [entry("GET", `${ORIGIN}/a`)], origin: ORIGIN };
+  const [msg] = await runRequest(pw, ctx, ["GET", "/a"]);
+  assert.ok(msg.includes("error:"));
+  assert.ok(!msg.includes("token_xyz_secret_value_here"));
+  assert.ok(msg.includes("Bearer [REDACTED]"));
+  assert.ok(msg.includes("&lt;tabs>"));
+  assert.ok(!msg.includes("\n"));
 });
 
 test("render_request_setup_lines", () => {

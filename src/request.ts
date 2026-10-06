@@ -1,7 +1,7 @@
 import { cliError } from "./expect.ts";
 import type { NetworkEntry } from "./network.ts";
 import type { PlaywrightCLI } from "./pw.ts";
-import { redactBody } from "./redact.ts";
+import { redactBody, redactText } from "./redact.ts";
 import { codePointLength, flat, neutralise, sliceCodePoints } from "./text.ts";
 
 export const REQUEST_METHODS: readonly string[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -138,7 +138,11 @@ export async function runRequest(
     return [`error: request ${method} ${path} was not seen on this site in this run; do it through the page first`, null, null];
   }
   const res = await pw.run("run-code", [buildSnippet(ctx.origin, method, path, body), "--raw"]);
-  if (res.code !== 0) return [cliError(res), null, null];
+  if (res.code !== 0) {
+    const error = cliError(res);
+    const redacted = "error: " + neutralise(flat(redactText(error.slice(7))));
+    return [redacted, null, null];
+  }
   const { result, ok } = formatResponse(res.stdout, method, path, expected);
   return ok ? [result, `request ${method} ${path}`, ctx.origin] : [result, null, null];
 }
