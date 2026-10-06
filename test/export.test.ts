@@ -312,3 +312,93 @@ test("export_run_api_refuses_overwriting_history", () => {
 test("export_run_api_without_calls_exits_1", () => {
   assert.throws(() => exportRun(writeRun(tmpDir(), GREET), null, true), exportError(1, /no API calls/));
 });
+
+const ORIGIN = "https://shop.example.com";
+const reqStep = (args: string[], result: string, origin: string | null = ORIGIN) => ({
+  ...step([["request", args, "request x"]], [result]),
+  request_origins: [origin],
+});
+
+test("request_before_ui_is_exported_as_setup", () => {
+  const { spec, warnings } = renderSpec(run([
+    reqStep(["POST", "/api/items", '{"title":"x"}'], 'ok 201 {"id":7}'),
+    step([["goto", ["https://example.com/"], GOTO]]),
+    step([["expect", [], EXPECT]]),
+  ]));
+  assert.ok(spec.includes("  // setup: POST /api/items\n"));
+  assert.ok(spec.includes('  const apiRequest1 = await page.request.fetch("https://shop.example.com/api/items", { method: "POST", maxRedirects: 0, data: {"title":"x"} });\n'));
+  assert.ok(spec.includes("  expect(apiRequest1.status()).toBe(201);\n"));
+  assert.ok(spec.indexOf("// setup:") < spec.indexOf("page.goto"));
+  assert.ok(warnings.some((w) => /storageState/.test(w)));
+});
+
+test("expected_status_arg_wins_over_the_recorded_status", () => {
+  const { spec } = renderSpec(run([
+    reqStep(["POST", "/api/items", "{}", "202"], "ok 202"),
+    step([["goto", ["u"], GOTO]]),
+  ]));
+  assert.ok(spec.includes("toBe(202)"));
+});
+
+test("request_after_a_ui_action_fails_the_export", () => {
+  assert.throws(() => renderSpec(run([
+    step([["goto", ["u"], GOTO]]),
+    reqStep(["POST", "/api/items", "{}"], "ok 201"),
+  ])), exportError(1, /request in step 2 comes after a UI action in step 1/));
+});
+
+test("request_after_only_expect_or_screenshot_is_fine", () => {
+  const { spec } = renderSpec(run([
+    step([["expect", [], EXPECT], ["screenshot", [], null]]),
+    reqStep(["GET", "/api/items"], "ok 200"),
+    step([["goto", ["u"], GOTO]]),
+  ]));
+  assert.ok(spec.includes("// setup: GET /api/items"));
+});
+
+test("ui_action_that_errored_or_was_skipped_does_not_count", () => {
+  const { spec } = renderSpec(run([
+    step([["click", ["e1"], null]], ["error: no such element"]),
+    reqStep(["GET", "/api/items"], "ok 200"),
+    step([["goto", ["u"], GOTO]]),
+  ]));
+  assert.ok(spec.includes("// setup: GET /api/items"));
+});
+
+test("failed_request_is_skipped_with_a_warning", () => {
+  const failed = { ...step([["request", ["POST", "/api/items", "{}"], null]], ["error: request POST /api/items returned 500 boom"]), request_origins: [null] };
+  const { spec, warnings } = renderSpec(run([failed, step([["goto", ["u"], GOTO]])]));
+  assert.ok(!spec.includes("setup:"));
+  assert.ok(warnings.some((w) => /request in step 1 failed/.test(w)));
+});
+
+test("request_without_a_recorded_origin_is_skipped_with_a_warning", () => {
+  const { spec, warnings } = renderSpec(run([
+    reqStep(["GET", "/api/items"], "ok 200", null),
+    step([["goto", ["u"], GOTO]]),
+  ]));
+  assert.ok(!spec.includes("setup:"));
+  assert.ok(warnings.some((w) => /no recorded origin/.test(w)));
+});
+
+test("request_with_secret_body_warns", () => {
+  const { warnings } = renderSpec(run([
+    reqStep(["POST", "/api/login", '{"user":"a","password":"hunter2"}'], "ok 200"),
+    step([["goto", ["u"], GOTO]]),
+  ]));
+  assert.ok(warnings.some((w) => /request in step 1 has a body; check it for secrets/.test(w)));
+});
+
+test("request_with_invalid_args_is_skipped_with_a_warning", () => {
+  const { spec, warnings } = renderSpec(run([
+    reqStep(["GET", "/a?x=1"], "ok 200"),
+    step([["goto", ["u"], GOTO]]),
+  ]));
+  assert.ok(!spec.includes("setup:"));
+  assert.ok(warnings.some((w) => /request with invalid arguments skipped/.test(w)));
+});
+
+test("request_only_run_has_code_but_no_assertions_warning", () => {
+  const { warnings } = renderSpec(run([reqStep(["GET", "/api/items"], "ok 200")]));
+  assert.ok(warnings.includes(NO_ASSERTIONS));
+});
