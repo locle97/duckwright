@@ -31,6 +31,7 @@ export interface HistoryStep {
   results: string[];
   network?: NetworkEntry[];
   network_errors?: string[];
+  request_origins?: (string | null)[];
 }
 
 /** The shape of a run's history.json. */
