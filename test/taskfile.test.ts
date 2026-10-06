@@ -314,3 +314,13 @@ test("settingvalue_messages_match_front_matter", () => {
   assert.equal(settingValue("model", "m1"), "m1");
   assert.throws(() => settingValue("model", ""), /"model" has no value/);
 });
+
+test("network_key_parsed", () => {
+  const p = w(tmpDir(), "---\nnetwork: false\n---\nGo\n");
+  assert.equal(loadTaskFile(p).settings.network, false);
+});
+
+test("network_key_bad_value", () => {
+  const p = w(tmpDir(), "---\nnetwork: maybe\n---\nGo\n");
+  assert.equal(err(p), `${p}:2: network must be true or false, got "maybe"`);
+});
