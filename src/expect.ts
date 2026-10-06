@@ -90,7 +90,7 @@ export function checkArgs(args: string[]): string | null {
   return null;
 }
 
-function cliError(res: ProcResult): string {
+export function cliError(res: ProcResult): string {
   return `error: ${res.stderr.trim() || res.stdout.trim()}`;
 }
 
