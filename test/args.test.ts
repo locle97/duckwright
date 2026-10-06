@@ -122,9 +122,9 @@ test("usage error carries the usage line", () => {
 });
 
 test("export args", () => {
-  assert.deepEqual(args<ExportArgs>(parseExportArgs(["runs/x"])), { run: "runs/x", output: null });
-  assert.deepEqual(args<ExportArgs>(parseExportArgs(["runs/x", "-o", "a.ts"])), { run: "runs/x", output: "a.ts" });
-  assert.deepEqual(args<ExportArgs>(parseExportArgs(["--output=a.ts", "runs/x"])), { run: "runs/x", output: "a.ts" });
+  assert.deepEqual(args<ExportArgs>(parseExportArgs(["runs/x"])), { run: "runs/x", output: null, api: false });
+  assert.deepEqual(args<ExportArgs>(parseExportArgs(["runs/x", "-o", "a.ts"])), { run: "runs/x", output: "a.ts", api: false });
+  assert.deepEqual(args<ExportArgs>(parseExportArgs(["--output=a.ts", "runs/x"])), { run: "runs/x", output: "a.ts", api: false });
   assert.equal(parseExportArgs(["-h"]).kind, "help");
   assert.throws(() => parseExportArgs([]), usage("the following arguments are required: run"));
   assert.throws(() => parseExportArgs(["a", "b"]), usage("unrecognized arguments: b"));
@@ -240,4 +240,15 @@ test("help_mentions_network", () => {
   assert.ok(at > text.indexOf("  --export, --no-export\n"));
   assert.ok(at < text.indexOf("  --snapshot-hybrid"));
   assert.ok(RUN_USAGE.includes("[--export | --no-export] [--network | --no-network]"));
+});
+
+test("export_api_flag", () => {
+  assert.deepEqual(args<ExportArgs>(parseExportArgs(["--api", "runs/a"])), { run: "runs/a", output: null, api: true });
+  assert.equal(args<ExportArgs>(parseExportArgs(["runs/a", "--api"])).api, true);
+  assert.throws(() => parseExportArgs(["--api=1", "a"]), usage("argument --api: ignored explicit argument '1'"));
+});
+
+test("export_help_mentions_api", () => {
+  const p = parseExportArgs(["-h"]);
+  assert.match(p.kind === "help" ? p.text : "", /--api/);
 });

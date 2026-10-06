@@ -106,7 +106,7 @@ duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
                   [--allow-file-access] [--[no-]export] [--[no-]network]
 duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
-duckwright export RUN [-o FILE]
+duckwright export [--api] RUN [-o FILE]
 duckwright --tui [--max-parallel N] [--past N] [--theme NAME] [options]
 ```
 
@@ -302,6 +302,7 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
    ```bash
    duckwright export runs/<id>                      # writes runs/<id>/duckwright.spec.ts
    duckwright export runs/<id> -o e2e/greet.spec.ts # or anywhere else
+   duckwright export --api runs/<id>                # API-only spec: runs/<id>/duckwright.api.spec.ts
    duckwright "<task>" --export                     # export right after a successful run
    ```
    The test contains each action's recorded `code` in step order, including the assertions the agent checked with `expect`, using the semantic locators `playwright-cli` generates:
@@ -324,6 +325,8 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
      expect((await apiResponse1).status()).toBe(201);
    ```
    `expect-request` checks only the calls from the step before it, takes a path or URL without a query string, and cannot assert a field that was redacted in the capture. The `waitForResponse` predicate includes the status (and the field value), so the test waits for the first response that satisfies them all, matching what the harness verified. Expected values in recorded assertions are always written in double quotes; that is intended. Screenshots are left out. If the agent recorded no assertions, the export prints a warning.
+
+   **API-only spec.** `duckwright export --api` replays the run's captured `fetch`/`xhr` calls with the `request` fixture and asserts each call's status, so the backend flow runs without the UI. It needs network capture. Only the `content-type` and `accept` headers are kept, and captured values are redacted, so the export warns wherever `[REDACTED]` appears; supply auth by hand, and for a `--state` run add `test.use({ storageState: 'auth.json' })`. It exits `1` when there are no captured API calls. `--export` on a run still writes the UI spec only.
 2. Add any further assertions the agent did not record.
 3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 
@@ -358,6 +361,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`brain.ts`](https://github.com/locle97/duckwright/blob/main/src/brain.ts) | Calls `claude -p`, enforces the decision schema, tracks cost |
 | [`actions.ts`](https://github.com/locle97/duckwright/blob/main/src/actions.ts) | Command and flag allow-lists, action execution, Playwright code capture |
 | [`export.ts`](https://github.com/locle97/duckwright/blob/main/src/export.ts) | Renders `history.json` as a `@playwright/test` spec |
+| [`exportApi.ts`](https://github.com/locle97/duckwright/blob/main/src/exportApi.ts) | Renders captured API calls as a `request`-fixture spec (`export --api`) |
 | [`expect.ts`](https://github.com/locle97/duckwright/blob/main/src/expect.ts) | `expect` checks: verified against the live page and recorded as assertions |
 | [`expectRequest.ts`](https://github.com/locle97/duckwright/blob/main/src/expectRequest.ts) | `expect-request` checks: verified against the captured network calls and rendered as `waitForResponse` assertions |
 | [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
@@ -411,7 +415,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [x] **Network capture**: record the requests the page makes during each step (method, URL, status, and request and response bodies, via `playwright-cli requests`) into `history.json` and per-request files under `network/`, with secrets and auth headers redacted. The agent sees a short summary of the API calls its last actions triggered.
 - [x] **API assertions**: an `expect-request` action, so the agent can check that a step called the expected endpoint with the expected status or response field. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
-- [ ] **API test export**: `duckwright export --api runs/<id>` turns the captured calls into a `@playwright/test` spec that uses the `request` fixture, so the backend flow can be tested without the UI.
+- [x] **API test export**: `duckwright export --api runs/<id>` turns the captured calls into a `@playwright/test` spec that uses the `request` fixture, so the backend flow can be tested without the UI.
 - [ ] **API steps in the loop**: a `request` action that lets the agent call an endpoint it has already seen on the site directly (same origin, current session cookies), for example to set up test data faster than through the UI.
 
 **Experience**

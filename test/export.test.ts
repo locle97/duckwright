@@ -288,3 +288,27 @@ test("failed_expect_request_with_null_code_is_not_exported", () => {
   assert.ok(!spec.includes("waitForResponse"));
   assert.ok(warnings.includes(NO_ASSERTIONS));
 });
+
+const WITH_CALL = {
+  ...GREET,
+  history: [{ ...(GREET.history[0] as object), network: [
+    { id: "0001", method: "GET", url: "http://a/api/x", status: 200, statusText: "OK", type: "fetch", durationMs: 1 },
+  ] }],
+};
+
+test("export_run_api_writes_default_api_spec", () => {
+  const runDir = writeRun(tmpDir(), WITH_CALL);
+  const { path: p } = exportRun(runDir, null, true);
+  assert.equal(p, path.join(runDir, "duckwright.api.spec.ts"));
+  assert.match(fs.readFileSync(p, "utf8"), /async \(\{ request \}\)/);
+  assert.equal(fs.existsSync(path.join(runDir, SPEC_NAME)), false);
+});
+
+test("export_run_api_refuses_overwriting_history", () => {
+  const runDir = writeRun(tmpDir(), WITH_CALL);
+  assert.throws(() => exportRun(runDir, path.join(runDir, "history.json"), true), exportError(2, /overwrite/));
+});
+
+test("export_run_api_without_calls_exits_1", () => {
+  assert.throws(() => exportRun(writeRun(tmpDir(), GREET), null, true), exportError(1, /no API calls/));
+});
