@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { checkRequestArgs, renderRequestExpect } from "./expectRequest.ts";
 import type { NetworkEntry } from "./network.ts";
 import { resolvePath } from "./paths.ts";
 import { splitLines } from "./text.ts";
@@ -98,11 +99,16 @@ export function loadHistory(p: string): { runDir: string; data: HistoryData } {
 /** Render a successful run as a @playwright/test spec. */
 export function renderSpec(data: HistoryData): { spec: string; warnings: string[] } {
   if (!data.success) throw new ExportError("run did not succeed; only successful runs can be exported", 1);
-  const body: string[] = [];
   const tabs: string[] = [];
+  const warnings: string[] = [];
+  // Per history step: lines to run before its actions (the waitForResponse arms of the next
+  // step's expect-requests, which must exist before the request is made) and its own lines.
+  const arms: string[][] = data.history.map(() => []);
+  const lines: string[][] = data.history.map(() => []);
+  let requests = 0;
   let hasCode = false;
   let asserted = false;
-  for (const rec of data.history) {
+  for (const [index, rec] of data.history.entries()) {
     const results: unknown[] = Array.isArray(rec.results) ? rec.results : [];
     for (const [i, a] of rec.actions.entries()) {
       const { cmd, code } = a;
@@ -110,19 +116,37 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
       if (TAB_COMMANDS.has(cmd)) {
         if (result === "ok") {
           // Command name only: args could break out of the comment.
-          body.push(`  // TODO(duckwright): ${cmd} needs a hand edit; this test assumes a single page`);
+          lines[index].push(`  // TODO(duckwright): ${cmd} needs a hand edit; this test assumes a single page`);
           if (!tabs.includes(cmd)) tabs.push(cmd);
         }
         continue;
       }
       if (typeof code !== "string" || !code.trim() || cmd === "screenshot") continue;
-      body.push(...splitLines(code).map((line) => `  ${line}`));
+      if (cmd === "expect-request") {
+        // The recorded code is only the "passed" marker: the arm and check are re-rendered here.
+        const args = Array.isArray(a.args) ? a.args : [];
+        const bad = checkRequestArgs(args);
+        if (bad !== null) {
+          warnings.push(`expect-request with invalid arguments skipped: ${bad}`);
+        } else if (index === 0) {
+          warnings.push(`expect-request in step ${index + 1} has no earlier step to arm; skipped`);
+        } else {
+          const { arm, check } = renderRequestExpect(args, ++requests);
+          arms[index - 1].push(`  ${arm}`);
+          lines[index].push(...check.map((line) => `  ${line}`));
+          hasCode = true;
+          asserted = true;
+        }
+        continue;
+      }
+      lines[index].push(...splitLines(code).map((line) => `  ${line}`));
       hasCode = true;
       asserted ||= cmd === "expect";
     }
   }
+  const body = data.history.flatMap((_, index) => [...arms[index], ...lines[index]]);
   if (!hasCode) throw new ExportError("nothing to export: the run recorded no Playwright code", 1);
-  const warnings = tabs.map((t) => `run used ${t}; edit the test by hand, it assumes a single page`);
+  warnings.unshift(...tabs.map((t) => `run used ${t}; edit the test by hand, it assumes a single page`));
   if (!asserted) warnings.push(NO_ASSERTIONS);
   const spec = HEADER + "\n"
     + `test(${JSON.stringify(data.task)}, async ({ page }) => {\n`

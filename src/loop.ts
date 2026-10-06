@@ -163,7 +163,7 @@ export class Agent {
       const { results, done } = await execute(this.pw, decision.actions, codes, {
         start: (index) => this.events.emit({ type: "action:start", step, index }),
         result: (index, result, code) => this.events.emit({ type: "action:result", step, index, result, code }),
-      });
+      }, this.network ? { entries: history.at(-1)?.network ?? [], workdir: this.workdir } : null);
       const rec: StepRecord = { step, decision, results, codes };
       if (this.network) {
         const cap = await captureStep(this.pw, this.workdir, step, this.nextNetworkId);

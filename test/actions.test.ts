@@ -3,8 +3,10 @@ import { test } from "node:test";
 
 import { ALLOWED_LIST, EARLIER_FAILED, MAX_ERROR_CHARS, execute, extractCode } from "../src/actions.ts";
 import type { Action } from "../src/brain.ts";
+import type { RequestContext } from "../src/expectRequest.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
+import { tmpDir } from "./helpers.ts";
 
 const A = (cmd: string, ...args: string[]): Action => ({ cmd, args });
 
@@ -339,4 +341,48 @@ test("execute_hooks_cover_every_action", async () => {
   assert.deepEqual(starts, [0, 1, 2]);
   assert.deepEqual(got.map((g) => g[1]), results);
   assert.deepEqual(got.map((g) => g[0]), [0, 1, 2]);
+});
+
+const REQ_CTX = (): RequestContext => ({
+  entries: [{ id: "0001", method: "POST", url: "http://h/api/login", status: 201, statusText: "Created", type: "fetch", durationMs: 1 }],
+  workdir: tmpDir(),
+});
+
+test("expect_request_passes_without_calling_playwright", async () => {
+  const [pw, calls] = makePw();
+  const codes: (string | null)[] = [];
+  const { results } = await execute(pw, [A("expect-request", "POST", "/api/login", "201")], codes, undefined, REQ_CTX());
+  assert.deepEqual(results, ["ok"]);
+  assert.deepEqual(calls, []);
+  assert.match(codes[0]!, /^const apiResponse1 = page\.waitForResponse/);
+});
+
+test("expect_request_without_context_errors", async () => {
+  const [pw] = makePw();
+  const codes: (string | null)[] = [];
+  const { results } = await execute(pw, [A("expect-request", "POST", "/api/login", "201")], codes);
+  assert.deepEqual(results, ["error: expect-request needs network capture (run without --no-network)"]);
+  assert.deepEqual(codes, [null]);
+});
+
+test("expect_request_bad_args_rejected_even_when_skipped", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("click", "e5"), A("expect-request", "GET", "/a?x=1", "200")], undefined, undefined, REQ_CTX());
+  assert.equal(results[1], "error: expect-request url must not include a query or fragment");
+  assert.deepEqual(calls, [["click", "e5"]]);
+});
+
+test("expect_request_does_not_skip_later_actions", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("expect-request", "POST", "/api/login", "201"), A("fill", "e4", "x")], undefined, undefined, REQ_CTX());
+  assert.deepEqual(results, ["ok", "ok"]);
+  assert.equal(calls.length, 1);
+});
+
+test("done_success_blocked_after_failed_expect_request", async () => {
+  const [pw] = makePw();
+  const { results, done } = await execute(pw, [A("expect-request", "POST", "/api/login", "400"), A("done", "success", "x")], undefined, undefined, REQ_CTX());
+  assert.ok(results[0].startsWith("error: expect-request failed"));
+  assert.equal(results[1], EARLIER_FAILED);
+  assert.equal(done, null);
 });

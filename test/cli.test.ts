@@ -202,17 +202,6 @@ test("agent_skill_omits_find_and_eval", () => {
   assert.equal(/\b(find|eval)\b/.test(fs.readFileSync(PROMPTS.defaultSkill, "utf8")), false);
 });
 
-test("agent skill matches the legacy copy", () => {
-  const legacy = path.resolve(import.meta.dirname, "..", "legacy", "duckwright", "prompts");
-  for (const name of fs.readdirSync(legacy).filter((n) => n.endsWith(".md"))) {
-    assert.equal(
-      fs.readFileSync(path.join(path.dirname(PROMPTS.system), name), "utf8"),
-      fs.readFileSync(path.join(legacy, name), "utf8"),
-      name,
-    );
-  }
-});
-
 test("run_dirs_do_not_collide", async () => {
   const e = env();
   const ok = agentWith(async () => result(true));
@@ -260,7 +249,8 @@ test("version_flag", async () => {
 
 test("system_prompt_documents_expect", () => {
   const text = fs.readFileSync(PROMPTS.system, "utf8");
-  assert.ok(text.includes("screenshot, expect, done"));
+  assert.ok(text.includes("screenshot, expect, expect-request, done"));
+  assert.ok(text.includes('{"cmd": "expect-request", "args": ["POST", "/api/login", "201"]}'));
   assert.ok(text.includes('{"cmd": "expect", "args": ["text", "e15", '));
   for (const check of ["visible", "value", "checked", "unchecked", "url"]) assert.ok(text.includes(`"${check}"`));
 });
