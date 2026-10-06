@@ -1,6 +1,6 @@
 // The command line, parsed the way the Python version's argparse parser did: a greedy
 // -f/--file, negatable booleans, mutually exclusive snapshot flags, and argparse's messages.
-import { SPEC_NAME } from "./export.ts";
+import { API_SPEC_NAME, SPEC_NAME } from "./export.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { THEME_NAMES } from "./tui/theme.ts";
 import type { ThemeName } from "./tui/theme.ts";
@@ -28,6 +28,7 @@ export interface RunArgs {
 export interface ExportArgs {
   run: string;
   output: string | null;
+  api: boolean;
 }
 
 export class UsageError extends Error {
@@ -100,7 +101,7 @@ Run a task file: duckwright -f tasks/login.md. To turn an earlier run into a
 test: duckwright export runs/<id>
 `;
 
-export const EXPORT_USAGE = "usage: duckwright export [-h] [-o FILE] run";
+export const EXPORT_USAGE = "usage: duckwright export [-h] [--api] [-o FILE] run";
 
 export const EXPORT_HELP = `${EXPORT_USAGE}
 
@@ -111,8 +112,11 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  --api                 write an API spec (request fixture) from the run's
+                        captured network calls instead of the UI spec
   -o FILE, --output FILE
-                        spec path (default: <run>/${SPEC_NAME})
+                        spec path (default: <run>/${SPEC_NAME}, or
+                        <run>/${API_SPEC_NAME} with --api)
 `;
 
 interface OptionSpec {
@@ -267,7 +271,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
 }
 
 const EXPORT_SPEC: OptionSpec = {
-  names: { "-h": "-h/--help", "--help": "-h/--help", "-o": "-o/--output", "--output": "-o/--output" },
+  names: { "-h": "-h/--help", "--help": "-h/--help", "-o": "-o/--output", "--output": "-o/--output", "--api": "--api" },
   shortWithValue: ["-o"],
 };
 
@@ -277,6 +281,7 @@ export function parseExportArgs(argv: string[]): Parsed<ExportArgs> {
   };
   let run: string | null = null;
   let output: string | null = null;
+  let api = false;
   const extras: string[] = [];
   let positional = false;
   for (let i = 0; i < argv.length; i++) {
@@ -291,6 +296,9 @@ export function parseExportArgs(argv: string[]): Parsed<ExportArgs> {
       else extras.push(a);
     } else if (!opt.known) {
       extras.push(a);
+    } else if (opt.name === "--api") {
+      if (opt.inline !== null) fail(`argument --api: ignored explicit argument '${opt.inline}'`);
+      api = true;
     } else if (opt.name === "-o" || opt.name === "--output") {
       if (opt.inline !== null) output = opt.inline;
       else if (isValue(argv[i + 1], EXPORT_SPEC)) output = argv[++i];
@@ -303,5 +311,5 @@ export function parseExportArgs(argv: string[]): Parsed<ExportArgs> {
   }
   if (run === null) fail("the following arguments are required: run");
   if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);
-  return { kind: "args", args: { run: run!, output } };
+  return { kind: "args", args: { run: run!, output, api } };
 }

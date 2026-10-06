@@ -315,7 +315,7 @@ test("export_usage_error_exits_2", async () => {
   const e = env();
   assert.equal(await main(["export"], e.deps()), 2);
   assert.deepEqual(e.err, [
-    "usage: duckwright export [-h] [-o FILE] run",
+    "usage: duckwright export [-h] [--api] [-o FILE] run",
     "duckwright export: error: the following arguments are required: run",
   ]);
 });
