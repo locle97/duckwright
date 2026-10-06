@@ -22,7 +22,7 @@ test("netline_duration_in_seconds_and_missing", () => {
 test("netline_failed_load_has_no_status", () => {
   const e = entry({ status: null, statusText: "net::ERR_UNSAFE_PORT", durationMs: null });
   assert.equal(formatCall(e), "GET shop.test/api/items?page=2 → net::ERR_UNSAFE_PORT");
-  assert.equal(formatCall(entry({ status: null, statusText: "" })), "GET shop.test/api/items?page=2 → (no response)");
+  assert.equal(formatCall(entry({ status: null, statusText: "", durationMs: null })), "GET shop.test/api/items?page=2 → (no response)");
   assert.equal(callFailed(e), true);
 });
 
