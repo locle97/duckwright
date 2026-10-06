@@ -11,7 +11,7 @@ export const TOOL_TIMEOUT = 120;
 export const ALLOWED_COMMANDS = [
   "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
   "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
-  "screenshot", "expect", "expect-request", "done",
+  "screenshot", "expect", "expect-request", "request", "done",
 ] as const;
 
 export const DECISION_SCHEMA = {
@@ -65,7 +65,7 @@ export const DECISION_SCHEMA = {
             properties: {
               cmd: {
                 type: "string",
-                enum: ALLOWED_COMMANDS.filter((c) => c !== "done" && c !== "expect" && c !== "expect-request"),
+                enum: ALLOWED_COMMANDS.filter((c) => c !== "done" && c !== "expect" && c !== "expect-request" && c !== "request"),
               },
               args: { type: "array", items: { type: "string" } },
             },
@@ -77,6 +77,15 @@ export const DECISION_SCHEMA = {
             properties: {
               cmd: { const: "expect-request" },
               args: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 5 },
+            },
+          },
+          // request: method, path, then an optional JSON body and an optional expected status.
+          {
+            type: "object",
+            required: ["cmd", "args"],
+            properties: {
+              cmd: { const: "request" },
+              args: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4 },
             },
           },
         ],

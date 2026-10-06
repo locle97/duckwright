@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { ALLOWED_LIST, EARLIER_FAILED, MAX_ERROR_CHARS, execute, extractCode } from "../src/actions.ts";
 import type { Action } from "../src/brain.ts";
 import type { RequestContext } from "../src/expectRequest.ts";
+import type { RequestCallContext } from "../src/request.ts";
+import type { NetworkEntry } from "../src/network.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
 import { tmpDir } from "./helpers.ts";
@@ -18,6 +20,11 @@ function makePw(code = 0, stderr = "", stdout = ""): [PlaywrightCLI, string[][]]
   };
   return [new PlaywrightCLI({ session: "t", runner }), calls];
 }
+
+const ORIGIN = "https://shop.example.com";
+const seenEntry = (method: string, p: string): NetworkEntry =>
+  ({ id: "0001", method, url: ORIGIN + p, status: 200, statusText: "OK", type: "fetch", durationMs: 1 });
+const REQ_OUT = JSON.stringify({ status: 201, bytes: 8, text: '{"id":7}', type: "application/json", location: null });
 
 test("rejects_unknown_cmd", async () => {
   const [pw, calls] = makePw();
@@ -385,4 +392,64 @@ test("done_success_blocked_after_failed_expect_request", async () => {
   assert.ok(results[0].startsWith("error: expect-request failed"));
   assert.equal(results[1], EARLIER_FAILED);
   assert.equal(done, null);
+});
+
+test("request_runs_when_seen_and_returns_origin_and_code", async () => {
+  const [pw, calls] = makePw(0, "", REQ_OUT);
+  const call: RequestCallContext = { seen: [seenEntry("POST", "/api/items")], origin: ORIGIN };
+  const codes: (string | null)[] = [];
+  const { results, origins } = await execute(pw, [A("request", "POST", "/api/items", '{"t":1}', "201")], codes, undefined, null, call);
+  assert.deepEqual(results, ['ok 201 {"id":7}']);
+  assert.deepEqual(codes, ["request POST /api/items"]);
+  assert.deepEqual(origins, [ORIGIN]);
+  assert.equal(calls[0][0], "run-code");
+});
+
+test("request_is_rejected_statically_even_when_skipped", async () => {
+  const [pw, calls] = makePw();
+  const call: RequestCallContext = { seen: [], origin: ORIGIN };
+  const { results } = await execute(pw, [A("goto", "https://x.test"), A("request", "GET", "/a?x=1")], undefined, undefined, null, call);
+  assert.equal(results[1].startsWith("error: request path must start with /"), true);
+  assert.deepEqual(calls.map((c) => c[0]), ["goto"]);
+});
+
+test("request_is_skipped_after_a_page_changing_action", async () => {
+  const [pw, calls] = makePw();
+  const call: RequestCallContext = { seen: [seenEntry("GET", "/a")], origin: ORIGIN };
+  const { results } = await execute(pw, [A("click", "e1"), A("request", "GET", "/a")], undefined, undefined, null, call);
+  assert.deepEqual(results, ["ok", "skipped: page may have changed"]);
+  assert.deepEqual(calls.map((c) => c[0]), ["click"]);
+});
+
+test("request_can_be_batched_before_a_page_changing_action", async () => {
+  const [pw, calls] = makePw(0, "", REQ_OUT);
+  const call: RequestCallContext = { seen: [seenEntry("POST", "/api/items")], origin: ORIGIN };
+  const { results } = await execute(pw, [A("request", "POST", "/api/items", "{}"), A("click", "e1")], undefined, undefined, null, call);
+  assert.equal(results[0].startsWith("ok 201"), true);
+  assert.equal(results[1], "ok");
+  assert.deepEqual(calls.map((c) => c[0]), ["run-code", "click"]);
+});
+
+test("request_without_capture_is_refused", async () => {
+  const [pw, calls] = makePw();
+  const { results, origins } = await execute(pw, [A("request", "GET", "/a")]);
+  assert.deepEqual(results, ["error: request needs network capture (run without --no-network)"]);
+  assert.deepEqual(origins, [null]);
+  assert.deepEqual(calls, []);
+});
+
+test("failed_request_blocks_done_success_in_the_same_step", async () => {
+  const [pw] = makePw(0, "", JSON.stringify({ status: 500, bytes: 4, text: "boom", type: null, location: null }));
+  const call: RequestCallContext = { seen: [seenEntry("POST", "/api/items")], origin: ORIGIN };
+  const { results, done } = await execute(pw, [A("request", "POST", "/api/items", "{}"), A("done", "success", "ok")], undefined, undefined, null, call);
+  assert.equal(results[0], "error: request POST /api/items returned 500 boom");
+  assert.equal(results[1], EARLIER_FAILED);
+  assert.equal(done, null);
+});
+
+test("request_with_about_blank_origin_is_refused_without_sending", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("request", "GET", "/a")], undefined, undefined, null, { seen: [seenEntry("GET", "/a")], origin: null });
+  assert.deepEqual(results, ["error: request: no current page origin"]);
+  assert.deepEqual(calls, []);
 });
