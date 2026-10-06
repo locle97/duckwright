@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -379,5 +380,120 @@ test("loop_stop_while_paused_aborts", async () => {
   await new Promise((r) => setImmediate(r));
   control.stop();
   await assert.rejects(p, AbortedError);
+  assert.equal(pw.closed, 1);
+});
+
+const LIST = "### Result\n1. [GET] http://h/a => [200] OK\n";
+const DETAILS = "### Result\nGeneral\n  duration: 5ms\n";
+
+class NetPW extends FakePW {
+  clearCodes: number[] = [];
+  listFailures: string[] = [];
+  listThrow: Error | null = null;
+
+  override async run(cmd: string, args: string[]): Promise<ProcResult> {
+    this.calls.push([cmd, [...args]]);
+    if (cmd === "requests" && args[0] === "--clear") {
+      const code = this.clearCodes.shift() ?? 0;
+      return { code, stdout: "", stderr: code ? "x" : "" };
+    }
+    if (cmd === "requests") {
+      if (this.listThrow) throw this.listThrow;
+      const f = this.listFailures.shift();
+      if (f !== undefined) return { code: 1, stdout: "", stderr: f };
+      return { code: 0, stdout: LIST, stderr: "" };
+    }
+    if (cmd === "request") return { code: 0, stdout: DETAILS, stderr: "" };
+    return { code: 0, stdout: this.runStdout, stderr: "" };
+  }
+}
+
+const cmds = (pw: FakePW) => pw.calls.map(([c, a]) => (c === "requests" && a[0] === "--clear" ? "requests --clear" : c));
+
+test("network_call_order", async () => {
+  const pw = new NetPW();
+  await agent(pw, new FakeBrain([dec([["click", ["e1"]]]), dec([["done", ["success", "ok"]]])]), { network: true }).run();
+  const c = cmds(pw).filter((x) => x !== "close");
+  assert.deepEqual(c.slice(0, 2), ["open", "requests --clear"]);
+  const expected = ["tab-list", "click", "requests", "request", "requests --clear", "tab-list"];
+  assert.deepEqual(c.slice(2, 2 + expected.length), expected);
+});
+
+test("network_state_load_then_clear", async () => {
+  const pw = new NetPW();
+  await agent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { network: true, state: "s.json" }).run();
+  assert.deepEqual(cmds(pw).slice(0, 3), ["open", "state-load", "requests --clear"]);
+});
+
+test("network_done_step_captured", async () => {
+  const r = await agent(new NetPW(), new FakeBrain([dec([["done", ["success", "ok"]]])]), { network: true }).run();
+  assert.equal(r.history[0].network?.length, 1);
+});
+
+test("network_ids_continue_across_steps", async () => {
+  const workdir = tmpDir();
+  const r = await agent(new NetPW(), new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]), { network: true, workdir }).run();
+  assert.equal(r.history[0].network?.[0].id, "0001");
+  assert.equal(r.history[1].network?.[0].id, "0002");
+  assert.ok(fs.existsSync(path.join(workdir, "network", "0002", "request.json")));
+});
+
+test("network_brain_error_clear_only", async () => {
+  const pw = new NetPW();
+  const r = await agent(pw, new FakeBrain([new BrainError("k"), dec([["done", ["success", "ok"]]])]), { network: true }).run();
+  const c = cmds(pw);
+  // open, initial clear, tab-list, (brain error) clear, tab-list, ...
+  assert.deepEqual(c.slice(0, 5), ["open", "requests --clear", "tab-list", "requests --clear", "tab-list"]);
+  assert.equal("network" in r.history[0], false);
+  assert.equal("networkErrors" in r.history[0], false);
+});
+
+test("network_requests_failure_recorded", async () => {
+  const pw = new NetPW();
+  pw.listFailures = ["boom"];
+  const r = await agent(pw, new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]), { network: true }).run();
+  assert.deepEqual(r.history[0].network, []);
+  assert.deepEqual(r.history[0].networkErrors, ["requests: boom"]);
+  assert.equal(r.success, true);
+  assert.equal(r.steps, 2);
+});
+
+test("network_no_errors_key_when_clean", async () => {
+  const r = await agent(new NetPW(), new FakeBrain([dec([["done", ["success", "ok"]]])]), { network: true }).run();
+  assert.equal("networkErrors" in r.history[0], false);
+});
+
+test("network_initial_clear_error_skips_brain_error_step", async () => {
+  const pw = new NetPW();
+  pw.clearCodes = [1];
+  pw.listFailures = ["boom"];
+  const brain = new FakeBrain([new BrainError("k"), dec([["hover", ["e1"]]]), dec([["hover", ["e2"]]])]);
+  const r = await agent(pw, brain, { network: true, maxSteps: 3 }).run();
+  assert.equal("networkErrors" in r.history[0], false);
+  assert.deepEqual(r.history[1].networkErrors, ["initial requests --clear: x", "requests: boom"]);
+  assert.equal(r.history.length, 3);
+  assert.equal("networkErrors" in r.history[2], false);
+});
+
+test("network_initial_clear_error_dropped", async () => {
+  const pw = new NetPW();
+  pw.clearCodes = [1];
+  const r = await agent(pw, new FakeBrain([new BrainError("k")]), { network: true, maxFailures: 3 }).run();
+  assert.equal(r.history.length, 3);
+  assert.ok(r.history.every((h) => !("networkErrors" in h)));
+});
+
+test("network_off_by_default", async () => {
+  const pw = new NetPW();
+  const workdir = tmpDir();
+  await agent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { workdir }).run();
+  assert.ok(!cmds(pw).some((c) => c.startsWith("request")));
+  assert.equal(fs.existsSync(path.join(workdir, "network")), false);
+});
+
+test("network_aborted_propagates", async () => {
+  const pw = new NetPW();
+  pw.listThrow = new AbortedError();
+  await assert.rejects(agent(pw, new FakeBrain([dec([["hover", ["e1"]]])]), { network: true }).run(), AbortedError);
   assert.equal(pw.closed, 1);
 });

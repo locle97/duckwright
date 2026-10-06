@@ -3,6 +3,7 @@ import { BrainError } from "./brain.ts";
 import type { DecideFn } from "./brain.ts";
 import { RunControl } from "./control.ts";
 import { RunEvents } from "./events.ts";
+import { captureStep, clearRequests } from "./network.ts";
 import { observe, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { AbortedError } from "./proc.ts";
@@ -46,6 +47,7 @@ export interface AgentOptions {
   signal?: AbortSignal;
   events?: RunEvents;
   control?: RunControl;
+  network?: boolean;
 }
 
 export class Agent {
@@ -61,6 +63,9 @@ export class Agent {
   readonly signal: AbortSignal | undefined;
   readonly events: RunEvents;
   readonly control: RunControl | undefined;
+  readonly network: boolean;
+  private nextNetworkId = 1;
+  private pendingNetworkErrors: string[] = [];
   // Updated as the run goes, so a caller can still read it after run() throws.
   costUsd = 0;
 
@@ -77,6 +82,7 @@ export class Agent {
     this.signal = opts.signal;
     this.events = opts.events ?? new RunEvents();
     this.control = opts.control;
+    this.network = opts.network ?? false;
     const onStep = opts.onStep;
     if (onStep) this.events.subscribe((e) => { if (e.type === "step:end") onStep(e.record); });
   }
@@ -91,6 +97,10 @@ export class Agent {
       const res = await this.pw.open(this.headed);
       if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout);
       if (this.state) await this.pw.stateLoad(this.state);
+      if (this.network) {
+        const err = await clearRequests(this.pw);
+        if (err) this.pendingNetworkErrors = [`initial ${err}`];
+      }
       return await this.loop();
     } finally {
       await this.pw.close();
@@ -126,6 +136,7 @@ export class Agent {
         if (this.signal?.aborted) throw new AbortedError();
         failures += 1;
         this.events.emit({ type: "brain:error", step, message: e.message, cost: e.cost, failures });
+        if (this.network) await clearRequests(this.pw);
         this.record(history, {
           step,
           decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [] },
@@ -153,7 +164,16 @@ export class Agent {
         start: (index) => this.events.emit({ type: "action:start", step, index }),
         result: (index, result, code) => this.events.emit({ type: "action:result", step, index, result, code }),
       });
-      this.record(history, { step, decision, results, codes }, cost, startedAt);
+      const rec: StepRecord = { step, decision, results, codes };
+      if (this.network) {
+        const cap = await captureStep(this.pw, this.workdir, step, this.nextNetworkId);
+        this.nextNetworkId = cap.nextId;
+        const errs = [...this.pendingNetworkErrors, ...cap.errors];
+        this.pendingNetworkErrors = [];
+        rec.network = cap.entries;
+        if (errs.length) rec.networkErrors = errs;
+      }
+      this.record(history, rec, cost, startedAt);
       if (done !== null) return { success: done.success, answer: done.answer, steps, costUsd: this.costUsd, history };
     }
     return { success: false, answer: "max steps reached", steps, costUsd: this.costUsd, history };
