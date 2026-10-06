@@ -24,7 +24,7 @@ test("package_bundles_build_and_prompts", () => {
     "prompts/snapshot-full.md", "prompts/snapshot-grep.md", "prompts/snapshot-hybrid.md",
     "package.json", "README.md", "LICENSE",
   ]) assert.ok(files.includes(p), p);
-  assert.ok(!files.some((p) => /^(src|test|legacy|scripts|docs|examples|benchmark_tasks)\//.test(p)));
+  assert.ok(!files.some((p) => /^(src|test|scripts|docs|examples|benchmark_tasks)\//.test(p)));
 });
 
 test("package_name_and_command", () => {

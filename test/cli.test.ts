@@ -202,17 +202,6 @@ test("agent_skill_omits_find_and_eval", () => {
   assert.equal(/\b(find|eval)\b/.test(fs.readFileSync(PROMPTS.defaultSkill, "utf8")), false);
 });
 
-test("agent skill matches the legacy copy", () => {
-  const legacy = path.resolve(import.meta.dirname, "..", "legacy", "duckwright", "prompts");
-  for (const name of fs.readdirSync(legacy).filter((n) => n.endsWith(".md"))) {
-    assert.equal(
-      fs.readFileSync(path.join(path.dirname(PROMPTS.system), name), "utf8"),
-      fs.readFileSync(path.join(legacy, name), "utf8"),
-      name,
-    );
-  }
-});
-
 test("run_dirs_do_not_collide", async () => {
   const e = env();
   const ok = agentWith(async () => result(true));

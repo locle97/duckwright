@@ -91,7 +91,7 @@ Installing straight from GitHub (`npm install -g github:locle97/duckwright`) doe
 Check the install with `duckwright --version`. To pick up a newer version, re-run the same install command. To work on the code instead, see [Development](#development).
 
 > [!NOTE]
-> **Upgrading from the Python version**: Duckwright was rewritten in TypeScript; the commands, task files and `history.json` are unchanged. If you installed it with pipx, remove that copy first with `pipx uninstall duckwright`. The Python code is kept, frozen, in [`legacy/`](https://github.com/locle97/duckwright/tree/main/legacy).
+> **Upgrading from the Python version**: Duckwright was rewritten in TypeScript; the commands, task files and `history.json` are unchanged. If you installed it with pipx, remove that copy first with `pipx uninstall duckwright`.
 
 > [!NOTE]
 > **Upgrading from `pw_agent`**: the project was renamed from `pw_agent` / `playwright-agent-loop` to Duckwright. If you installed the old version, replace it with:
@@ -437,8 +437,6 @@ node src/bin.ts "<task>"                                   # run from source, no
 ```
 
 Node runs the TypeScript sources directly, so tests and `node src/bin.ts` need no build step; `npm run build` writes `dist/` for the installed command.
-
-The original Python version lives, frozen, in [`legacy/`](https://github.com/locle97/duckwright/tree/main/legacy). Its tests still run in CI as a reference until it is removed.
 
 > [!TIP]
 > The e2e test fills in and submits [`test/fixtures/form.html`](https://github.com/locle97/duckwright/blob/main/test/fixtures/form.html) using a real model, so each run costs a small amount.

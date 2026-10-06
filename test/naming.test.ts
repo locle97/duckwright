@@ -9,7 +9,7 @@ const LEGACY = ["pw_agent", "pw-agent", "PW_AGENT", "playwright-agent-loop", "pl
 // Lines that must mention the old name on purpose (migration instructions).
 const ALLOWED = ["Upgrading from `pw_agent`", "pipx uninstall playwright-agent-loop"];
 const SKIP_DIRS = new Set([
-  ".git", "docs", "build", "dist", ".pytest_cache", "runs", "__pycache__", "node_modules", "legacy",
+  ".git", "docs", "build", "dist", ".pytest_cache", "runs", "__pycache__", "node_modules",
 ]);
 const SELF = path.join(ROOT, "test", "naming.test.ts");
 
