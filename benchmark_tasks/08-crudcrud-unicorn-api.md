@@ -18,12 +18,7 @@ max-steps: 15
 ---
 Go to https://crudcrud.com/ and find your unique REST endpoint URL printed on the page (it looks
 like https://crudcrud.com/api/<id>).
-Go directly to that endpoint with /unicorns appended (so the page's own GET on that exact path is
-captured).
-Right after that step, before clicking anything else, use request to call GET on that same
-/unicorns path again and note the response body.
-Go back to https://crudcrud.com/ and click "Click to create a unicorn" to create one unicorn record
-through the page's own POST call.
-Go to your endpoint's /unicorns path again to see the created record.
-Report: your endpoint's unique id, what the collection's GET returned before you created anything,
-and the "name", "age", "colour" and generated "_id" of the unicorn afterwards.
+View Here is what you can do list of request tables
+follow instruction and use send request ability to test these API
+Expect after each run, example after create -> expect see the records inside unicorn farm,...
+The same for other endpoints
