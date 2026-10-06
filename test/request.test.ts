@@ -271,6 +271,14 @@ test("run_request_redacts_cli_error_with_credentials", async () => {
   assert.ok(!msg.includes("\n"));
 });
 
+test("run_request_drops_playwright_call_log", async () => {
+  const stderr = `apiRequestContext.fetch: connect ECONNREFUSED\nCall log:\n  - Cookie: sid=abc\n  - Set-Cookie: s=1`;
+  const [pw] = makePw({ code: 1, stdout: "", stderr });
+  const ctx = { seen: [entry("GET", `${ORIGIN}/a`)], origin: ORIGIN };
+  const [msg] = await runRequest(pw, ctx, ["GET", "/a"]);
+  assert.equal(msg, "error: apiRequestContext.fetch: connect ECONNREFUSED");
+});
+
 test("render_request_setup_lines", () => {
   assert.deepEqual(renderRequestSetup(["post", "/api/items", '{"title": "x"}', ""], ORIGIN, "201", 1), [
     "// setup: POST /api/items",

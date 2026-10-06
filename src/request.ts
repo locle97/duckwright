@@ -139,8 +139,12 @@ export async function runRequest(
   }
   const res = await pw.run("run-code", [buildSnippet(ctx.origin, method, path, body), "--raw"]);
   if (res.code !== 0) {
-    const error = cliError(res);
-    const redacted = "error: " + neutralise(flat(redactText(error.slice(7))));
+    let error = cliError(res);
+    const lines = error.slice(7).split("\n");
+    const callLogIndex = lines.findIndex((line) => /^\s*Call log:/.test(line));
+    if (callLogIndex !== -1) lines.splice(callLogIndex);
+    const trimmed = lines.join("\n");
+    const redacted = "error: " + neutralise(flat(redactText(trimmed)));
     return [redacted, null, null];
   }
   const { result, ok } = formatResponse(res.stdout, method, path, expected);
