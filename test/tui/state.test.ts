@@ -629,3 +629,22 @@ test("state_options_focus", () => {
   s = reduce(s, { type: "escape" });
   assert.deepEqual([s.focus, s.mode], ["list", "list"]);
 });
+
+const NET = { id: "0001", method: "GET", url: "https://a.test/x", status: 200, statusText: "OK", type: "fetch", durationMs: 5 };
+
+test("state_step_end_carries_network", () => {
+  const d = dec("g", [["click", "e1"]]);
+  const withNet = (record: Record<string, unknown>): RunEvent => {
+    const e = stepEnd(1, d, ["ok"]) as Extract<RunEvent, { type: "step:end" }>;
+    return { ...e, record: { ...e.record, ...record } } as RunEvent;
+  };
+  const steps = (last: RunEvent) => selectedRun(play(base(), ...fullStep(1, d, ["ok"]).slice(0, -1), run(last)))!.steps[0]!;
+  const s = steps(withNet({ network: [NET], networkErrors: ["requests: boom"] }));
+  assert.deepEqual(s.network, [NET]);
+  assert.deepEqual(s.networkErrors, ["requests: boom"]);
+  assert.deepEqual(steps(stepEnd(1, d, ["ok"])).network, []);
+  const bad = steps(withNet({ network: "nope", networkErrors: [1, "ok"] }));
+  assert.deepEqual(bad.network, []);
+  assert.deepEqual(bad.networkErrors, ["ok"]);
+  assert.deepEqual(steps(withNet({ network: [NET, { id: 3 }, null] })).network, [NET]);
+});

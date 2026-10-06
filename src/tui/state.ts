@@ -1,6 +1,7 @@
 // Pure view-state reducer: turns manager events and UI actions into the screen state the Ink
 // components render. No ink/react here; labels are raw (sanitising happens at render time).
 import type { ControlState, Phase, RunEvent, RunOutcome } from "../events.ts";
+import type { NetworkEntry } from "../network.ts";
 import type { Globals, ManagerEvent, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
 import { rank } from "./candidates.ts";
 import type { Candidate, CandidateIndex } from "./candidates.ts";
@@ -27,6 +28,9 @@ export interface StepView {
   error: string | null;
   cost: number | null;
   durationMs: number | null;
+  /** Calls captured by this step's actions; empty when capture was off, the step predates it, or the data was malformed. */
+  network: NetworkEntry[];
+  networkErrors: string[];
 }
 
 export interface RunView {
@@ -239,6 +243,15 @@ function stepStatus(results: (string | null)[], actions: StepView["actions"]): S
   return actions.some((a) => a.result?.startsWith("error:")) ? "warn" : "ok";
 }
 
+const isEntry = (v: unknown): v is NetworkEntry => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const e = v as NetworkEntry;
+  return typeof e.method === "string" && typeof e.url === "string" && typeof e.statusText === "string"
+    && (e.status === null || typeof e.status === "number") && (e.durationMs === null || typeof e.durationMs === "number");
+};
+const entriesOf = (v: unknown): NetworkEntry[] => (Array.isArray(v) ? v.filter(isEntry) : []);
+const stringsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
 function reduceRunEvent(r: RunView, e: RunEvent): RunView {
   switch (e.type) {
     case "run:start":
@@ -247,7 +260,7 @@ function reduceRunEvent(r: RunView, e: RunEvent): RunView {
       const previousLast = r.steps.length - 1;
       const view: StepView = {
         step: e.step, goal: "", evaluation: "", memory: null, actions: [], runningAction: null,
-        phase: null, status: "running", error: null, cost: null, durationMs: null,
+        phase: null, status: "running", error: null, cost: null, durationMs: null, network: [], networkErrors: [],
       };
       return applyFollow({ ...r, steps: [...r.steps, view] }, previousLast);
     }
@@ -278,6 +291,7 @@ function reduceRunEvent(r: RunView, e: RunEvent): RunView {
     case "step:end":
       return updateStep(r, e.record.step, (v) => ({
         ...v, durationMs: e.durationMs, runningAction: null, phase: null,
+        network: entriesOf(e.record.network), networkErrors: stringsOf(e.record.networkErrors),
         status: v.status === "brain" ? "brain" : stepStatus(e.record.results, v.actions),
       }));
     case "control": {
