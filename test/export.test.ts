@@ -220,3 +220,14 @@ for (const name of ["greet", "multiline", "tabs", "unicode"]) {
     assert.equal(spec, fs.readFileSync(path.join(dir, "expected.spec.ts"), "utf8"));
   });
 }
+
+test("spec_ignores_network_fields", () => {
+  const dir = path.join(FIXTURES, "export", "greet");
+  const data = JSON.parse(fs.readFileSync(path.join(dir, "history.json"), "utf8"));
+  for (const s of data.history) {
+    s.network = [{ id: "0001", method: "GET", url: "http://h/", status: 200, statusText: "OK", type: "fetch", durationMs: 1 }];
+    s.network_errors = ["requests: x"];
+  }
+  const runDir = writeRun(tmpDir(), data);
+  assert.equal(renderSpec(loadHistory(runDir).data).spec, fs.readFileSync(path.join(dir, "expected.spec.ts"), "utf8"));
+});

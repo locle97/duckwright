@@ -219,3 +219,44 @@ test("run_failing_sink_keeps_outcome", async () => {
   assert.ok(warnings[0].includes("events.jsonl"));
   assert.deepEqual(o1, o2);
 });
+
+const NET = { id: "0001", method: "GET", url: "http://h/", status: 200, statusText: "OK", type: "fetch", durationMs: 1 };
+const stepKeys = (h: { history: Record<string, unknown>[] }) => h.history[0];
+
+test("history_json_network_keys", async () => {
+  const r = { ...rec(), network: [NET], networkErrors: ["requests: boom"] };
+  const { spec, deps } = setup(agentWith(async (opts) => { step(opts, r); return result(true, [r]); }));
+  const h = startRun(spec, deps);
+  await h.done;
+  const s = stepKeys(readHistory(h.workdir));
+  assert.deepEqual(Object.keys(s).slice(-3), ["results", "network", "network_errors"]);
+  assert.deepEqual(s.network, [NET]);
+  assert.deepEqual(s.network_errors, ["requests: boom"]);
+});
+
+test("history_json_network_empty_no_errors", async () => {
+  const r = { ...rec(), network: [] };
+  const { spec, deps } = setup(agentWith(async (opts) => { step(opts, r); return result(true, [r]); }));
+  const h = startRun(spec, deps);
+  await h.done;
+  const s = stepKeys(readHistory(h.workdir));
+  assert.deepEqual(s.network, []);
+  assert.equal("network_errors" in s, false);
+});
+
+test("history_json_no_network_keys", async () => {
+  const { spec, deps } = setup(agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()]); }));
+  const h = startRun(spec, deps);
+  await h.done;
+  const s = stepKeys(readHistory(h.workdir));
+  assert.equal("network" in s, false);
+  assert.equal("network_errors" in s, false);
+});
+
+test("start_run_passes_network", async () => {
+  const seen: (boolean | undefined)[] = [];
+  const mk = () => agentWith(async (opts) => { seen.push(opts.network); return result(true); });
+  await startRun(...(({ spec, deps }) => [spec, deps] as const)(setup(mk(), { network: false }))).done;
+  await startRun(...(({ spec, deps }) => [spec, deps] as const)(setup(mk()))).done;
+  assert.deepEqual(seen, [false, true]);
+});

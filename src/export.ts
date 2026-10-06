@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { NetworkEntry } from "./network.ts";
 import { resolvePath } from "./paths.ts";
 import { splitLines } from "./text.ts";
 
@@ -25,6 +26,8 @@ export interface HistoryStep {
   next_goal: string;
   actions: HistoryAction[];
   results: string[];
+  network?: NetworkEntry[];
+  network_errors?: string[];
 }
 
 /** The shape of a run's history.json. */

@@ -239,3 +239,16 @@ test("past_started_at_zero_when_folder_mtime_throws", () => {
   };
   assert.equal(loadPastRuns({ runsDir: "/r", limit: 1, fs: fake }).runs[0].startedAt, 0);
 });
+
+test("past_loads_history_with_network", () => {
+  const runs = tmpDir();
+  const h = hist();
+  for (const s of h.history) {
+    s.network = [{ id: "0001", method: "GET", url: "http://h/", status: 200, statusText: "OK", type: "fetch", durationMs: 1 }];
+    s.network_errors = ["requests: x"];
+  }
+  mkRun(runs, "20261001-100000-a", h);
+  const r = loadPastRuns({ runsDir: runs, limit: 5 });
+  assert.equal(r.runs.length, 1);
+  assert.equal(r.skipped, 0);
+});
