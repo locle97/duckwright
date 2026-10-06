@@ -90,6 +90,7 @@ export function historyJson(
       results: [...r.results],
       ...(r.network ? { network: r.network } : {}),
       ...(r.networkErrors?.length ? { network_errors: [...r.networkErrors] } : {}),
+      ...(r.requestOrigins?.some((o) => o !== null) ? { request_origins: [...r.requestOrigins] } : {}),
     })),
   };
 }

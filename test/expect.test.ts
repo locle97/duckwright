@@ -6,7 +6,7 @@ import type { ProcResult } from "../src/proc.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
 
 const LOC: ProcResult = { code: 0, stdout: "getByTestId('msg')\n", stderr: "" };
-const ALLOWED_MSG = "(allowed: visible, text, value, checked, unchecked, url)";
+const ALLOWED_MSG = "(allowed: visible, text, contains, value, checked, unchecked, url)";
 
 function val(v: unknown): ProcResult {
   return { code: 0, stdout: JSON.stringify(v) + "\n", stderr: "" };
@@ -82,6 +82,20 @@ test("text_mismatch_reports_actual", async () => {
   const [pw] = makePw({ "generate-locator": LOC, "run-code": val("Hello, !") });
   assert.deepEqual(await runExpect(pw, ["text", "e7", "Hello, Linh!"]), [
     'error: expect text failed: expected "Hello, Linh!", got "Hello, !"', null,
+  ]);
+});
+
+test("contains_matches_substring_and_records_toContainText", async () => {
+  const [pw] = makePw({ "generate-locator": LOC, "run-code": val('[{"name":"A"},\n {"name":"B"}]') });
+  assert.deepEqual(await runExpect(pw, ["contains", "e7", '"name":"B"']), [
+    "ok", 'await expect(page.getByTestId(\'msg\')).toContainText("\\"name\\":\\"B\\"");',
+  ]);
+});
+
+test("contains_mismatch_reports_actual", async () => {
+  const [pw] = makePw({ "generate-locator": LOC, "run-code": val("Hello") });
+  assert.deepEqual(await runExpect(pw, ["contains", "e7", "Bye"]), [
+    'error: expect contains failed: expected to contain "Bye", got "Hello"', null,
   ]);
 });
 

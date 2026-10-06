@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { captureStep, clearRequests, networkSummary, parseDuration, parseRequestDetails, parseRequestList, requestId } from "../src/network.ts";
+import { captureStep, clearRequests, currentOrigin, networkSummary, parseDuration, parseRequestDetails, parseRequestList, requestId } from "../src/network.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { ProcResult } from "../src/proc.ts";
@@ -517,4 +517,15 @@ test("summary_unparseable_url", () => {
 
 test("summary_empty", () => {
   assert.equal(networkSummary([], TABS), null);
+});
+
+test("current_origin_reads_the_current_tab", () => {
+  const tabs = "- 0: [Home](https://shop.example.com/)\n- 1: (current) [Cart](https://shop.example.com/cart?x=1)";
+  assert.equal(currentOrigin(tabs), "https://shop.example.com");
+});
+
+test("current_origin_is_null_without_a_web_page", () => {
+  assert.equal(currentOrigin("- 0: (current) [](about:blank)"), null);
+  assert.equal(currentOrigin(""), null);
+  assert.equal(currentOrigin("- 0: [Home](https://shop.example.com/)"), null);
 });

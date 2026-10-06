@@ -260,3 +260,17 @@ test("start_run_passes_network", async () => {
   await startRun(...(({ spec, deps }) => [spec, deps] as const)(setup(mk()))).done;
   assert.deepEqual(seen, [false, true]);
 });
+
+test("history_json_writes_request_origins_only_when_used", async () => {
+  const mk = (origins: (string | null)[]) => ({
+    ...rec(), results: ["ok 200"], codes: ["request GET /a"], requestOrigins: origins,
+  });
+  const run = async (r: StepRecord) => {
+    const { spec, deps } = setup(agentWith(async (opts) => { step(opts, r); return result(true, [r]); }));
+    const h = startRun(spec, deps);
+    await h.done;
+    return stepKeys(readHistory(h.workdir));
+  };
+  assert.deepEqual((await run(mk(["https://shop.example.com"]))).request_origins, ["https://shop.example.com"]);
+  assert.equal("request_origins" in (await run(mk([null]))), false);
+});

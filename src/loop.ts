@@ -3,13 +3,14 @@ import { BrainError } from "./brain.ts";
 import type { DecideFn } from "./brain.ts";
 import { RunControl } from "./control.ts";
 import { RunEvents } from "./events.ts";
-import { captureStep, clearRequests } from "./network.ts";
+import { captureStep, clearRequests, currentOrigin } from "./network.ts";
 import { observe, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { AbortedError } from "./proc.ts";
 import { buildPrompt } from "./prompt.ts";
 import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
+import type { RequestCallContext } from "./request.ts";
 
 export const REPEAT_NUDGE = "You are repeating the same actions; try a different approach.";
 export const REPEAT_THRESHOLD = 3;
@@ -160,11 +161,16 @@ export class Agent {
       const codes: (string | null)[] = [];
       this.events.emit({ type: "decision", step, decision, cost });
       this.events.emit({ type: "phase", step, phase: "acting" });
-      const { results, done } = await execute(this.pw, decision.actions, codes, {
+      const requestCtx = this.network ? { entries: history.at(-1)?.network ?? [], workdir: this.workdir } : null;
+      const callCtx: RequestCallContext | null = this.network
+        ? { seen: history.flatMap((r) => r.network ?? []), origin: currentOrigin(obs.tabs) }
+        : null;
+      const { results, done, origins } = await execute(this.pw, decision.actions, codes, {
         start: (index) => this.events.emit({ type: "action:start", step, index }),
         result: (index, result, code) => this.events.emit({ type: "action:result", step, index, result, code }),
-      }, this.network ? { entries: history.at(-1)?.network ?? [], workdir: this.workdir } : null);
+      }, requestCtx, callCtx);
       const rec: StepRecord = { step, decision, results, codes };
+      if (origins.some((o) => o !== null)) rec.requestOrigins = origins;
       if (this.network) {
         const cap = await captureStep(this.pw, this.workdir, step, this.nextNetworkId);
         this.nextNetworkId = cap.nextId;

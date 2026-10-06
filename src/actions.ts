@@ -3,6 +3,8 @@ import type { Action } from "./brain.ts";
 import { checkArgs, runExpect } from "./expect.ts";
 import { checkRequestArgs, runExpectRequest } from "./expectRequest.ts";
 import type { RequestContext } from "./expectRequest.ts";
+import { checkRequestCallArgs, runRequest } from "./request.ts";
+import type { RequestCallContext } from "./request.ts";
 import { PlaywrightCLI } from "./pw.ts";
 import { sliceCodePoints } from "./text.ts";
 
@@ -45,6 +47,7 @@ function rejection(a: Action): string | null {
   // Its args never reach playwright-cli as given, so expected text may look like a flag.
   if (a.cmd === "expect") return checkArgs(a.args);
   if (a.cmd === "expect-request") return checkRequestArgs(a.args);
+  if (a.cmd === "request") return checkRequestCallArgs(a.args);
   const bad = badFlag(a.cmd, a.args);
   return bad !== null ? `error: flag '${bad}' not allowed` : null;
 }
@@ -56,6 +59,7 @@ export function extractCode(stdout: string): string | null {
 export interface Executed {
   results: string[];
   done: { success: boolean; answer: string } | null;
+  origins: (string | null)[];
 }
 
 export interface ExecuteHooks {
@@ -67,15 +71,17 @@ export interface ExecuteHooks {
  * Run allowed actions. If `codes` is given, it is extended with one entry per
  * action: the Playwright code playwright-cli ran for it, or null if none ran.
  * `requests` is what expect-request checks against; null or absent means capture is off.
+ * `call` is the request context for running request actions.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
-  requests?: RequestContext | null,
+  requests?: RequestContext | null, call?: RequestCallContext | null,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
   let skip: string | null = null;
   const ran = new Map<number, string>();
+  const origins = new Map<number, string>();
   const handle = async (i: number, a: Action): Promise<void> => {
     const rejected = rejection(a);
     if (rejected !== null) {
@@ -114,6 +120,13 @@ export async function execute(
       if (code !== null) ran.set(i, code);
       return;
     }
+    if (a.cmd === "request") {
+      const [result, code, origin] = await runRequest(pw, call ?? null, a.args);
+      results.push(result.startsWith("ok") ? result : clip(result));
+      if (code !== null) ran.set(i, code);
+      if (origin !== null && code !== null) origins.set(i, origin);
+      return;
+    }
     const res = await pw.run(a.cmd, a.args);
     if (res.code === 0) {
       results.push("ok");
@@ -133,5 +146,5 @@ export async function execute(
     hooks?.result?.(i, results[results.length - 1], ran.get(i) ?? null);
   }
   codes?.push(...actions.map((_, i) => ran.get(i) ?? null));
-  return { results, done };
+  return { results, done, origins: actions.map((_, i) => origins.get(i) ?? null) };
 }

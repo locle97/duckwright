@@ -258,12 +258,17 @@ function originOf(u: string): string | null {
   }
 }
 
+/** The origin of the current tab in `tab-list` output, or null when it is not an http(s) page. */
+export function currentOrigin(tabs: string): string | null {
+  const cur = tabs.split(/\r?\n/).find((l) => /^- \d+: \(current\) /.test(l));
+  const found = cur?.match(/https?:\/\/\S+/g)?.at(-1)?.replace(/[)\]]+$/, "");
+  return found ? originOf(found) : null;
+}
+
 /** Prompt text listing the last step's calls, or null when there were none. */
 export function networkSummary(entries: NetworkEntry[], tabs: string): string | null {
   if (!entries.length) return null;
-  const cur = tabs.split(/\r?\n/).find((l) => /^- \d+: \(current\) /.test(l));
-  const found = cur?.match(/https?:\/\/\S+/g)?.at(-1)?.replace(/[)\]]+$/, "");
-  const curOrigin = found ? originOf(found) : null;
+  const curOrigin = currentOrigin(tabs);
   const lines = entries.slice(0, SUMMARY_MAX).map((en) => {
     let url = en.url;
     const origin = originOf(en.url);

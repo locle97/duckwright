@@ -516,3 +516,32 @@ test("expect_request_without_network_capture_errors", async () => {
   const r = await agent(new FakePW(), brain).run();
   assert.equal(r.history[0].results[0], "error: expect-request needs network capture (run without --no-network)");
 });
+
+test("request_action_uses_earlier_captured_calls_and_records_origin", async () => {
+  class ReqPW extends NetPW {
+    override async run(cmd: string, args: string[]): Promise<ProcResult> {
+      if (cmd === "requests" && args[0] !== "--clear") {
+        this.calls.push([cmd, [...args]]);
+        const n = this.calls.filter(([c, a]) => c === "requests" && a[0] !== "--clear").length;
+        return { code: 0, stdout: n === 1 ? "### Result\n1. [POST] https://shop.example.com/api/items => [201] Created\n" : "### Result\n", stderr: "" };
+      }
+      if (cmd === "tab-list") {
+        this.calls.push([cmd, [...args]]);
+        return { code: 0, stdout: "- 0: (current) [Shop](https://shop.example.com/)\n", stderr: "" };
+      }
+      if (cmd === "run-code") {
+        this.calls.push([cmd, [...args]]);
+        return { code: 0, stdout: '{"status":201,"bytes":2,"text":"{}","type":"application/json","location":null}', stderr: "" };
+      }
+      return super.run(cmd, args);
+    }
+  }
+  const r = await agent(new ReqPW(), new FakeBrain([
+    dec([["click", ["e1"]]]),
+    dec([["request", ["POST", "/api/items", '{"t":1}']]]),
+    dec([["done", ["success", "ok"]]]),
+  ]), { network: true }).run();
+  assert.equal(r.history[1].results[0], "ok 201 {}");
+  assert.deepEqual(r.history[1].requestOrigins, ["https://shop.example.com"]);
+  assert.equal(r.history[0].requestOrigins, undefined);
+});
