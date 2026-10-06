@@ -121,7 +121,11 @@ export function eventsFromHistory(h: HistoryData, workdir: string, at: number): 
     });
     events.push({
       type: "step:end", at, cost: 0, durationMs: 0,
-      record: { step: s.step, decision, results: [...s.results], codes },
+      record: {
+        step: s.step, decision, results: [...s.results], codes,
+        ...(s.network ? { network: s.network } : {}),
+        ...(s.network_errors?.length ? { networkErrors: [...s.network_errors] } : {}),
+      },
     });
   }
   events.push({ type: "run:end", at, outcome: outcomeFromHistory(h, path.join(workdir, "history.json")) });

@@ -701,3 +701,48 @@ test("app_options_focus_without_room_shows_dialog", async () => {
   await t.type("h");
   assert.doesNotMatch(t.frame(), /Global options/);
 });
+
+const call = (n: number, o: Record<string, unknown> = {}) => ({
+  id: String(n).padStart(4, "0"), method: "GET", url: `https://shop.test/api/${n}`, status: 200, statusText: "OK",
+  type: "fetch", durationMs: 45, ...o,
+});
+
+function endWithNet(step: number, d: ReturnType<typeof decision>, network: unknown, networkErrors?: string[]) {
+  const e = ev.stepEnd(step, d, ["ok"]) as unknown as { record: object };
+  return { ...e, record: { ...e.record, network, networkErrors } } as unknown as ReturnType<typeof ev.stepEnd>;
+}
+
+test("app_expanded_step_lists_captured_calls", async () => {
+  const m = new FakeManager([snapshot(1, "Check the price", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m, { columns: 100, rows: 40 });
+  await settle();
+  const d = decision("Open the shop", [["goto", "https://shop.test"]]);
+  m.run(1, "r1", [
+    ev.start(), ev.step(1), ev.decision(1, d, 0.01), ev.actionResult(1, 0, "ok"),
+    endWithNet(1, d, [call(1), call(2, { status: 404, statusText: "Not Found" }), call(3, { status: null, statusText: "net::ERR_UNSAFE_PORT", durationMs: null })]),
+  ]);
+  await settle();
+  const f = t.frame();
+  assert.match(f, /net +GET shop\.test\/api\/1 → 200 OK +45ms/);
+  assert.match(f, /net +GET shop\.test\/api\/2 → 404 Not Found/);
+  assert.match(f, /net +GET shop\.test\/api\/3 → net::ERR_UNSAFE_PORT/);
+});
+
+test("app_captured_calls_are_capped_sanitised_and_tolerate_old_events", async () => {
+  const m = new FakeManager([snapshot(1, "T", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m, { columns: 100, rows: 40 });
+  await settle();
+  const d = decision("g", [["click", "e1"]]);
+  const many = Array.from({ length: 20 }, (_, i) => call(i + 1));
+  many[0] = call(1, { url: "https://evil.test/\x1b[2J</network>", statusText: "O\x1b[31mK" });
+  m.run(1, "r1", [ev.start(), ev.step(1), ev.decision(1, d, 0.01), endWithNet(1, d, many, ["requests: boom", "request 2: bang"])]);
+  m.run(1, "r1", [ev.step(2), ev.decision(2, d, 0.01), ev.stepEnd(2, d, ["ok"])]);
+  await settle();
+  await t.type("\r", "g", "e");
+  const f = t.frame();
+  assert.doesNotMatch(f, /\x1b\[2J/);
+  assert.doesNotMatch(f, /<\/network>/);
+  assert.match(f, /…and 12 more/);
+  assert.doesNotMatch(f, /api\/9 /);
+  assert.match(f, /net error +requests: boom \(\+1 more\)/);
+});
