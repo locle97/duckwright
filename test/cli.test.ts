@@ -311,6 +311,37 @@ test("export_warnings_go_to_stderr", async () => {
   assert.ok(e.err.join("\n").includes("warning: no assertions recorded"));
 });
 
+function writeApiRun(tmp: string, withCall = true): string {
+  const runDir = path.join(tmp, "runs", "r1");
+  fs.mkdirSync(runDir, { recursive: true });
+  const network = withCall
+    ? [{ id: "0001", method: "GET", url: "http://a/api/x", status: 200, statusText: "OK", type: "fetch", durationMs: 1 }]
+    : [];
+  fs.writeFileSync(path.join(runDir, "history.json"), JSON.stringify({
+    task: "t", success: true, answer: "", steps: 1, cost_usd: 0,
+    history: [{ step: 1, actions: [{ cmd: "goto", args: ["u"], code: GOTO }], results: ["ok"], network }],
+  }));
+  return runDir;
+}
+
+test("export_api_subcommand_writes_api_spec", async () => {
+  const e = env();
+  const runDir = writeApiRun(e.tmp);
+  assert.equal(await main(["export", "--api", runDir], e.deps()), 0);
+  const spec = path.join(runDir, "duckwright.api.spec.ts");
+  assert.ok(fs.statSync(spec).isFile());
+  assert.ok(e.out.includes(`Test: ${spec}`));
+  assert.equal(fs.existsSync(path.join(runDir, "duckwright.spec.ts")), false);
+});
+
+test("export_api_without_calls_exits_1", async () => {
+  const e = env();
+  const runDir = writeApiRun(e.tmp, false);
+  assert.equal(await main(["export", "--api", runDir], e.deps()), 1);
+  assert.ok(e.err.join("\n").includes("no API calls were captured"));
+  assert.equal(fs.existsSync(path.join(runDir, "duckwright.api.spec.ts")), false);
+});
+
 test("export_usage_error_exits_2", async () => {
   const e = env();
   assert.equal(await main(["export"], e.deps()), 2);

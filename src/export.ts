@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { checkRequestArgs, renderRequestExpect } from "./expectRequest.ts";
 import type { NetworkEntry } from "./network.ts";
+import { renderApiSpec } from "./exportApi.ts";
 import { resolvePath } from "./paths.ts";
 import { splitLines } from "./text.ts";
 
@@ -157,10 +158,10 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
 }
 
 /** Write the spec for a run. Returns the written path and any warnings. */
-export function exportRun(p: string, out: string | null = null): { path: string; warnings: string[] } {
+export function exportRun(p: string, out: string | null = null, api = false): { path: string; warnings: string[] } {
   const { runDir, data } = loadHistory(p);
-  const { spec, warnings } = renderSpec(data);
-  const target = out ?? path.join(runDir, SPEC_NAME);
+  const { spec, warnings } = api ? renderApiSpec(data, runDir) : renderSpec(data);
+  const target = out ?? path.join(runDir, api ? API_SPEC_NAME : SPEC_NAME);
   if (resolvePath(target) === resolvePath(path.join(runDir, "history.json"))) {
     throw new ExportError(`refusing to overwrite the run's history: ${target}`, 2);
   }

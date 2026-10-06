@@ -99,8 +99,8 @@ function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
   return preflight(deps, args.skill, statePath(args));
 }
 
-function exportSpec(deps: CliDeps, run: string, out: string | null = null): string {
-  const { path: p, warnings } = exportRun(run, out);
+function exportSpec(deps: CliDeps, run: string, out: string | null = null, api = false): string {
+  const { path: p, warnings } = exportRun(run, out, api);
   for (const w of warnings) deps.stderr(`warning: ${w}`);
   return p;
 }
@@ -113,7 +113,7 @@ function exportMain(deps: CliDeps, argv: string[]): number {
   }
   if (parsed.kind === "version") return 0;
   try {
-    deps.stdout(`Test: ${exportSpec(deps, parsed.args.run, parsed.args.output)}`);
+    deps.stdout(`Test: ${exportSpec(deps, parsed.args.run, parsed.args.output, parsed.args.api)}`);
     return 0;
   } catch (e) {
     if (!(e instanceof ExportError)) throw e;
