@@ -152,10 +152,11 @@ test("malformed_action_message_shows_the_action", async () => {
 const anyOf = (DECISION_SCHEMA as any).properties.actions.items.anyOf;
 
 test("schema_restricts_cmd_to_allowed", () => {
-  const [done, expect, other] = anyOf;
+  const [done, expect, other, expectRequest] = anyOf;
   assert.deepEqual(done.properties.cmd, { const: "done" });
   assert.deepEqual(expect.properties.cmd, { const: "expect" });
-  const cmds = new Set<string>([...other.properties.cmd.enum, "done", "expect"]);
+  assert.deepEqual(expectRequest.properties.cmd, { const: "expect-request" });
+  const cmds = new Set<string>([...other.properties.cmd.enum, "done", "expect", "expect-request"]);
   assert.deepEqual(cmds, new Set<string>(ALLOWED_COMMANDS));
   assert.ok(!cmds.has("playwright-cli"));
 });
@@ -176,6 +177,10 @@ test("schema_done_requires_status_and_answer", () => {
   assert.ok(!ok({ cmd: "expect", args: ["e1", "toHaveText", "Hi"] }));
   assert.ok(!ok({ cmd: "expect", args: [] }));
   assert.ok(!ok({ cmd: "expect", args: ["text", "e1", "a", "b"] }));
+  assert.ok(ok({ cmd: "expect-request", args: ["POST", "/api/login", "201"] }));
+  assert.ok(ok({ cmd: "expect-request", args: ["GET", "/api/items", "200", "data.id", "42"] }));
+  assert.ok(!ok({ cmd: "expect-request", args: ["POST", "/api/login"] }));
+  assert.ok(!ok({ cmd: "expect-request", args: ["a", "b", "c", "d", "e", "f"] }));
 });
 
 test("schema_expect_checks_match_expect_module", () => {

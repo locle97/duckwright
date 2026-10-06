@@ -497,3 +497,22 @@ test("network_aborted_propagates", async () => {
   await assert.rejects(agent(pw, new FakeBrain([dec([["hover", ["e1"]]])]), { network: true }).run(), AbortedError);
   assert.equal(pw.closed, 1);
 });
+
+test("network_expect_request_checks_previous_step", async () => {
+  const brain = new FakeBrain([dec([["click", ["e1"]]]), dec([["expect-request", ["GET", "/a", "200"]], ["done", ["success", "ok"]]])]);
+  const r = await agent(new NetPW(), brain, { network: true }).run();
+  assert.equal(r.history[1].results[0], "ok");
+  assert.match(r.history[1].codes[0]!, /^const apiResponse1 = page\.waitForResponse/);
+});
+
+test("expect_request_first_step_has_no_calls", async () => {
+  const brain = new FakeBrain([dec([["expect-request", ["GET", "/a", "200"]]]), dec([["done", ["failure", "x"]]])]);
+  const r = await agent(new NetPW(), brain, { network: true }).run();
+  assert.equal(r.history[0].results[0], "error: expect-request failed: no GET /a in the previous step's calls (saw: no calls)");
+});
+
+test("expect_request_without_network_capture_errors", async () => {
+  const brain = new FakeBrain([dec([["expect-request", ["GET", "/a", "200"]]]), dec([["done", ["failure", "x"]]])]);
+  const r = await agent(new FakePW(), brain).run();
+  assert.equal(r.history[0].results[0], "error: expect-request needs network capture (run without --no-network)");
+});

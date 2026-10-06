@@ -1,6 +1,8 @@
 import { ALLOWED_COMMANDS } from "./brain.ts";
 import type { Action } from "./brain.ts";
 import { checkArgs, runExpect } from "./expect.ts";
+import { checkRequestArgs, runExpectRequest } from "./expectRequest.ts";
+import type { RequestContext } from "./expectRequest.ts";
 import { PlaywrightCLI } from "./pw.ts";
 import { sliceCodePoints } from "./text.ts";
 
@@ -42,6 +44,7 @@ function rejection(a: Action): string | null {
   if (!ALLOWED.has(a.cmd)) return `error: command '${a.cmd}' not allowed (allowed: ${ALLOWED_LIST})`;
   // Its args never reach playwright-cli as given, so expected text may look like a flag.
   if (a.cmd === "expect") return checkArgs(a.args);
+  if (a.cmd === "expect-request") return checkRequestArgs(a.args);
   const bad = badFlag(a.cmd, a.args);
   return bad !== null ? `error: flag '${bad}' not allowed` : null;
 }
@@ -63,9 +66,11 @@ export interface ExecuteHooks {
 /**
  * Run allowed actions. If `codes` is given, it is extended with one entry per
  * action: the Playwright code playwright-cli ran for it, or null if none ran.
+ * `requests` is what expect-request checks against; null or absent means capture is off.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
+  requests?: RequestContext | null,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
@@ -99,6 +104,12 @@ export async function execute(
     }
     if (a.cmd === "expect") {
       const [result, code] = await runExpect(pw, a.args);
+      results.push(clip(result));
+      if (code !== null) ran.set(i, code);
+      return;
+    }
+    if (a.cmd === "expect-request") {
+      const [result, code] = runExpectRequest(requests ?? null, a.args);
       results.push(clip(result));
       if (code !== null) ran.set(i, code);
       return;

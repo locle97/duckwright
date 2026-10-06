@@ -260,7 +260,8 @@ test("version_flag", async () => {
 
 test("system_prompt_documents_expect", () => {
   const text = fs.readFileSync(PROMPTS.system, "utf8");
-  assert.ok(text.includes("screenshot, expect, done"));
+  assert.ok(text.includes("screenshot, expect, expect-request, done"));
+  assert.ok(text.includes('{"cmd": "expect-request", "args": ["POST", "/api/login", "201"]}'));
   assert.ok(text.includes('{"cmd": "expect", "args": ["text", "e15", '));
   for (const check of ["visible", "value", "checked", "unchecked", "url"]) assert.ok(text.includes(`"${check}"`));
 });
