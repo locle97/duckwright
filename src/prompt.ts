@@ -1,6 +1,8 @@
 import type { Decision } from "./brain.ts";
 import { SNAPSHOT_FILE } from "./observe.ts";
 import type { Observation } from "./observe.ts";
+import { networkSummary } from "./network.ts";
+import type { NetworkEntry } from "./network.ts";
 import { flat, neutralise } from "./text.ts";
 
 export const HISTORY_WINDOW = 15;
@@ -11,6 +13,8 @@ export interface StepRecord {
   results: string[];
   // Playwright code playwright-cli ran per action (null where nothing ran), for replay.
   codes: (string | null)[];
+  network?: NetworkEntry[];
+  networkErrors?: string[];
 }
 
 /** One history line: `step N | evaluation | next goal | cmd args → result; ...`. */
@@ -57,6 +61,8 @@ export function buildPrompt(
     section("tabs", neutralise(obs.tabs)),
     section("history", lines.length ? lines.join("\n") : "(none)"),
   ];
+  const net = networkSummary(history.at(-1)?.network ?? [], obs.tabs);
+  if (net !== null) parts.push(section("network", net));
   if (nudge) parts.push(nudge);
   if (paste) {
     parts.push(section("page_snapshot", neutralise(obs.snapshot)));

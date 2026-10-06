@@ -5,7 +5,7 @@ import { AbortedError } from "./proc.ts";
 import type { PlaywrightCLI } from "./pw.ts";
 import { redactBody, redactHeaders, redactUrl } from "./redact.ts";
 import type { Header } from "./redact.ts";
-import { codePointLength, sliceCodePoints } from "./text.ts";
+import { codePointLength, flat, neutralise, sliceCodePoints } from "./text.ts";
 
 export type { Header } from "./redact.ts";
 
@@ -245,4 +245,39 @@ export async function captureStep(
   const clearErr = await clearRequests(pw);
   if (clearErr !== null) errors.push(clearErr);
   return { entries, errors, nextId };
+}
+
+const SUMMARY_MAX = 10;
+const URL_CLIP = 200;
+
+function originOf(u: string): string | null {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Prompt text listing the last step's calls, or null when there were none. */
+export function networkSummary(entries: NetworkEntry[], tabs: string): string | null {
+  if (!entries.length) return null;
+  const cur = tabs.split(/\r?\n/).find((l) => /^- \d+: \(current\) /.test(l));
+  const found = cur?.match(/https?:\/\/\S+/g)?.at(-1)?.replace(/[)\]]+$/, "");
+  const curOrigin = found ? originOf(found) : null;
+  const lines = entries.slice(0, SUMMARY_MAX).map((en) => {
+    let url = en.url;
+    const origin = originOf(en.url);
+    if (curOrigin !== null && origin === curOrigin) {
+      const rest = en.url.slice(en.url.indexOf("://") + 3);
+      const slash = rest.indexOf("/");
+      url = slash < 0 ? "/" : rest.slice(slash).split("#")[0];
+    }
+    if (codePointLength(url) > URL_CLIP) url = sliceCodePoints(url, URL_CLIP) + "\u2026";
+    const outcome = en.status === null
+      ? (en.statusText || "(no response)")
+      : `${en.status} ${en.statusText}`;
+    return neutralise(flat(`${en.method} ${url} \u2192 ${outcome}`.trim()));
+  });
+  if (entries.length > SUMMARY_MAX) lines.push(`\u2026and ${entries.length - SUMMARY_MAX} more`);
+  return lines.join("\n");
 }

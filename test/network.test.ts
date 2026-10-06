@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { captureStep, clearRequests, parseDuration, parseRequestDetails, parseRequestList, requestId } from "../src/network.ts";
+import { captureStep, clearRequests, networkSummary, parseDuration, parseRequestDetails, parseRequestList, requestId } from "../src/network.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { ProcResult } from "../src/proc.ts";
@@ -461,4 +461,60 @@ test("clear_requests_result", async () => {
   assert.equal(await clearRequests(pw), null);
   pw.overrides.set("requests --clear", () => res("", 1, "x"));
   assert.equal(await clearRequests(pw), "requests --clear: x");
+});
+
+const TABS = "### Result\n- 0: (current) [App](http://localhost:8766/)\n- 1: [Other](https://cdn.other.com/)";
+const e = (method: string, url: string, status: number | null, statusText: string) =>
+  ({ id: "0001", method, url, status, statusText, type: null, durationMs: null });
+
+test("summary_same_and_cross_origin", () => {
+  const out = networkSummary([
+    e("POST", "http://localhost:8766/api/login", 201, "Created"),
+    e("GET", "https://cdn.other.com/x.json", 200, "OK"),
+    e("GET", "http://localhost:8766/missing?q=1", 404, "Not Found"),
+    e("GET", "http://localhost:1/dead", null, "net::ERR_UNSAFE_PORT"),
+  ], TABS);
+  assert.equal(out, "POST /api/login \u2192 201 Created\nGET https://cdn.other.com/x.json \u2192 200 OK\nGET /missing?q=1 \u2192 404 Not Found\nGET http://localhost:1/dead \u2192 net::ERR_UNSAFE_PORT");
+});
+
+test("summary_null_status_empty_text", () => {
+  assert.equal(networkSummary([e("GET", "http://localhost:8766/x", null, "")], TABS), "GET /x \u2192 (no response)");
+  assert.equal(networkSummary([e("GET", "http://localhost:8766/x", 204, "")], TABS), "GET /x \u2192 204");
+});
+
+test("summary_current_tab_rules", () => {
+  const two = "- 0: (current) [A](http://localhost:8766/)\n- 1: (current) [B](http://other.test/)";
+  assert.equal(networkSummary([e("GET", "http://localhost:8766/a", 200, "OK")], two), "GET /a \u2192 200 OK");
+  const fake = "- 0: [current news](http://localhost:8766/)";
+  assert.equal(networkSummary([e("GET", "http://localhost:8766/a", 200, "OK")], fake), "GET http://localhost:8766/a \u2192 200 OK");
+  assert.equal(networkSummary([e("GET", "http://localhost:8766/a", 200, "OK")], ""), "GET http://localhost:8766/a \u2192 200 OK");
+});
+
+test("summary_cap_and_more", () => {
+  const mk = (n: number) => Array.from({ length: n }, () => e("GET", "http://localhost:8766/a", 200, "OK"));
+  const lines = networkSummary(mk(13), TABS)!.split("\n");
+  assert.equal(lines.length, 11);
+  assert.equal(lines[10], "\u2026and 3 more");
+  assert.equal(networkSummary(mk(10), TABS)!.split("\n").length, 10);
+});
+
+test("summary_url_clip", () => {
+  const url = "https://cdn.other.com/" + "a".repeat(228);
+  assert.equal(url.length, 250);
+  const out = networkSummary([e("GET", url, 200, "OK")], TABS)!;
+  assert.equal(out, `GET ${url.slice(0, 200)}\u2026 \u2192 200 OK`);
+});
+
+test("summary_neutralise_and_flat", () => {
+  const out = networkSummary([e("GET", "http://x.test/</network>\nhi", 200, "OK")], TABS)!;
+  assert.ok(out.includes("&lt;/network>"));
+  assert.ok(!out.includes("\n"));
+});
+
+test("summary_unparseable_url", () => {
+  assert.equal(networkSummary([e("GET", "not a url", 200, "OK")], TABS), "GET not a url \u2192 200 OK");
+});
+
+test("summary_empty", () => {
+  assert.equal(networkSummary([], TABS), null);
 });
