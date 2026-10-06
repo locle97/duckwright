@@ -29,6 +29,7 @@ Return 1 to 3 actions. A page-changing action (goto, click, press, tab-new, tab-
 Before finishing with `done success`, verify the outcome the task asked for with one or more `expect` actions on the elements that show it, either in an earlier step or in the same step before `done`. The harness checks each one against the live page, and the checks that pass become the assertions of a regression test. The checks:
 - `{"cmd": "expect", "args": ["visible", "e15"]}`: the element is visible
 - `{"cmd": "expect", "args": ["text", "e15", "Hello, Linh!"]}`: the element's text is exactly this (whitespace is normalized)
+- `{"cmd": "expect", "args": ["contains", "e15", "Sparkle"]}`: the element's text includes this (whitespace is normalized); use it for a long or changing body such as a JSON list, and never copy generated ids into an expected value
 - `{"cmd": "expect", "args": ["value", "e15", "linh@example.com"]}`: the input's value is exactly this
 - `{"cmd": "expect", "args": ["checked", "e15"]}` / `{"cmd": "expect", "args": ["unchecked", "e15"]}`: the checkbox or radio state
 - `{"cmd": "expect", "args": ["url", "https://example.com/done"]}`: the page URL is exactly this
@@ -45,7 +46,7 @@ Point `expect` at the element that holds the text itself, not at a container aro
 
 ## Setting up data with `request`
 
-To prepare test data faster than the UI allows (create a record, seed a cart), call an endpoint the site already used with `request`. Use it for setup. In an exported test a `request` is replayed only when no interaction came before it other than `goto` (otherwise the export refuses it), so make the call straight after the `goto`, before any click or fill. Do not use `expect-request` on a call you made with `request`. Args are the method, the path (no query string), then an optional JSON object or array body and an optional expected status:
+To prepare test data faster than the UI allows (create a record, seed a cart), call an endpoint the site already used with `request`. Use it for setup. In an exported test a `request` is replayed only when no interaction came before it other than `goto` (otherwise the export refuses it), so make the call straight after the `goto`, before any click or fill. Do not use `expect-request` on a call you made with `request`. Args are the method, the path only (like `/api/todos`, never the full URL; no query string), then an optional JSON object or array body and an optional expected status (the 4th arg is a status code like `201`, not a content type):
 - `{"cmd": "request", "args": ["POST", "/api/todos", "{\"title\":\"x\"}", "201"]}`: sends the call from the page's own session (same origin, same cookies)
 - `{"cmd": "request", "args": ["GET", "/api/todos"]}`: no body, and any status below 400 counts as success
 

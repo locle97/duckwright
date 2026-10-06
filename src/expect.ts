@@ -6,6 +6,7 @@ import { PlaywrightCLI } from "./pw.ts";
 export const CHECKS: Readonly<Record<string, readonly string[]>> = {
   visible: ["ref"],
   text: ["ref", "expected"],
+  contains: ["ref", "expected"],
   value: ["ref", "expected"],
   checked: ["ref"],
   unchecked: ["ref"],
@@ -41,6 +42,7 @@ const JS_WS = new RegExp(
 const READ: Readonly<Record<string, string>> = {
   visible: "isVisible()",
   text: "textContent()",
+  contains: "textContent()",
   value: "inputValue()",
   checked: "isChecked()",
   unchecked: "isChecked()",
@@ -136,16 +138,17 @@ export async function runExpect(
   } else {
     let expected = args[args.length - 1];
     let got: string;
-    if (check === "text") {
+    if (check === "text" || check === "contains") {
       expected = norm(expected);
       got = norm(actual);
     } else {
       got = typeof actual === "string" ? actual : actual == null ? "" : String(actual);
     }
-    if (got !== expected) {
-      return [`error: expect ${check} failed: expected ${q(expected)}, got ${q(got)}`, null];
+    if (check === "contains" ? !got.includes(expected) : got !== expected) {
+      const rel = check === "contains" ? "to contain" : "";
+      return [`error: expect ${check} failed: expected ${rel ? rel + " " : ""}${q(expected)}, got ${q(got)}`, null];
     }
-    const name = { text: "toHaveText", value: "toHaveValue", url: "toHaveURL" }[check as "text" | "value" | "url"];
+    const name = { text: "toHaveText", contains: "toContainText", value: "toHaveValue", url: "toHaveURL" }[check as "text" | "contains" | "value" | "url"];
     matcher = `${name}(${q(expected)})`;
   }
   return ["ok", `await expect(${subject}).${matcher};`];

@@ -22,7 +22,8 @@ export function checkRequestCallArgs(args: string[]): string | null {
     return `error: request method must be one of ${REQUEST_METHODS.join(", ")}, got ${q(rawMethod)}`;
   }
   if (!/^\/(?!\/)[^\s?#]*$/.test(path)) {
-    return `error: request path must start with / and have no query, fragment or spaces, got ${q(path)}`;
+    const hint = /^https?:\/\//i.test(path) ? "; give the path only, e.g. /api/items, not the full URL" : "";
+    return `error: request path must start with / and have no query, fragment or spaces, got ${q(path)}${hint}`;
   }
   if (body !== "") {
     if (method === "GET" || method === "DELETE") return `error: request ${method} cannot have a body`;
@@ -36,7 +37,7 @@ export function checkRequestCallArgs(args: string[]): string | null {
     if (parsed === null || typeof parsed !== "object") return "error: request body must be a JSON object or array";
   }
   if (status !== "" && !/^[1-5]\d\d$/.test(status)) {
-    return `error: request expected status must be a three-digit code, got ${q(status)}`;
+    return `error: request expected status must be a three-digit code, got ${q(status)}; the 4th arg is the expected status, content-type is set for you`;
   }
   return null;
 }

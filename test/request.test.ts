@@ -35,7 +35,8 @@ test("check_args_rejects_bad_shapes", () => {
     checkRequestCallArgs(["POST", "/a", JSON.stringify({ k: "x".repeat(10_000) })]),
     "error: request body is over 10000 characters",
   );
-  assert.equal(checkRequestCallArgs(["POST", "/a", "{}", "20"]), 'error: request expected status must be a three-digit code, got "20"');
+  assert.equal(checkRequestCallArgs(["POST", "/a", "{}", "20"]), 'error: request expected status must be a three-digit code, got "20"; the 4th arg is the expected status, content-type is set for you');
+  assert.match(checkRequestCallArgs(["GET", "https://a.test/x"]) ?? "", /give the path only/);
 });
 
 test("was_seen_matches_method_origin_and_path", () => {
