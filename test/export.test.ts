@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { ExportError, SPEC_NAME, exportRun, loadHistory, renderSpec } from "../src/export.ts";
+import { ExportError, NO_ASSERTIONS, SPEC_NAME, exportRun, loadHistory, renderSpec } from "../src/export.ts";
 import type { HistoryData } from "../src/export.ts";
 import { ROOT, tmpDir } from "./helpers.ts";
 
@@ -230,4 +230,61 @@ test("spec_ignores_network_fields", () => {
   }
   const runDir = writeRun(tmpDir(), data);
   assert.equal(renderSpec(loadHistory(runDir).data).spec, fs.readFileSync(path.join(dir, "expected.spec.ts"), "utf8"));
+});
+
+const REQ = "const apiResponse1 = page.waitForResponse(...);";
+const armOf = (n: number, method: string, p: string) =>
+  `const apiResponse${n} = page.waitForResponse((r) => r.request().method() === "${method}" && new URL(r.url()).pathname === "${p}");`;
+
+test("expect_request_arm_is_hoisted_to_the_previous_step", () => {
+  const { spec, warnings } = renderSpec(run([
+    step([["goto", ["https://example.com/form"], GOTO]]),
+    step([["click", ["e2"], CLICK]]),
+    step([["expect-request", ["POST", "/api/login", "201"], REQ], ["done", ["success", "x"], null]], ["ok", "done"]),
+  ]));
+  assert.equal(spec, HEADER + "\n" + 'test("greet", async ({ page }) => {\n'
+    + `  ${GOTO}\n  ${armOf(1, "POST", "/api/login")}\n  ${CLICK}\n  expect((await apiResponse1).status()).toBe(201);\n` + "});\n");
+  assert.deepEqual(warnings, []);
+});
+
+test("two_expect_requests_get_distinct_names_and_order", () => {
+  const { spec } = renderSpec(run([
+    step([["click", ["e2"], CLICK]]),
+    step([["expect-request", ["POST", "/a", "201"], REQ], ["expect-request", ["GET", "/b", "200"], REQ]]),
+  ]));
+  assert.equal(spec, HEADER + "\n" + 'test("greet", async ({ page }) => {\n'
+    + `  ${armOf(1, "POST", "/a")}\n  ${armOf(2, "GET", "/b")}\n  ${CLICK}\n`
+    + "  expect((await apiResponse1).status()).toBe(201);\n  expect((await apiResponse2).status()).toBe(200);\n" + "});\n");
+});
+
+test("expect_request_with_field_emits_body_lines", () => {
+  const { spec } = renderSpec(run([
+    step([["click", ["e2"], CLICK]]),
+    step([["expect-request", ["GET", "/api/items", "200", "data.items.0.id", "42"], REQ]]),
+  ]));
+  assert.ok(spec.includes("  const apiBody1 = await (await apiResponse1).json();\n"));
+  assert.ok(spec.includes('  expect(String(apiBody1?.data?.items?.[0]?.id)).toBe("42");\n'));
+});
+
+test("expect_request_in_first_step_or_with_bad_args_is_skipped_with_warning", () => {
+  const first = renderSpec(run([
+    step([["expect-request", ["GET", "/a", "200"], REQ], ["click", ["e2"], CLICK]]),
+  ]));
+  assert.ok(!first.spec.includes("waitForResponse"));
+  assert.ok(first.warnings.includes("expect-request in step 1 has no earlier step to arm; skipped"));
+  const bad = renderSpec(run([
+    step([["click", ["e2"], CLICK]]),
+    step([["expect-request", ["GET", "/a?x=1", "200"], REQ]]),
+  ]));
+  assert.ok(!bad.spec.includes("waitForResponse"));
+  assert.ok(bad.warnings.includes("expect-request with invalid arguments skipped: error: expect-request url must not include a query or fragment"));
+});
+
+test("failed_expect_request_with_null_code_is_not_exported", () => {
+  const { spec, warnings } = renderSpec(run([
+    step([["click", ["e2"], CLICK]]),
+    step([["expect-request", ["GET", "/a", "200"], null]], ["error: expect-request failed: no GET /a"]),
+  ]));
+  assert.ok(!spec.includes("waitForResponse"));
+  assert.ok(warnings.includes(NO_ASSERTIONS));
 });
