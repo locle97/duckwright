@@ -169,6 +169,10 @@ function allFiles(dir: string): string[] {
     e.isDirectory() ? allFiles(path.join(dir, e.name)) : [path.join(dir, e.name)]);
 }
 
+function assertNoRaw(workdir: string): void {
+  assert.deepEqual(allFiles(path.join(workdir, "network")).filter((f) => f.endsWith(".raw")), []);
+}
+
 test("capture_command_sequence", async () => {
   const { pw, workdir } = setup();
   await captureStep(pw, workdir, 1, 1);
@@ -177,6 +181,7 @@ test("capture_command_sequence", async () => {
     ["response-body", "2", `--filename=${workdir}/network/0001/response-body.raw`],
     ["request", "4"], ["requests", "--clear"],
   ]);
+  assertNoRaw(workdir);
 });
 
 test("capture_entries_and_ids", async () => {
@@ -188,6 +193,7 @@ test("capture_entries_and_ids", async () => {
   assert.equal(r.entries[1].id, "0008");
   assert.equal(r.entries[1].status, null);
   assert.equal(r.entries[1].statusText, "net::ERR_UNSAFE_PORT");
+  assertNoRaw(workdir);
 });
 
 test("capture_folder_files", async () => {
@@ -201,6 +207,7 @@ test("capture_folder_files", async () => {
   assert.equal(rd(path.join(nd(workdir, "0007"), "request-body.txt")), '{"user":"a","password":"[REDACTED]"}');
   assert.equal(rd(path.join(nd(workdir, "0007"), "response-body.txt")), '{"token":"[REDACTED]","ok":true}');
   assert.deepEqual(fs.readdirSync(nd(workdir, "0008")).sort(), ["request.json", "response.json"]);
+  assertNoRaw(workdir);
 });
 
 test("capture_no_raw_secret_in_any_file", async () => {
@@ -208,6 +215,7 @@ test("capture_no_raw_secret_in_any_file", async () => {
   const r = await captureStep(pw, workdir, 1, 1);
   const all = allFiles(path.join(workdir, "network")).map((f) => rd(f)).join("\n") + JSON.stringify(r.entries);
   for (const secret of ["qs1", "hdr1", "ck1", "pw1", "rt1"]) assert.ok(!all.includes(secret), secret);
+  assertNoRaw(workdir);
 });
 
 test("capture_status_from_list_line", async () => {
@@ -217,6 +225,7 @@ test("capture_status_from_list_line", async () => {
   const j = JSON.parse(rd(path.join(nd(workdir, "0001"), "response.json")));
   assert.equal(j.status, 201);
   assert.equal(j.statusText, "Created");
+  assertNoRaw(workdir);
 });
 
 test("capture_binary_response", async () => {
@@ -228,6 +237,7 @@ test("capture_binary_response", async () => {
     assert.deepEqual(fs.readFileSync(path.join(d, "response-body.bin")), bytes);
     assert.ok(!fs.existsSync(path.join(d, "response-body.txt")));
     assert.ok(!fs.existsSync(path.join(d, "response-body.raw")));
+    assertNoRaw(workdir);
   }
 });
 
@@ -238,12 +248,14 @@ test("capture_empty_bodies_no_files", async () => {
   const r = await captureStep(pw, workdir, 1, 1);
   assert.deepEqual(r.errors, []);
   assert.deepEqual(fs.readdirSync(nd(workdir, "0001")).sort(), ["request.json", "response.json"]);
+  assertNoRaw(workdir);
 });
 
 test("capture_folder_exists_before_response_body", async () => {
   const { pw, workdir } = setup();
   await captureStep(pw, workdir, 1, 1);
   assert.deepEqual(pw.dirExisted, [true]);
+  assertNoRaw(workdir);
 });
 
 test("capture_mkdir_failure_skips_bodies", async () => {
@@ -255,6 +267,7 @@ test("capture_mkdir_failure_skips_bodies", async () => {
   assert.equal(r.errors.length, 1);
   assert.ok(r.errors[0].startsWith("write 0001: "));
   assert.equal(r.entries.length, 2);
+  assertNoRaw(workdir);
 });
 
 test("capture_request_json_write_fails", async () => {
@@ -265,6 +278,7 @@ test("capture_request_json_write_fails", async () => {
   assert.ok(r.errors[0].startsWith("write 0001: "));
   assert.equal(r.entries.length, 2);
   for (const f of ["response.json", "request-body.txt", "response-body.txt"]) assert.ok(fs.existsSync(path.join(nd(workdir, "0001"), f)), f);
+  assertNoRaw(workdir);
 });
 
 test("capture_response_json_write_fails", async () => {
@@ -275,6 +289,7 @@ test("capture_response_json_write_fails", async () => {
   assert.ok(r.errors[0].startsWith("write 0001: "));
   assert.equal(r.entries.length, 2);
   assert.ok(fs.statSync(path.join(nd(workdir, "0001"), "request.json")).isFile());
+  assertNoRaw(workdir);
 });
 
 test("capture_raw_read_fails", async () => {
@@ -289,6 +304,7 @@ test("capture_raw_read_fails", async () => {
   assert.equal(r.entries.length, 2);
   const d = nd(workdir, "0001");
   for (const f of ["response-body.txt", "response-body.bin", "response-body.raw"]) assert.ok(!fs.existsSync(path.join(d, f)), f);
+  assertNoRaw(workdir);
 });
 
 test("capture_raw_rename_fails", async () => {
@@ -300,6 +316,7 @@ test("capture_raw_rename_fails", async () => {
   assert.ok(r.errors[0].startsWith("write 0001: "));
   assert.ok(!fs.existsSync(path.join(nd(workdir, "0001"), "response-body.raw")));
   assert.equal(r.entries.length, 2);
+  assertNoRaw(workdir);
 });
 
 test("capture_response_body_no_file_written", async () => {
@@ -307,14 +324,15 @@ test("capture_response_body_no_file_written", async () => {
   pw.overrides.set("response-body 2", () => res());
   const r = await captureStep(pw, workdir, 1, 1);
   assert.deepEqual(r.errors, ["response-body 2: no file written"]);
-  assert.ok(!fs.existsSync(path.join(nd(workdir, "0001"), "response-body.txt")));
+  assert.deepEqual(fs.readdirSync(nd(workdir, "0001")).sort(), ["request-body.txt", "request.json", "response.json"]);
+  assertNoRaw(workdir);
 });
 
 test("capture_no_raw_left_behind", async () => {
   const { pw, workdir } = setup();
   pw.bodies.set(2, Buffer.from([0xff, 0xfe, 0x41]));
   await captureStep(pw, workdir, 1, 1);
-  assert.deepEqual(allFiles(path.join(workdir, "network")).filter((f) => f.endsWith(".raw")), []);
+  assertNoRaw(workdir);
 });
 
 test("capture_requests_fails", async () => {
@@ -324,6 +342,7 @@ test("capture_requests_fails", async () => {
   assert.deepEqual(r.entries, []);
   assert.deepEqual(r.errors, ["requests: boom"]);
   assert.deepEqual(pw.calls.at(-1), ["requests", "--clear"]);
+  assertNoRaw(workdir);
 });
 
 test("capture_request_n_fails", async () => {
@@ -337,6 +356,7 @@ test("capture_request_n_fails", async () => {
   assert.deepEqual(JSON.parse(rd(path.join(d, "request.json"))).headers, []);
   assert.deepEqual(JSON.parse(rd(path.join(d, "response.json"))), { status: 201, statusText: "Created", type: null, mimeType: null, durationMs: null, headers: [] });
   assert.ok(!pw.calls.some((c) => c[0] === "request-body" || c[0] === "response-body"));
+  assertNoRaw(workdir);
 });
 
 test("capture_body_commands_fail", async () => {
@@ -347,6 +367,7 @@ test("capture_body_commands_fail", async () => {
   assert.deepEqual(r.errors, ["request-body 2: rb", "response-body 2: sb"]);
   assert.deepEqual(fs.readdirSync(nd(workdir, "0001")).sort(), ["request.json", "response.json"]);
   assert.equal(r.entries.length, 2);
+  assertNoRaw(workdir);
 });
 
 test("capture_timeout_and_throw", async () => {
@@ -357,6 +378,7 @@ test("capture_timeout_and_throw", async () => {
   });
   const r = await captureStep(pw, workdir, 1, 1);
   assert.deepEqual(r.errors, ["request 2: timeout", "request 4: spawn ENOENT"]);
+  assertNoRaw(workdir);
 });
 
 test("capture_message_clipped", async () => {
@@ -364,6 +386,7 @@ test("capture_message_clipped", async () => {
   pw.overrides.set("request 2", () => res("", 1, "x".repeat(400)));
   const r = await captureStep(pw, workdir, 1, 1);
   assert.equal(r.errors[0], `request 2: ${"x".repeat(300)}`);
+  assertNoRaw(workdir);
 });
 
 test("capture_clear_fails", async () => {
@@ -371,6 +394,7 @@ test("capture_clear_fails", async () => {
   pw.overrides.set("requests --clear", () => res("", 1, "nope"));
   const r = await captureStep(pw, workdir, 1, 1);
   assert.equal(r.errors.at(-1), "requests --clear: nope");
+  assertNoRaw(workdir);
 });
 
 test("capture_aborted_propagates", async () => {
@@ -383,6 +407,53 @@ test("capture_aborted_propagates", async () => {
     throw new AbortedError();
   });
   await assert.rejects(clearRequests(pw), AbortedError);
+});
+
+const writeRawSecret = (args: string[]): void => {
+  fs.writeFileSync(args.find((a) => a.startsWith("--filename="))!.slice(11), "SECRET-raw-body");
+};
+
+test("capture_raw_removed_on_nonzero_exit", async () => {
+  const { pw, workdir } = setup();
+  pw.overrides.set("response-body 2", (_c, args) => {
+    writeRawSecret(args);
+    return res("", 1, "boom");
+  });
+  const r = await captureStep(pw, workdir, 1, 1);
+  assert.deepEqual(r.errors, ["response-body 2: boom"]);
+  assertNoRaw(workdir);
+  for (const f of allFiles(path.join(workdir, "network"))) assert.ok(!rd(f).includes("SECRET"), f);
+});
+
+test("capture_raw_removed_on_timeout", async () => {
+  const { pw, workdir } = setup();
+  pw.overrides.set("response-body 2", (_c, args) => {
+    writeRawSecret(args);
+    return res("", -1, "timeout");
+  });
+  await captureStep(pw, workdir, 1, 1);
+  assertNoRaw(workdir);
+});
+
+test("capture_raw_removed_on_throw", async () => {
+  const { pw, workdir } = setup();
+  pw.overrides.set("response-body 2", (_c, args) => {
+    writeRawSecret(args);
+    throw new Error("spawn died");
+  });
+  const r = await captureStep(pw, workdir, 1, 1);
+  assert.deepEqual(r.errors, ["response-body 2: spawn died"]);
+  assertNoRaw(workdir);
+});
+
+test("capture_raw_removed_on_abort", async () => {
+  const { pw, workdir } = setup();
+  pw.overrides.set("response-body 2", (_c, args) => {
+    writeRawSecret(args);
+    throw new AbortedError();
+  });
+  await assert.rejects(captureStep(pw, workdir, 1, 1), AbortedError);
+  assertNoRaw(workdir);
 });
 
 test("clear_requests_result", async () => {

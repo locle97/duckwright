@@ -191,37 +191,39 @@ export async function captureStep(
       }
       if (d.hasResponseBody) {
         const raw = path.join(dir, "response-body.raw");
-        const out = await runCmd(pw, "response-body", [String(l.n), `--filename=${raw}`], `response-body ${l.n}`, errors);
-        if (out !== null) {
-          try {
-            if (!fs.existsSync(raw)) {
-              errors.push(`response-body ${l.n}: no file written`);
-            } else {
-              const bytes = fs.readFileSync(raw);
-              if (bytes.length > 0) {
-                let text: string | null = null;
-                if (!bytes.includes(0)) {
-                  try {
-                    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-                  } catch {
-                    text = null;
+        try {
+          const out = await runCmd(pw, "response-body", [String(l.n), `--filename=${raw}`], `response-body ${l.n}`, errors);
+          if (out !== null) {
+            try {
+              if (!fs.existsSync(raw)) {
+                errors.push(`response-body ${l.n}: no file written`);
+              } else {
+                const bytes = fs.readFileSync(raw);
+                if (bytes.length > 0) {
+                  let text: string | null = null;
+                  if (!bytes.includes(0)) {
+                    try {
+                      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+                    } catch {
+                      text = null;
+                    }
+                  }
+                  if (text !== null) {
+                    responseFile = { name: "response-body.txt", data: redactBody(text, contentType(d.responseHeaders)) };
+                  } else {
+                    fs.renameSync(raw, path.join(dir, "response-body.bin"));
                   }
                 }
-                if (text !== null) {
-                  responseFile = { name: "response-body.txt", data: redactBody(text, contentType(d.responseHeaders)) };
-                } else {
-                  fs.renameSync(raw, path.join(dir, "response-body.bin"));
-                }
               }
+            } catch (e) {
+              errors.push(`write ${id}: ${errMsg(e)}`);
             }
-          } catch (e) {
-            errors.push(`write ${id}: ${errMsg(e)}`);
-          } finally {
-            try {
-              fs.rmSync(raw, { force: true, recursive: true });
-            } catch {
-              // best effort
-            }
+          }
+        } finally {
+          try {
+            fs.rmSync(raw, { force: true, recursive: true });
+          } catch {
+            // best effort
           }
         }
       }
