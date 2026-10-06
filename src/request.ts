@@ -85,7 +85,7 @@ function locationPath(location: string): string | null {
 export function formatResponse(
   stdout: string, method: string, path: string, expected: string,
 ): { result: string; ok: boolean } {
-  const unreadable = { result: "error: request: unreadable response", ok: false };
+  const unreadable = { result: "error: request: unreadable response (the call may have been sent)", ok: false };
   let data: { status?: unknown; bytes?: unknown; text?: unknown; type?: unknown; location?: unknown };
   try {
     data = JSON.parse(stdout);

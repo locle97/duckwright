@@ -122,7 +122,7 @@ export async function execute(
     }
     if (a.cmd === "request") {
       const [result, code, origin] = await runRequest(pw, call ?? null, a.args);
-      results.push(clip(result));
+      results.push(result.startsWith("ok") ? result : clip(result));
       if (code !== null) ran.set(i, code);
       if (origin !== null && code !== null) origins.set(i, origin);
       return;

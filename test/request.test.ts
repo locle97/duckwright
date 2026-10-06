@@ -215,7 +215,7 @@ test("format_response_redirect_shows_only_the_location_path", () => {
 });
 
 test("format_response_unreadable", () => {
-  assert.equal(formatResponse("not json", "GET", "/a", "").result, "error: request: unreadable response");
+  assert.equal(formatResponse("not json", "GET", "/a", "").result, "error: request: unreadable response (the call may have been sent)");
   assert.equal(formatResponse(JSON.stringify({ text: "x" }), "GET", "/a", "").ok, false);
 });
 

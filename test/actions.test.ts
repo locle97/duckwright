@@ -405,6 +405,15 @@ test("request_runs_when_seen_and_returns_origin_and_code", async () => {
   assert.equal(calls[0][0], "run-code");
 });
 
+test("passing_request_excerpt_comes_back_whole", async () => {
+  const text = "x".repeat(450);
+  const out = JSON.stringify({ status: 200, bytes: 450, text, type: "text/plain", location: null });
+  const [pw] = makePw(0, "", out);
+  const call: RequestCallContext = { seen: [seenEntry("GET", "/a")], origin: ORIGIN };
+  const { results } = await execute(pw, [A("request", "GET", "/a")], undefined, undefined, null, call);
+  assert.equal(results[0], `ok 200 ${text}`);
+});
+
 test("request_is_rejected_statically_even_when_skipped", async () => {
   const [pw, calls] = makePw();
   const call: RequestCallContext = { seen: [], origin: ORIGIN };

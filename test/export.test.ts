@@ -342,9 +342,39 @@ test("expected_status_arg_wins_over_the_recorded_status", () => {
 
 test("request_after_a_ui_action_fails_the_export", () => {
   assert.throws(() => renderSpec(run([
-    step([["goto", ["u"], GOTO]]),
+    step([["click", ["e1"], null]]),
     reqStep(["POST", "/api/items", "{}"], "ok 201"),
   ])), exportError(1, /request in step 2 comes after a UI action in step 1/));
+});
+
+test("request_after_goto_is_exported_after_the_goto_line", () => {
+  const { spec } = renderSpec(run([
+    step([["goto", ["https://example.com/"], GOTO]]),
+    reqStep(["POST", "/api/items", '{"title":"x"}'], "ok 201"),
+    step([["expect", [], EXPECT]]),
+  ]));
+  assert.ok(spec.includes("// setup: POST /api/items"));
+  assert.ok(spec.indexOf("page.goto") < spec.indexOf("// setup:"));
+});
+
+test("goto_then_click_then_request_still_fails", () => {
+  assert.throws(() => renderSpec(run([
+    step([["goto", ["u"], GOTO]]),
+    step([["click", ["e1"], null]]),
+    reqStep(["POST", "/api/items", "{}"], "ok 201"),
+  ])), exportError(1, /request in step 3 comes after a UI action in step 2/));
+});
+
+test("request_after_tab_new_still_fails", () => {
+  assert.throws(() => renderSpec(run([
+    step([["tab-new", [], null]]),
+    reqStep(["GET", "/api/items"], "ok 200"),
+  ])), exportError(1, /request in step 2 comes after a UI action in step 1/));
+});
+
+test("request_in_the_same_step_after_an_ok_fill_fails", () => {
+  const same = { ...step([["fill", ["e1", "x"], null], ["request", ["GET", "/api/items", "", "200"], "request x"]]), request_origins: [null, ORIGIN] };
+  assert.throws(() => renderSpec(run([same])), exportError(1, /request in step 1 comes after a UI action in step 1/));
 });
 
 test("request_after_only_expect_or_screenshot_is_fine", () => {

@@ -45,7 +45,7 @@ Point `expect` at the element that holds the text itself, not at a container aro
 
 ## Setting up data with `request`
 
-To prepare test data faster than the UI allows (create a record, seed a cart), call an endpoint the site already used with `request`. Use it for setup, before your first UI action on the page under test. Args are the method, the path (no query string), then an optional JSON object or array body and an optional expected status:
+To prepare test data faster than the UI allows (create a record, seed a cart), call an endpoint the site already used with `request`. Use it for setup. In an exported test a `request` is replayed only when no interaction came before it other than `goto` (otherwise the export refuses it), so make the call straight after the `goto`, before any click or fill. Do not use `expect-request` on a call you made with `request`. Args are the method, the path (no query string), then an optional JSON object or array body and an optional expected status:
 - `{"cmd": "request", "args": ["POST", "/api/todos", "{\"title\":\"x\"}", "201"]}`: sends the call from the page's own session (same origin, same cookies)
 - `{"cmd": "request", "args": ["GET", "/api/todos"]}`: no body, and any status below 400 counts as success
 
