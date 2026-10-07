@@ -21,6 +21,7 @@ import type { Human } from "./twofa.ts";
 import { fixed4 } from "./text.ts";
 import { which } from "./which.ts";
 import type { ThemeName } from "./tui/theme.ts";
+import type { StartWebOptions, WebHandle } from "./web/index.ts";
 import { TaskFileError, loadTaskFile, taskPaths } from "./taskfile.ts";
 
 export { PROMPTS, historyJson, which };
@@ -39,6 +40,8 @@ export function version(): string {
 export interface TuiHandle { done: Promise<void>; restoreTerminal(): void; quit(): void }
 export interface TuiModule { startTui(o: { manager: ManagerLike; theme?: ThemeName; notices?: string[] }): TuiHandle }
 
+export interface WebModule { startWeb(o: StartWebOptions): Promise<WebHandle> }
+
 export interface CliDeps {
   which(name: string): string | null;
   createAgent(opts: AgentOptions): AgentLike;
@@ -48,6 +51,7 @@ export interface CliDeps {
   signal: AbortSignal;
   isTTY(): boolean;
   loadTui(): Promise<TuiModule>;
+  loadWeb(): Promise<WebModule>;
   loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
   /** Plan mode's planner; by default `claude -p` with the planner prompt. */
   planner?: Planner;
@@ -66,6 +70,7 @@ const DEFAULT_DEPS: CliDeps = {
   signal: new AbortController().signal,
   isTTY: () => !!process.stdin.isTTY && !!process.stdout.isTTY,
   loadTui: () => import("./tui/index.ts"),
+  loadWeb: () => import("./web/index.ts"),
   loadPastRuns: (limit) => loadPastRuns({ runsDir: "runs", limit }),
   env: process.env,
   human: (label) => createTtyHuman({ label }),
@@ -229,7 +234,15 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
   return count("pass") === rows.length ? 0 : 1;
 }
 
-async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
+/** A running frontend: `done` settles once the user quit it, `quit()` stops every run and ends it, `cleanup()` puts the screen back. */
+interface Frontend { done: Promise<void>; quit(): void; cleanup(): void }
+/** The frontend could not start (the port is taken, the UI is not built): one line on stderr, exit 2. */
+class StartError extends Error {}
+
+/** Shared by the TUI and web modes: build the manager, add what was given, open a frontend, run until it closes. */
+async function interactiveMain(
+  deps: CliDeps, argv: string[], args: RunArgs, open: (manager: RunManager, notices: string[]) => Promise<Frontend>,
+): Promise<number> {
   const err = preflightArgs(deps, args) ?? (args.plan !== null ? planProblem(deps, args.plan) : null);
   if (err) {
     deps.stderr(err);
@@ -250,35 +263,65 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
     preflight: (a) => preflightArgs(deps, a),
     planner: plannerOf(deps),
   });
-  // Load every file before the TUI opens, so a bad one is reported on the plain terminal.
+  // Load every file before the frontend opens, so a bad one is reported on the plain terminal.
   const given = args.task !== null || args.file !== null ? manager.add({ mentions: args.file ?? [], typed: args.task }) : null;
   if (given !== null && !given.ok) {
     deps.stderr(given.errors.map((e) => e.message).join("\n"));
     return 2;
   }
-  const tui = await deps.loadTui();
   const k = past.skipped;
   const notices = k > 0 ? [`skipped ${k} unreadable run folder${k === 1 ? "" : "s"} in runs/`] : [];
-  const handle = tui.startTui({ manager, theme: args.theme ?? "auto", notices });
-  // Started once the TUI is up, so it sees every run from its first event.
+  let front: Frontend;
+  try {
+    front = await open(manager, notices);
+  } catch (e) {
+    if (!(e instanceof StartError)) throw e;
+    deps.stderr(e.message);
+    return 2;
+  }
+  // Started once the frontend is up, so it sees every run from its first event.
   if (given?.ok) manager.startQueued(given.added);
   if (args.plan !== null) {
     const planned = manager.plan(args.plan);
     if (!planned.ok) manager.notify("error", planned.error);
   }
-  // An outside SIGINT aborts the signal (and with it every run): close the TUI too, and exit 130.
-  const onAbort = (): void => handle.quit();
+  // An outside SIGINT aborts the signal (and with it every run): close the frontend too, and exit 130.
+  const onAbort = (): void => front.quit();
   deps.signal.addEventListener("abort", onAbort, { once: true });
   if (deps.signal.aborted) onAbort();
   try {
-    await handle.done;
+    await front.done;
   } finally {
     deps.signal.removeEventListener("abort", onAbort);
-    handle.restoreTerminal();
+    front.cleanup();
   }
   const { lines, exitCode } = manager.summary();
   for (const line of lines) deps.stdout(line);
   return deps.signal.aborted ? 130 : exitCode;
+}
+
+function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
+  return interactiveMain(deps, argv, args, async (manager, notices) => {
+    const tui = await deps.loadTui();
+    const handle = tui.startTui({ manager, theme: args.theme ?? "auto", notices });
+    return { done: handle.done, quit: handle.quit, cleanup: handle.restoreTerminal };
+  });
+}
+
+function webMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
+  return interactiveMain(deps, argv, args, async (manager, notices) => {
+    const web = await deps.loadWeb();
+    let handle: WebHandle;
+    try {
+      handle = await web.startWeb({
+        manager, port: args.port ?? undefined, maxParallel: args.maxParallel ?? 3, notices, theme: args.theme ?? "auto",
+      });
+    } catch (e) {
+      throw new StartError(e instanceof Error ? e.message : String(e));
+    }
+    deps.stdout(`duckwright web: ${handle.url}`);
+    return { done: handle.done, quit: handle.quit, cleanup: () => {} };
+  });
 }
 
 function usageError(deps: CliDeps, e: UsageError): number {
@@ -319,6 +362,11 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     return 2;
   }
   const { args } = parsed;
+  if (args.web) {
+    if (args.print) throw usage("--web cannot be used with -p");
+    return webMain(deps, argv, args);
+  }
+  if (args.port !== null) throw usage("--port applies to --web");
   if (!args.print && deps.isTTY()) return tuiMain(deps, argv, args);
   // With no terminal, print mode is the fallback, and the TUI-only options have nothing to apply to.
   if (args.print) {

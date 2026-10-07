@@ -6,7 +6,8 @@ import { afterEach, test } from "node:test";
 import { Brain, BrainError } from "../src/brain.ts";
 import type { Action } from "../src/brain.ts";
 import { PROMPTS, historyJson, main, version } from "../src/cli.ts";
-import type { AgentLike, CliDeps, TuiHandle, TuiModule } from "../src/cli.ts";
+import type { AgentLike, CliDeps, TuiHandle, TuiModule, WebModule } from "../src/cli.ts";
+import type { WebHandle } from "../src/web/index.ts";
 import type { ManagerEvent, ManagerLike } from "../src/runs/manager.ts";
 import type { PastRun } from "../src/runs/past.ts";
 import type { AgentOptions, RunResult } from "../src/loop.ts";
@@ -1350,4 +1351,122 @@ test("batch_prompts_are_labelled_with_position_and_file", async () => {
     createAgent: (opts) => ({ costUsd: 0, run: async () => { await opts.twofa!.approve().catch(() => {}); return OKRESULT; } }),
   }));
   assert.deepEqual(labels, ["[1/2] tasks/a.md", "[2/2] tasks/b.md"]);
+});
+
+// ---- web mode ----
+
+interface FakeWeb {
+  load: () => Promise<WebModule>;
+  loads: number;
+  quits: number;
+  options: { port?: number; maxParallel: number; theme?: string } | null;
+}
+
+/** A web server that finishes when a task passes, and fails to start when `failWith` is set. */
+function fakeWeb(failWith: Error | null = null): FakeWeb {
+  const fake: FakeWeb = { loads: 0, quits: 0, options: null, load: null as never };
+  fake.load = async () => {
+    fake.loads++;
+    return {
+      async startWeb(o): Promise<WebHandle> {
+        if (failWith) throw failWith;
+        fake.options = { port: o.port, maxParallel: o.maxParallel, theme: o.theme };
+        let resolve!: () => void;
+        const done = new Promise<void>((r) => { resolve = r; });
+        const off = o.manager.subscribe((e) => {
+          if (e.type === "task:updated" && e.task.state === "passed") {
+            off();
+            setImmediate(resolve);
+          }
+        });
+        return {
+          url: "http://127.0.0.1:4000/?t=abc", done,
+          quit: () => {
+            fake.quits++;
+            void o.manager.stopAll().then(resolve);
+          },
+        };
+      },
+    };
+  };
+  return fake;
+}
+
+test("web_runs_given_tasks_prints_the_url_and_the_summary", async () => {
+  const e = env();
+  const web = fakeWeb();
+  const tui = fakeTui();
+  const code = await main([...e.argv, "--web"],
+    e.deps({ isTTY: () => false, loadWeb: web.load, loadTui: tui.load, createAgent: tuiAgent }));
+  assert.equal(code, 0);
+  assert.equal(web.loads, 1);
+  assert.equal(tui.loads, 0);
+  assert.equal(e.out[0], "duckwright web: http://127.0.0.1:4000/?t=abc");
+  assert.ok(e.out[1].startsWith("Batch: 1 passed, 0 failed, 0 stopped"));
+  assert.ok(e.out[2].startsWith('pass  "task"'));
+});
+
+test("web_options_reach_the_server", async () => {
+  const e = env();
+  const web = fakeWeb();
+  await main([...e.argv, "--web", "--port", "8123", "--max-parallel", "2", "--theme", "dark"],
+    e.deps({ loadWeb: web.load, createAgent: tuiAgent }));
+  assert.deepEqual(web.options, { port: 8123, maxParallel: 2, theme: "dark" });
+});
+
+test("web_conflicts_with_print", async () => {
+  const e = env();
+  const web = fakeWeb();
+  assert.equal(await main(["--web", "-p", ...e.argv], e.deps({ loadWeb: web.load })), 2);
+  assert.ok(e.err.some((l) => l.includes("--web cannot be used with -p")));
+  assert.equal(web.loads, 0);
+});
+
+test("port_needs_web", async () => {
+  const e = env();
+  assert.equal(await main(["--port", "8080", ...e.argv], e.deps()), 2);
+  assert.ok(e.err.some((l) => l.includes("--port applies to --web")));
+});
+
+test("web_that_cannot_start_exits_2_without_running_anything", async () => {
+  const e = env();
+  const web = fakeWeb(new Error("port 80 is already in use"));
+  assert.equal(await main([...e.argv, "--web"], e.deps({ loadWeb: web.load, createAgent: tuiAgent })), 2);
+  assert.deepEqual(e.err, ["port 80 is already in use"]);
+  assert.equal(histories(e.tmp).length, 0);
+});
+
+test("web_bad_task_file_fails_before_the_server_starts", async () => {
+  const e = env();
+  const web = fakeWeb();
+  assert.equal(await main(["--web", "-f", "missing.md", "--skill", e.argv[2]], e.deps({ loadWeb: web.load })), 2);
+  assert.equal(web.loads, 0);
+});
+
+test("web_outside_sigint_quits", { timeout: 5000 }, async () => {
+  const e = env();
+  const quits: number[] = [];
+  const load = async (): Promise<WebModule> => ({
+    async startWeb({ manager }): Promise<WebHandle> {
+      manager.start(manager.addTyped("do it"));
+      let resolve!: () => void;
+      const done = new Promise<void>((r) => { resolve = r; });
+      return {
+        url: "http://127.0.0.1:4000/?t=abc", done,
+        quit: () => {
+          quits.push(1);
+          void manager.stopAll().then(resolve);
+        },
+      };
+    },
+  });
+  const ac = new AbortController();
+  const p = main(["--web", "--skill", e.argv[2]], e.deps({ loadWeb: load, createAgent: untilAborted, signal: ac.signal }));
+  await new Promise((r) => setTimeout(r, 20));
+  ac.abort();
+  assert.equal(await p, 130);
+  assert.equal(quits.length, 1);
+  assert.equal(e.out[0], "duckwright web: http://127.0.0.1:4000/?t=abc");
+  assert.equal(e.out[1], "Batch: 0 passed, 0 failed, 1 stopped  Cost: $0.0000");
+  assert.ok(e.out[2].startsWith('stop  "do it"'));
 });
