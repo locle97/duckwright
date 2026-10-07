@@ -1,13 +1,14 @@
 // Task list: one row per task with its state icon, name and (when wide enough) the latest run's cost;
 // a plan is a header row (fold mark, name, progress) with its tasks indented under it in run order.
+// The title names the two tabs, Tasks and History (past runs), with the shown one marked.
 import { Box, Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
 
 import type { PlanSnapshot, TaskSnapshot } from "../runs/manager.ts";
 import { sanitize } from "./sanitize.ts";
-import { activeQuery, planTally, selectedRowIndex, visibleRows } from "./state.ts";
-import type { ViewState } from "./state.ts";
+import { activeQuery, planTally, selectedRowIndex, tabOf, visibleRows } from "./state.ts";
+import type { Tab, ViewState } from "./state.ts";
 import { paneBorder, spinnerFrame } from "./theme.ts";
 import { useTheme } from "./themeContext.ts";
 
@@ -79,7 +80,12 @@ export function Sidebar({ s, width, height, focused, showCost }: SidebarProps): 
   const start = scrollStart(position, visible.length, size);
   const query = activeQuery(s);
   const shownTasks = visible.filter((r) => r.kind === "task").length;
-  const title = query !== "" ? `TASKS /${sanitize(query)} ${shownTasks}/${s.tasks.length}` : "TASKS";
+  const inTab = s.tasks.filter((t) => tabOf(t) === s.tab).length;
+  const tab = (name: Tab, label: string): ReactElement =>
+    h(Text, s.tab === name ? { color: theme.role.accent, bold: true, underline: true } : { color: theme.role.muted }, label);
+  const title = h(Text, { wrap: "truncate-end" },
+    tab("tasks", "TASKS"), h(Text, { color: theme.role.muted }, " │ "), tab("history", "HISTORY"),
+    query !== "" ? h(Text, { color: theme.role.muted }, ` /${sanitize(query)} ${shownTasks}/${inTab}`) : null);
   const rows = visible.slice(start, start + size).map((r, i) => {
     const selected = start + i === at;
     if (r.kind === "plan") return h(PlanRow, { key: `p${r.plan.id}`, s, p: r.plan, selected, focused });
@@ -94,6 +100,6 @@ export function Sidebar({ s, width, height, focused, showCost }: SidebarProps): 
     flexDirection: "column", width, height, flexShrink: 0, overflow: "hidden", paddingX: 1,
     ...(framed ? paneBorder(theme, focused) : {}),
   },
-  h(Text, { color: theme.role.muted, bold: true, wrap: "truncate-end" }, title),
+  title,
   ...rows);
 }

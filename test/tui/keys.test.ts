@@ -47,7 +47,8 @@ test("keys_list_bindings", () => {
   assert.deepEqual(press(s, "pageUp"), [ui({ type: "select", delta: -10 })]);
   assert.deepEqual(press(s, "g"), [ui({ type: "selectEdge", edge: "first" })]);
   assert.deepEqual(press(s, "G"), [ui({ type: "selectEdge", edge: "last" })]);
-  assert.deepEqual(press(s, "tab"), [ui({ type: "focus", target: "compose" })]);
+  assert.deepEqual(press(s, "tab"), [ui({ type: "tab" })]);
+  assert.deepEqual(press(s, "i"), [ui({ type: "focus", target: "compose" })]);
   assert.deepEqual(press(s, "?"), [ui({ type: "help", open: true })]);
   assert.deepEqual(press(s, "a"), [ui({ type: "focus", target: "compose" })]);
   assert.deepEqual(press(s, "p"), [{ kind: "manager", call: "pause", id: 1 }]);
@@ -256,11 +257,12 @@ test("keys_too_small_screen", () => {
 });
 
 test("hints_per_mode_and_state", () => {
-  assert.equal(footer(mk("running")), "⏎ details · tab add · P plan · p pause · s stop · ? help");
-  assert.equal(footer(mk("paused")), "⏎ details · tab add · P plan · r resume · n step · s stop · ? help");
-  assert.equal(footer(mk("idle")), "space run · ⏎ details · e edit · tab add · P plan · o options · d remove · ? help");
-  assert.equal(footer(mk("stopping")), "⏎ details · tab add · P plan · ? help");
-  assert.equal(footer(initialState(0)), "tab add · P plan · ? help");
+  assert.equal(footer(mk("running")), "⏎ details · tab history · i add · P plan · p pause · s stop · ? help");
+  assert.equal(footer(mk("paused")), "⏎ details · tab history · i add · P plan · r resume · n step · s stop · ? help");
+  assert.equal(footer(mk("idle")), "space run · ⏎ details · e edit · tab history · i add · P plan · o options · d remove · ? help");
+  assert.equal(footer(mk("stopping")), "⏎ details · tab history · i add · P plan · ? help");
+  assert.equal(footer(initialState(0)), "tab history · i add · P plan · ? help");
+  assert.equal(footer(reduce(initialState(0), { type: "tab" })), "tab tasks · i add · P plan · ? help");
   assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back");
   const t = task(1);
   assert.equal(footer(reduce(initialState(0, [t]), { type: "form", next: openForm(1, t.effective, {}) })), "⏎ save · ctrl+r reset · esc cancel");
@@ -274,7 +276,7 @@ test("hints_per_mode_and_state", () => {
 
 test("help_lists_mode_bindings", () => {
   const list = helpBindings(mk("idle")).map((h) => `${h.key} ${h.label}`);
-  for (const want of ["space run", "⏎ details", "h/l options", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab add", "→ details", "q quit"]) {
+  for (const want of ["space run", "⏎ details", "h/l options", "a add", "o options", "d remove", "p pause", "r resume", "n step", "s stop", "tab history", "i add", "→ details", "q quit"]) {
     assert.ok(list.some((l) => l.startsWith(want)), `list help has ${want}: ${list.join("|")}`);
   }
   const detail = helpBindings(reduce(mk("idle"), { type: "focus", target: "detail" })).map((h) => `${h.key} ${h.label}`);
@@ -449,11 +451,17 @@ test("keys_filter_hints", () => {
   assert.ok(helpBindings(none).some((h) => h.key === "/" && h.label === "filter"));
 });
 
-test("keys_list_tab_opens_add_box", () => {
+test("keys_list_tab_switches_tabs_and_i_adds", () => {
+  const tab = [ui({ type: "tab" })];
+  assert.deepEqual(press(mk("idle"), "tab"), tab);
+  assert.deepEqual(press(mk(), "tab"), tab);
+  assert.deepEqual(press(mk("idle"), "shift+tab"), tab);
+  assert.deepEqual(press(reduce(mk("idle"), { type: "tab" }), "tab"), tab);
   const compose = [ui({ type: "focus", target: "compose" })];
-  assert.deepEqual(press(mk("idle"), "tab"), compose);
-  assert.deepEqual(press(mk(), "tab"), compose);
-  assert.deepEqual(press(mk("idle"), "shift+tab"), compose);
+  assert.deepEqual(press(mk("idle"), "i"), compose);
+  assert.deepEqual(press(reduce(mk(), { type: "tab" }), "i"), compose, "adds from the History tab too");
+  assert.deepEqual(press(mk("idle"), "a"), compose, "a still adds");
+  assert.deepEqual(press(mk("idle"), "P"), [ui({ type: "focus", target: "compose" }), ui({ type: "composeFor", value: "plan" })]);
 });
 
 test("keys_list_right_opens_details", () => {

@@ -79,7 +79,7 @@ test("app_empty_workspace", async () => {
   const f = t.frame();
   assert.match(f, /🦆 duckwright/);
   assert.match(f, /Describe a task, or @ a task file or folder…/);
-  assert.match(f, /tab add · P plan/);
+  assert.match(f, /tab history · i add · P plan/);
   assert.match(f, /\(P to plan a test plan\)/, "the idle box says how to plan a file");
 });
 
@@ -456,7 +456,7 @@ test("app_completion_folder", async () => {
   assert.doesNotMatch(t.frame(), /tasks\/login\.md/);
   assert.match(t.frame(), /esc back/, "still in the add box");
   await t.type("\x1b");
-  assert.match(t.frame(), /tab add/);
+  assert.match(t.frame(), /i add/);
 });
 
 test("app_mixed_submission", async () => {
@@ -565,6 +565,28 @@ test("app_past_task_shows_timeline", async () => {
   assert.doesNotMatch(f, /running/);
 });
 
+test("app_tab_switches_between_tasks_and_history", async () => {
+  const events = [ev.start(), ev.end({ ...OUTCOME, steps: 0 })];
+  const m = new FakeManager([
+    snapshot(1, "Old one", { runId: "20261001-100000-c", past: { runId: "20261001-100000-c", events } }),
+    snapshot(2, "New one"),
+  ]);
+  const t = mount(m);
+  await settle();
+  let f = t.frame();
+  assert.match(f, /"New one"/);
+  assert.doesNotMatch(f, /"Old one"/);
+  assert.match(f, /tab history/);
+  await t.type("\t");
+  f = t.frame();
+  assert.match(f, /"Old one"/);
+  assert.doesNotMatch(f, /"New one"/);
+  assert.match(f, /past run 20261001-100000-c/);
+  assert.match(f, /tab tasks/);
+  await t.type("i");
+  assert.match(t.frame(), /esc back/, "i opens the add box");
+});
+
 test("app_past_run_id_is_sanitized", async () => {
   const d = decision("open the page", [["goto", "https://x.test"]]);
   const events = [ev.start(), ev.step(1), ev.decision(1, d, 0.25), ev.stepEnd(1, d, ["ok"]), ev.end({ ...OUTCOME, steps: 1 })];
@@ -582,7 +604,7 @@ test("app_filter_narrows_sidebar", async () => {
   await settle();
   await t.type("/", "e", "t");
   let f = t.frame();
-  assert.match(f, /TASKS \/et 1\/3/);
+  assert.match(f, /TASKS │ HISTORY \/et 1\/3/);
   assert.match(f, /"beta"/);
   assert.match(f, /\/et▌/);
   assert.doesNotMatch(f, /"alpha"/);
@@ -590,7 +612,7 @@ test("app_filter_narrows_sidebar", async () => {
   assert.match(t.frame().split("\n").filter((l) => l.trim() !== "").pop() ?? "", /^\s*filter "et" · /);
   await t.type("\x1b");
   f = t.frame();
-  assert.match(f, /TASKS(?! \/)/);
+  assert.match(f, /TASKS │ HISTORY(?! \/)/);
   for (const n of ["alpha", "beta", "gamma"]) assert.match(f, new RegExp(`"${n}"`));
 });
 
