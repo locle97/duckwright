@@ -83,6 +83,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .row.child { margin-left: 18px; width: calc(100% - 18px); }
 .row.past { opacity: 0.65; }
 .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .selection-control { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
+.caret-button { background: none; border: 0; padding: 0 4px 0 0; font: inherit; color: inherit; cursor: pointer; }
 .card { padding: 10px 12px; box-shadow: 5px 5px 0 var(--shadow-ink); }
 .step { padding: 8px 10px; }
 .step.open { background: var(--pink); color: #111; box-shadow: 4px 4px 0 var(--shadow-ink); }

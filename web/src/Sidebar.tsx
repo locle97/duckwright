@@ -1,18 +1,19 @@
+import type { KeyboardEvent } from "react";
 import { clean } from "./clean.ts";
 import { planTally, visibleRows } from "./store.ts";
-import type { Action, Row, WebState } from "./store.ts";
+import type { Action, Row, Selection, WebState } from "./store.ts";
 import { Button, STATE_TAG, Tag } from "./ui.tsx";
 
 export function Sidebar(p: { state: WebState; dispatch(a: Action): void; open: boolean; onPicked(): void }) {
   const { state: s, dispatch } = p;
   const rows = visibleRows(s);
 
-  const pick = (selection: any) => {
+  const pick = (selection: Exclude<Selection, null>) => {
     dispatch({ type: "select", selection });
     p.onPicked();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, selection: any) => {
+  const handleKeyDown = (e: KeyboardEvent, selection: Exclude<Selection, null>) => {
     if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
       e.preventDefault();
       pick(selection);
