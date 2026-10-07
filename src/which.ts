@@ -44,3 +44,8 @@ export function quoteForCmd(arg: string): string {
   const meta = /([()\][%!^"`<>&|;, *?])/g;
   return a.replace(meta, "^$1").replace(meta, "^$1");
 }
+
+/** Quote the command itself for cmd.exe (cross-spawn's escapeCommand): carets only, escaped once and never wrapped in quotes. */
+export function escapeCommandForCmd(cmd: string): string {
+  return cmd.replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
+}
