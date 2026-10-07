@@ -114,6 +114,7 @@ duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
+duckwright init
 ```
 
 `duckwright` on its own opens the [interactive TUI](#interactive-tui). With `--web` it serves the [web UI](#web-mode) instead. Given a task or `-f`, it opens the TUI (or the web UI with `--web`) and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
@@ -144,7 +145,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
 
 > [!NOTE]
-> When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
+> When the first argument is exactly `export` or `init`, it is read as that subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
 
 > [!IMPORTANT]
 > Two runs at the same time must use different `--session` names. Otherwise they drive the same browser. The same goes for two TUIs: give each its own `--session`. Inside one TUI, runs get their own sessions automatically.
@@ -337,7 +338,7 @@ Defaults shared by every run live in one per-user file, so you do not repeat fla
 | Linux, macOS | `$XDG_CONFIG_HOME/duckwright/duckwright.conf`, or `~/.config/duckwright/duckwright.conf` when `XDG_CONFIG_HOME` is unset |
 | Windows | `%APPDATA%\duckwright\duckwright.conf` (usually `C:\Users\<you>\AppData\Roaming\duckwright\duckwright.conf`) |
 
-It is flat `key: value` lines (same comment rules as front matter) with the keys of the table above, minus `setup`, plus `max-parallel`, `past` and `theme` (the [options of the same names](#usage)). [`examples/duckwright.conf`](https://github.com/locle97/duckwright/blob/main/examples/duckwright.conf) is a commented template to copy there.
+It is flat `key: value` lines (same comment rules as front matter) with the keys of the table above, minus `setup`, plus `max-parallel`, `past` and `theme` (the [options of the same names](#usage)). `duckwright init` writes a commented template there with every key at its default; it never overwrites an existing file.
 
 ```
 model: opus

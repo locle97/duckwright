@@ -66,3 +66,38 @@ export function runSettings(config: GlobalConfig): TaskSettings {
   const { maxParallel: _m, past: _p, theme: _t, ...rest } = config;
   return rest;
 }
+
+/** What `duckwright init` writes: every key commented out at its built-in default. */
+export const DEFAULT_CONFIG = `# Global defaults for every run, read at startup from ~/.config/duckwright/duckwright.conf (Windows: %APPDATA%\\duckwright\\duckwright.conf).
+# Order: built-in defaults < this file < a task file's front matter < command-line flags.
+# Same keys as a task file's front matter, plus the TUI and web options at the end.
+# Relative paths (skill, state) are resolved from the folder holding this file.
+# allow-file-access is not allowed here; pass it on the command line.
+
+# model: sonnet
+# max-steps: 25
+# headed: false
+# skill: ../prompts/playwright-cli.md
+# session: duckwright
+# state: auth.json
+# network: true
+# twofa-timeout: 300
+# snapshot: hybrid
+
+# max-parallel: 3
+# past: 20
+# theme: auto
+`;
+
+/** Write the default config to `dir` unless it is already there; returns the file and whether it was created. */
+export function initConfig(dir: string = configDir()): { file: string; created: boolean } {
+  const file = path.join(dir, CONFIG_NAME);
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.writeFileSync(file, DEFAULT_CONFIG, { flag: "wx" });
+    return { file, created: true };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return { file, created: false };
+    throw e;
+  }
+}

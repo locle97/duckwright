@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
-import { loadConfig, runSettings } from "./config.ts";
+import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
 import { ExportError, exportRun } from "./export.ts";
 import { Agent } from "./loop.ts";
@@ -59,6 +59,8 @@ export interface CliDeps {
   planner?: Planner;
   /** The global config (duckwright.conf in the user config folder); throws TaskFileError when it is invalid. */
   loadConfig(): GlobalConfig;
+  /** Writes the default config unless it exists; used by `duckwright init`. */
+  initConfig(): { file: string; created: boolean };
   /** Where the TOTP secret is read from. */
   env: Record<string, string | undefined>;
   /** The person to ask for a 2FA code in print mode, named by `label`. Only used when `isTTY()` is true. */
@@ -77,6 +79,7 @@ const DEFAULT_DEPS: CliDeps = {
   loadWeb: () => import("./web/index.ts"),
   loadPastRuns: (limit) => loadPastRuns({ runsDir: "runs", limit }),
   loadConfig: () => loadConfig(),
+  initConfig: () => initConfig(),
   env: process.env,
   human: (label) => createTtyHuman({ label }),
 };
@@ -331,6 +334,19 @@ function webMain(deps: CliDeps, argv: string[], args: RunArgs, config: GlobalCon
   });
 }
 
+/** `duckwright init`: write the default config unless one exists. */
+function initMain(deps: CliDeps, rest: string[]): number {
+  if (rest.length) throw usage("init takes no arguments");
+  try {
+    const { file, created } = deps.initConfig();
+    deps.stdout(created ? `Wrote default config: ${file}` : `Config already exists: ${file}`);
+    return 0;
+  } catch (e) {
+    deps.stderr(`init: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
 function usageError(deps: CliDeps, e: UsageError): number {
   deps.stderr(e.usage);
   deps.stderr(`${e.prog}: error: ${e.message}`);
@@ -349,6 +365,7 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
 
 async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
   if (argv[0] === "export") return exportMain(deps, argv.slice(1));
+  if (argv[0] === "init") return initMain(deps, argv.slice(1));
   // `duckwright plan PLAN ...` is `duckwright --plan PLAN ...`.
   if (argv[0] === "plan") {
     if (argv.length < 2 || argv[1]!.startsWith("-")) throw usage("plan: give a plan file or a planned folder");

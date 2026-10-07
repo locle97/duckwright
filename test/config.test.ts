@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 
-import { configDir, loadConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, configDir, initConfig, loadConfig } from "../src/config.ts";
 import { main } from "../src/cli.ts";
 import type { AgentLike } from "../src/cli.ts";
 import type { AgentOptions } from "../src/loop.ts";
@@ -90,4 +90,25 @@ test("an invalid config stops before anything runs", async () => {
 test("config TUI options do not trip the -p checks", async () => {
   const s = setup("theme: dark\npast: 5\nmax-parallel: 2\n");
   assert.equal(await main(["-p", "task", "--skill", s.skill], s.deps), 0);
+});
+
+test("init writes the default config once and never overwrites it", async () => {
+  const dir = path.join(tmpDir(), "new", "duckwright");
+  assert.deepEqual(initConfig(dir), { file: path.join(dir, "duckwright.conf"), created: true });
+  assert.equal(fs.readFileSync(path.join(dir, "duckwright.conf"), "utf8"), DEFAULT_CONFIG);
+  assert.deepEqual(loadConfig(dir), {});
+  fs.writeFileSync(path.join(dir, "duckwright.conf"), "model: opus\n");
+  assert.equal(initConfig(dir).created, false);
+  assert.equal(fs.readFileSync(path.join(dir, "duckwright.conf"), "utf8"), "model: opus\n");
+});
+
+test("duckwright init reports what it did", async () => {
+  const dir = path.join(tmpDir(), "duckwright");
+  const out: string[] = [];
+  const deps = { initConfig: () => initConfig(dir), stdout: (l: string) => out.push(l), stderr: () => {} };
+  assert.equal(await main(["init"], deps), 0);
+  assert.equal(await main(["init"], deps), 0);
+  assert.match(out[0], /^Wrote default config: /);
+  assert.match(out[1], /^Config already exists: /);
+  assert.equal(await main(["init", "x"], deps), 2);
 });
