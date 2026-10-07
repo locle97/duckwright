@@ -545,6 +545,14 @@ The `Batch:` summary line gives each run's total cost, and every task line its o
 
 Every file at the top of the folder runs as a task, so keep notes out of it.
 
+### Benchmark plans
+
+[`benchmark_plans/`](https://github.com/locle97/duckwright/tree/main/benchmark_plans) holds four written test plans on public demo sites, for [plan mode](#plan-mode). Each is written in a different style, and most have shared setup, steps only a person can do, and a scenario that needs more than a browser. Its [README](benchmark_plans/README.md) lists the split each plan should give: the tasks, the shared setup, the notes and the skipped scenarios.
+
+```bash
+duckwright plan benchmark_plans/01-saucedemo-shop.md
+```
+
 CI runs the typecheck and unit tests on Node 22 and 24 for every push to `main` and every pull request, then builds the package and smoke-tests it in a temporary install prefix.
 
 Releasing to npm: create a GitHub release with a new tag `vX.Y.Z` (Releases → Draft a new release → choose a new tag). `release.yml` sets `package.json` to that version, runs the tests and the install check, publishes to npm with provenance, then commits the version bump to `main`. A release marked as pre-release (e.g. `v0.2.0-beta.1`) is published under the `next` dist-tag and does not bump `main`.
