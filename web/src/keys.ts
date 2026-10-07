@@ -40,7 +40,8 @@ export function commandFor(key: string, s: WebState): Command | null {
   const plan = selectedPlan(s);
   const live = task !== null && (task.state === "running" || task.state === "paused" || task.state === "stopping");
   switch (key) {
-    case "a": return dialog({ kind: "add", mode: "task" });
+    case "i": case "a": return dialog({ kind: "add", mode: "task" });
+    case "t": return act({ type: "tab" });
     case "P": return dialog({ kind: "add", mode: "plan" });
     case "?": return dialog({ kind: "help" });
     case "/": return { type: "focusFilter" };

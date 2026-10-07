@@ -159,3 +159,76 @@ test("clean strips escapes and control characters", () => {
   assert.equal(clean("one\ntwo", { multiline: true }), "one\ntwo");
   assert.equal(clean("tab\there"), "tab here");
 });
+
+const hist = (id: number, createdAt = id) =>
+  snapshot(id, `h${id}`, { createdAt, runId: `p${id}`, past: { runId: `p${id}`, events: [runStart(), { type: "run:end", at: 2, outcome: OUTCOME }] } });
+const ids = (s: WebState): number[] => visibleRows(s).map((r) => (r.kind === "task" ? r.task.id : -r.plan.id));
+
+test("tabs split tasks and history; plans only show on Tasks", () => {
+  let s = apply(initialState(), stateMsg({ tasks: [hist(1), hist(2), snapshot(3, "t", { createdAt: 3 })], plans: [planSnapshot(1, [3])] }));
+  assert.equal(s.tab, "tasks");
+  assert.ok(!ids(s).includes(1) && !ids(s).includes(2));
+  assert.ok(ids(s).includes(-1));
+  s = apply(s, { type: "tab" });
+  assert.equal(s.tab, "history");
+  assert.deepEqual(ids(s), [2, 1]);
+  assert.deepEqual(s.selection, { kind: "task", id: 2 });
+  s = apply(s, { type: "tab" });
+  assert.equal(s.tab, "tasks");
+});
+
+test("each tab keeps its own selection and filter", () => {
+  let s = apply(initialState(), stateMsg({ tasks: [hist(1), hist(2), snapshot(3, "t3", { createdAt: 3 }), snapshot(4, "t4", { createdAt: 4 })] }));
+  s = apply(s, { type: "move", delta: 1 }, { type: "filter", value: "t3" });
+  assert.deepEqual(s.selection, { kind: "task", id: 3 });
+  s = apply(s, { type: "tab" });
+  assert.equal(s.filter, "");
+  s = apply(s, { type: "move", delta: 1 }, { type: "tab" });
+  assert.equal(s.filter, "t3");
+  assert.deepEqual(s.selection, { kind: "task", id: 3 });
+  s = apply(s, { type: "tab" });
+  assert.deepEqual(s.selection, { kind: "task", id: 1 });
+});
+
+test("opens on History when there are only past runs", () => {
+  assert.equal(apply(initialState(), stateMsg({ tasks: [hist(1)] })).tab, "history");
+  assert.equal(apply(initialState(), stateMsg()).tab, "tasks");
+});
+
+test("running a past task again moves it to Tasks and the view follows", () => {
+  let s = apply(initialState(), stateMsg({ tasks: [hist(1), hist(2), snapshot(3, "t", { createdAt: 3 })] }), { type: "tab" });
+  assert.deepEqual(s.selection, { kind: "task", id: 2 });
+  s = apply(s, mgr({ type: "task:updated", task: { ...s.tasks[1]!, state: "running", runCount: 1 } }));
+  assert.equal(s.tab, "tasks");
+  assert.deepEqual(s.selection, { kind: "task", id: 2 });
+  assert.deepEqual(ids(s), [3, 2]);
+  s = apply(s, { type: "tab" });
+  assert.deepEqual(ids(s), [1]);
+  assert.deepEqual(s.selection, { kind: "task", id: 1 });
+});
+
+test("a past task run again while another is selected leaves the view alone", () => {
+  let s = apply(initialState(), stateMsg({ tasks: [hist(1), hist(2)] }));
+  s = apply(s, mgr({ type: "task:updated", task: { ...s.tasks[0]!, state: "running", runCount: 1 } }));
+  assert.equal(s.tab, "history");
+  assert.deepEqual(s.selection, { kind: "task", id: 2 });
+});
+
+test("an added task shows its tab; selecting a past task shows History; a plan's tasks keep the tab", () => {
+  let s = apply(initialState(), stateMsg({ tasks: [hist(1)] }));
+  assert.equal(s.tab, "history");
+  s = apply(s, mgr({ type: "task:added", task: snapshot(2, "new", { createdAt: 5 }) }));
+  assert.equal(s.tab, "tasks");
+  assert.deepEqual(ids(s), [2]);
+  s = apply(s, { type: "select", selection: { kind: "task", id: 1 } });
+  assert.equal(s.tab, "history");
+  assert.deepEqual(s.selection, { kind: "task", id: 1 });
+  s = apply(s, mgr({ type: "task:added", task: snapshot(3, "planned", { createdAt: 6, planId: 7 }) }));
+  assert.equal(s.tab, "history");
+});
+
+test("a new plan does not steal the selection on the History tab", () => {
+  let s = apply(initialState(), stateMsg({ tasks: [hist(1)] }));
+  s = apply(s, mgr({ type: "plan:added", plan: planSnapshot(1, []) }));
+  assert.deepEqual(s.selection, { kind: "task", id: 1 });
+});

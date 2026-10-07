@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from "react";
 import { clean } from "./clean.ts";
-import { planTally, visibleRows } from "./store.ts";
-import type { Action, Row, Selection, WebState } from "./store.ts";
+import { planTally, tabOf, visibleRows } from "./store.ts";
+import type { Action, Row, Selection, Tab, WebState } from "./store.ts";
 import { Button, STATE_TAG, Tag } from "./ui.tsx";
 
 export function Sidebar(p: { state: WebState; dispatch(a: Action): void; open: boolean; onPicked(): void }) {
@@ -57,14 +57,14 @@ export function Sidebar(p: { state: WebState; dispatch(a: Action): void; open: b
     const task = r.task;
     const sel = s.selection?.kind === "task" && s.selection.id === task.id;
     const tag = STATE_TAG[task.state];
-    const rowClasses = ["row", r.planId !== null ? "child" : "", task.past && task.runCount === 0 ? "past" : "", sel ? "sel" : ""].filter(Boolean).join(" ");
+    const rowClasses = ["row", r.planId !== null ? "child" : "", sel ? "sel" : ""].filter(Boolean).join(" ");
     return (
       <div key={`t${task.id}`} className={rowClasses}
         onClick={() => { pick({ kind: "task", id: task.id }); }}
         role="button" tabIndex={0}
         onKeyDown={(e) => { handleKeyDown(e, { kind: "task", id: task.id }); }}
         aria-current={sel ? "true" : undefined}>
-        <span className="name" title={clean(task.text)}>{task.past && task.runCount === 0 ? "past: " : ""}{clean(task.name)}</span>
+        <span className="name" title={clean(task.text)}>{clean(task.name)}</span>
         <span className="row-actions">
           {task.twofa ? <span title="waiting for a code"><Tag tone="ask">?</Tag></span> : null}
           <Tag tone={tag.tone}>{tag.label}</Tag>
@@ -74,15 +74,23 @@ export function Sidebar(p: { state: WebState; dispatch(a: Action): void; open: b
   };
 
   return (
-    <aside className={`sidebar ${p.open ? "open" : ""}`} aria-label="Tasks">
+    <aside className={`sidebar ${p.open ? "open" : ""}`} aria-label="Tasks and history">
+      <div className="tabs" role="tablist" aria-label="Sidebar tabs">
+        {(["tasks", "history"] as Tab[]).map((tab) => (
+          <button key={tab} type="button" role="tab" aria-selected={s.tab === tab} className={`tab ${s.tab === tab ? "active" : ""}`}
+            onClick={() => { if (s.tab !== tab) dispatch({ type: "tab" }); }}>
+            {tab === "tasks" ? "Tasks" : "History"} <span className="count">{s.tasks.filter((t) => tabOf(t) === tab).length}</span>
+          </button>
+        ))}
+      </div>
       <div className="row-actions">
         <Button onClick={() => dispatch({ type: "dialog", value: { kind: "add", mode: "task" } })}>+ Add task</Button>
         <Button kind="pink" onClick={() => dispatch({ type: "dialog", value: { kind: "add", mode: "plan" } })}>Plan a file</Button>
       </div>
-      <input className="input" placeholder="Filter tasks (/)" aria-label="Filter tasks" value={s.filter}
+      <input className="input" placeholder={s.tab === "history" ? "Filter history (/)" : "Filter tasks (/)"} aria-label="Filter tasks" value={s.filter}
         onChange={(e) => dispatch({ type: "filter", value: e.target.value })} data-filter />
       <div className="list">
-        {rows.length === 0 ? <p className="muted">{s.filter === "" ? "No tasks yet. Add one to start." : "No task matches the filter."}</p> : rows.map(renderRow)}
+        {rows.length === 0 ? <p className="muted">{s.filter === "" ? (s.tab === "history" ? "No past runs." : "No tasks yet. Add one to start.") : "No task matches the filter."}</p> : rows.map(renderRow)}
       </div>
     </aside>
   );

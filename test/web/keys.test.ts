@@ -136,3 +136,9 @@ test("shouldIgnore leaves Enter and Space to a focused button or link, but not o
   assert.equal(shouldIgnore(press({ key: "a", inInteractive: true }), state()), false);
   assert.equal(shouldIgnore(press({ key: "Enter" }), state()), false);
 });
+
+test("i adds a task like a, and t switches the sidebar tab", () => {
+  const s = state();
+  assert.deepEqual(commandFor("i", s), commandFor("a", s));
+  assert.deepEqual(commandFor("t", s), { type: "action", action: { type: "tab" } });
+});

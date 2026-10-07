@@ -1,6 +1,7 @@
 /** The keys that work outside a text field; shown in the help dialog and handled by keys.ts. */
 export const SHORTCUTS: { key: string; label: string }[] = [
-  { key: "a", label: "Add a task" },
+  { key: "i / a", label: "Add a task" },
+  { key: "t", label: "Switch between the Tasks and History tabs" },
   { key: "P", label: "Plan a test plan file" },
   { key: "space", label: "Start the selected task (on a plan: run the plan)" },
   { key: "j / ↓", label: "Next row" },

@@ -18,6 +18,10 @@ export type Dialog =
   | { kind: "options"; taskId: TaskId | null }
   | { kind: "confirm"; confirm: Confirm }
   | { kind: "help" };
+/** The sidebar's two tabs: the tasks of this session (and plans), and past runs not run again. */
+export type Tab = "tasks" | "history";
+/** What each tab keeps of its own while the other one is shown. */
+export interface TabMemory { selection: Selection; filter: string }
 export interface Toast { id: number; level: "info" | "error"; message: string; until: number }
 export type Row = { kind: "plan"; plan: PlanSnapshot } | { kind: "task"; task: TaskSnapshot; planId: PlanId | null };
 
@@ -38,6 +42,10 @@ export interface WebState {
   /** Keyed by run id. */
   runs: Record<string, RunView>;
   selection: Selection;
+  /** The sidebar tab shown. */
+  tab: Tab;
+  /** The selection and filter of the tab not shown. */
+  otherTab: TabMemory;
   /** Plans whose task rows are hidden. */
   collapsed: PlanId[];
   filter: string;
@@ -52,6 +60,7 @@ export type Action =
   | { type: "expired" }
   | { type: "tick"; now: number }
   | { type: "select"; selection: Selection }
+  | { type: "tab" }
   | { type: "move"; delta: number }
   | { type: "collapse"; id: PlanId }
   | { type: "filter"; value: string }
@@ -66,7 +75,7 @@ const TOAST_MS = 4000;
 export function initialState(now = 0): WebState {
   return {
     loaded: false, connected: false, ended: false, expired: false, now, tasks: [], plans: [], globals: null, maxParallel: 3, theme: "auto",
-    runs: {}, selection: null, collapsed: [], filter: "", dialog: null, toasts: [],
+    runs: {}, selection: null, tab: "tasks", otherTab: { selection: null, filter: "" }, collapsed: [], filter: "", dialog: null, toasts: [],
   };
 }
 
@@ -76,17 +85,23 @@ const matches = (t: { name: string; text: string }, q: string): boolean => {
   return t.name.toLowerCase().includes(x) || t.text.toLowerCase().includes(x);
 };
 
-/** The sidebar rows: tasks and plans newest first; a plan's tasks under it in the plan's order unless collapsed. */
+/** A past run that has not been run again in this session: it lives on the History tab. */
+export const isHistory = (t: TaskSnapshot): boolean => t.past !== undefined && t.runCount === 0;
+/** The tab a task is listed under. */
+export const tabOf = (t: TaskSnapshot): Tab => (isHistory(t) ? "history" : "tasks");
+
+/** The sidebar rows of the shown tab: tasks and plans newest first; a plan's tasks under it in the plan's order unless collapsed. */
 export function visibleRows(s: WebState): Row[] {
   const planIds = new Set(s.plans.map((p) => p.id));
   const byId = new Map(s.tasks.map((t) => [t.id, t]));
   type Entry = { createdAt: number; id: number; rows: Row[] };
   const entries: Entry[] = [];
   for (const t of s.tasks) {
+    if (tabOf(t) !== s.tab) continue;
     if (t.planId !== undefined && planIds.has(t.planId)) continue;
     if (matches(t, s.filter)) entries.push({ createdAt: t.createdAt, id: t.id, rows: [{ kind: "task", task: t, planId: null }] });
   }
-  for (const p of s.plans) {
+  for (const p of s.tab === "tasks" ? s.plans : []) {
     const tasks = p.taskIds.flatMap((id) => {
       const t = byId.get(id);
       return t && matches(t, s.filter) ? [t] : [];
@@ -113,6 +128,13 @@ function snap(s: WebState): WebState {
   const key = selKey(s.selection);
   if (key !== null && rows.some((r) => rowKey(r) === key)) return s;
   return { ...s, selection: toSelection(rows[0]) };
+}
+
+/** Shows the other tab: the shown one's selection and filter are kept for when it comes back. */
+function switchTab(s: WebState, tab: Tab): WebState {
+  if (tab === s.tab) return s;
+  const { selection, filter } = s.otherTab;
+  return snap({ ...s, tab, otherTab: { selection: s.selection, filter: s.filter }, selection, filter });
 }
 
 /** After rows went away: stay on the selected row if shown, else the next one below it, else the nearest above. */
@@ -194,6 +216,8 @@ function applySnapshot(s: WebState, m: Extract<StreamMessage, { type: "state" }>
     ...s, loaded: true, now, tasks: m.tasks, plans: m.plans, globals: m.globals, maxParallel: m.maxParallel, theme: m.theme, runs,
   };
   next = snap(next);
+  // Opened with nothing but past runs: show them rather than an empty Tasks tab.
+  if (!s.loaded && visibleRows(next).length === 0 && m.tasks.some(isHistory)) next = switchTab(next, "history");
   // Notices are shown once, on the first snapshot only.
   if (!s.loaded) for (const n of m.notices) next = addToast(next, "info", n, now);
   return next;
@@ -201,16 +225,27 @@ function applySnapshot(s: WebState, m: Extract<StreamMessage, { type: "state" }>
 
 function reduceManager(s: WebState, e: ManagerEvent): WebState {
   switch (e.type) {
-    case "task:added":
-      return snap({ ...s, tasks: [...s.tasks, e.task] });
-    case "task:updated":
-      return { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
+    case "task:added": {
+      const next = { ...s, tasks: [...s.tasks, e.task] };
+      // An add from the add box shows the tab it lands on; a plan's tasks arrive while it plans, in the background.
+      return snap(e.task.planId === undefined ? switchTab(next, tabOf(e.task)) : next);
+    }
+    case "task:updated": {
+      const next = { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
+      const before = s.tasks.find((t) => t.id === e.task.id);
+      if (before === undefined || tabOf(before) === tabOf(e.task)) return next;
+      // A past run run again moves to the Tasks tab; when it was selected, the view goes with it.
+      if (s.selection?.kind !== "task" || s.selection.id !== e.task.id) return keepSelection(s, next);
+      const shown = switchTab(keepSelection(s, next), tabOf(e.task));
+      const moved: WebState = { ...shown, selection: { kind: "task", id: e.task.id } };
+      return visibleRows(moved).some((r) => rowKey(r) === `t${e.task.id}`) ? moved : { ...moved, filter: "" };
+    }
     case "task:removed":
       return keepSelection(s, { ...s, tasks: s.tasks.filter((t) => t.id !== e.taskId) });
     case "plan:added": {
       // A new plan is the top row; while the selection sits on the top row (or nothing yet), it moves to the plan.
       const rows = visibleRows(s);
-      const atTop = s.selection === null || rows.length === 0 || rowKey(rows[0]!) === selKey(s.selection);
+      const atTop = s.tab === "tasks" && (s.selection === null || rows.length === 0 || rowKey(rows[0]!) === selKey(s.selection));
       const next = { ...s, plans: [...s.plans, e.plan] };
       return atTop ? { ...next, selection: { kind: "plan", id: e.plan.id } } : next;
     }
@@ -243,8 +278,17 @@ export function reduce(s: WebState, a: Action): WebState {
       return { ...s, expired: true, connected: false };
     case "tick":
       return { ...s, now: a.now, toasts: s.toasts.filter((t) => t.until > a.now) };
-    case "select":
-      return { ...s, selection: a.selection };
+    case "select": {
+      if (a.selection === null) return { ...s, selection: null };
+      const sel = a.selection;
+      const task = sel.kind === "task" ? s.tasks.find((t) => t.id === sel.id) : undefined;
+      const shown = switchTab(s, task ? tabOf(task) : "tasks");
+      const next: WebState = { ...shown, selection: sel };
+      // A row the filter hides is shown by dropping the filter.
+      return visibleRows(next).some((r) => rowKey(r) === selKey(sel)) ? next : { ...next, filter: "" };
+    }
+    case "tab":
+      return switchTab(s, s.tab === "tasks" ? "history" : "tasks");
     case "move": {
       const rows = visibleRows(s);
       if (rows.length === 0) return s;
