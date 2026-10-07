@@ -328,6 +328,21 @@ and check the greeting says "Hello, Linh!".
 
 [`examples/task.md`](https://github.com/locle97/duckwright/blob/main/examples/task.md) is a commented template to copy.
 
+#### Global config
+
+Defaults shared by every run live in `config/duckwright.conf` in the current directory, so you do not repeat flags on every command. It is flat `key: value` lines (same comment rules as front matter) with the keys of the table above, minus `setup`, plus `max-parallel`, `past` and `theme` (the [options of the same names](#usage)). [`config/duckwright.conf`](https://github.com/locle97/duckwright/blob/main/config/duckwright.conf) is a commented template.
+
+```
+model: opus
+max-steps: 40
+theme: dark
+```
+
+- Precedence, lowest first: built-in defaults, the config, a task file's front matter, flags on the command line.
+- A missing file is fine. An invalid line prints `config/duckwright.conf:LINE: problem` and exits with `2` before anything runs.
+- Relative `skill` and `state` paths are resolved from the `config/` folder.
+- `allow-file-access` can only be given on the command line, as in task files.
+
 #### Batch runs
 
 Give `-p -f` several files, or a folder, to run them one after another and print a summary, as in scripts and CI (without `-p`, on a terminal, they open in the [TUI](#interactive-tui) instead):
@@ -463,6 +478,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`expect.ts`](https://github.com/locle97/duckwright/blob/main/src/expect.ts) | `expect` checks: verified against the live page and recorded as assertions |
 | [`expectRequest.ts`](https://github.com/locle97/duckwright/blob/main/src/expectRequest.ts) | `expect-request` checks: verified against the captured network calls and rendered as `waitForResponse` assertions |
 | [`request.ts`](https://github.com/locle97/duckwright/blob/main/src/request.ts) | `request` action: argument checks, the seen-only gate, the fixed `run-code` call, response excerpt and the exported setup lines |
+| [`config.ts`](https://github.com/locle97/duckwright/blob/main/src/config.ts) | Reads the global config, `config/duckwright.conf`, that sits under task-file settings and flags |
 | [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings, the shared setup and the task text) and expands task folders for batch runs |
 | [`plan.ts`](https://github.com/locle97/duckwright/blob/main/src/plan.ts) | Plan mode: the planner call, its schema, and writing and reading planned folders |
 | [`totp.ts`](https://github.com/locle97/duckwright/blob/main/src/totp.ts) | RFC 6238 one-time passwords from a user-supplied secret |

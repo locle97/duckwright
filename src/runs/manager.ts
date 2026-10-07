@@ -132,6 +132,8 @@ export interface ManagerLike {
 export interface ManagerOptions {
   argv: string[];
   defaultSkill: string;
+  /** Global config settings, under every task's own file settings. */
+  settings?: TaskSettings;
   maxParallel: number;
   startRun(spec: RunSpec, human: Human): RunHandle;
   preflight(args: RunArgs): string | null;
@@ -329,7 +331,7 @@ export class RunManager implements ManagerLike {
   }
 
   globals(): Globals {
-    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill);
+    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, this.#o.settings);
     if (parsed.kind !== "args") throw new Error("argv does not describe a run");
     return { base: effectiveOf(parsed.args), overrides: { ...this.#globals } };
   }
@@ -841,7 +843,7 @@ export class RunManager implements ManagerLike {
   }
 
   #argsFor(task: Task): RunArgs {
-    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, task.fileSettings);
+    const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, { ...this.#o.settings, ...task.fileSettings });
     if (parsed.kind !== "args") throw new Error("argv does not describe a run");
     const args = { ...parsed.args };
     for (const o of [this.#globals, task.overrides]) {

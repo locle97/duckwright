@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
+import { loadConfig, runSettings } from "./config.ts";
+import type { GlobalConfig } from "./config.ts";
 import { ExportError, exportRun } from "./export.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
@@ -55,6 +57,8 @@ export interface CliDeps {
   loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
   /** Plan mode's planner; by default `claude -p` with the planner prompt. */
   planner?: Planner;
+  /** The global config (config/duckwright.conf); throws TaskFileError when it is invalid. */
+  loadConfig(): GlobalConfig;
   /** Where the TOTP secret is read from. */
   env: Record<string, string | undefined>;
   /** The person to ask for a 2FA code in print mode, named by `label`. Only used when `isTTY()` is true. */
@@ -72,6 +76,7 @@ const DEFAULT_DEPS: CliDeps = {
   loadTui: () => import("./tui/index.ts"),
   loadWeb: () => import("./web/index.ts"),
   loadPastRuns: (limit) => loadPastRuns({ runsDir: "runs", limit }),
+  loadConfig: () => loadConfig(),
   env: process.env,
   human: (label) => createTtyHuman({ label }),
 };
@@ -241,20 +246,21 @@ class StartError extends Error {}
 
 /** Shared by the TUI and web modes: build the manager, add what was given, open a frontend, run until it closes. */
 async function interactiveMain(
-  deps: CliDeps, argv: string[], args: RunArgs, open: (manager: RunManager, notices: string[]) => Promise<Frontend>,
+  deps: CliDeps, argv: string[], args: RunArgs, config: GlobalConfig, open: (manager: RunManager, notices: string[]) => Promise<Frontend>,
 ): Promise<number> {
   const err = preflightArgs(deps, args) ?? (args.plan !== null ? planProblem(deps, args.plan) : null);
   if (err) {
     deps.stderr(err);
     return 2;
   }
-  const limit = args.past ?? 20;
+  const limit = args.past ?? config.past ?? 20;
   const past = limit === 0 ? { runs: [], skipped: 0 } : deps.loadPastRuns(limit);
   const manager: RunManager = new RunManager({
     argv,
     past: past.runs,
     defaultSkill: deps.prompts.defaultSkill,
-    maxParallel: args.maxParallel ?? 3,
+    maxParallel: args.maxParallel ?? config.maxParallel ?? 3,
+    settings: runSettings(config),
     startRun: (s, human) => startRun(s, {
       prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent, env: deps.env,
       humanFor: () => human,
@@ -300,21 +306,22 @@ async function interactiveMain(
   return deps.signal.aborted ? 130 : exitCode;
 }
 
-function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
-  return interactiveMain(deps, argv, args, async (manager, notices) => {
+function tuiMain(deps: CliDeps, argv: string[], args: RunArgs, config: GlobalConfig): Promise<number> {
+  return interactiveMain(deps, argv, args, config, async (manager, notices) => {
     const tui = await deps.loadTui();
-    const handle = tui.startTui({ manager, theme: args.theme ?? "auto", notices });
+    const handle = tui.startTui({ manager, theme: args.theme ?? config.theme ?? "auto", notices });
     return { done: handle.done, quit: handle.quit, cleanup: handle.restoreTerminal };
   });
 }
 
-function webMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
-  return interactiveMain(deps, argv, args, async (manager, notices) => {
+function webMain(deps: CliDeps, argv: string[], args: RunArgs, config: GlobalConfig): Promise<number> {
+  return interactiveMain(deps, argv, args, config, async (manager, notices) => {
     const web = await deps.loadWeb();
     let handle: WebHandle;
     try {
       handle = await web.startWeb({
-        manager, port: args.port ?? undefined, maxParallel: args.maxParallel ?? 3, notices, theme: args.theme ?? "auto",
+        manager, port: args.port ?? undefined, maxParallel: args.maxParallel ?? config.maxParallel ?? 3, notices,
+        theme: args.theme ?? config.theme ?? "auto",
       });
     } catch (e) {
       throw new StartError(e instanceof Error ? e.message : String(e));
@@ -347,7 +354,16 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     if (argv.length < 2 || argv[1]!.startsWith("-")) throw usage("plan: give a plan file or a planned folder");
     argv = ["--plan", ...argv.slice(1)];
   }
-  const parsed = parseRunArgs(argv, deps.prompts.defaultSkill);
+  let config: GlobalConfig;
+  try {
+    config = deps.loadConfig();
+  } catch (e) {
+    if (!(e instanceof TaskFileError)) throw e;
+    deps.stderr(e.message);
+    return 2;
+  }
+  const defaults = runSettings(config);
+  const parsed = parseRunArgs(argv, deps.prompts.defaultSkill, defaults);
   if (parsed.kind === "help") {
     deps.stdout(parsed.text.trimEnd());
     return 0;
@@ -364,10 +380,10 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
   const { args } = parsed;
   if (args.web) {
     if (args.print) throw usage("--web cannot be used with -p");
-    return webMain(deps, argv, args);
+    return webMain(deps, argv, args, config);
   }
   if (args.port !== null) throw usage("--port applies to --web");
-  if (!args.print && deps.isTTY()) return tuiMain(deps, argv, args);
+  if (!args.print && deps.isTTY()) return tuiMain(deps, argv, args, config);
   // With no terminal, print mode is the fallback, and the TUI-only options have nothing to apply to.
   if (args.print) {
     if (args.maxParallel !== null) throw usage("--max-parallel applies to the TUI, not with -p");
@@ -402,8 +418,8 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     try {
       const tf = loadTaskFile(p);
       // A fresh parse per file, so one file's settings never become another's defaults.
-      // File settings are defaults, so flags given on the command line still win.
-      const fileArgs = parseRunArgs(argv, deps.prompts.defaultSkill, tf.settings);
+      // File settings are defaults over the config, so flags given on the command line still win.
+      const fileArgs = parseRunArgs(argv, deps.prompts.defaultSkill, { ...defaults, ...tf.settings });
       if (fileArgs.kind === "args") runs.push([p, { ...fileArgs.args, task: tf.task }]);
     } catch (e) {
       if (!(e instanceof TaskFileError)) throw e;

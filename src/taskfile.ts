@@ -6,6 +6,7 @@ import { SNAPSHOT_MODES } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { resolvePath } from "./paths.ts";
 import { compareCodePoints } from "./text.ts";
+import { THEME_NAMES } from "./tui/theme.ts";
 import { MAX_TWOFA_TIMEOUT_SEC } from "./twofa.ts";
 
 export type TaskSettings = Partial<{
@@ -22,7 +23,7 @@ export type TaskSettings = Partial<{
   setup: string;
 }>;
 
-type Kind = "int" | "str" | "bool" | "path" | "snapshot";
+export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme";
 
 // Front-matter key -> (setting, kind). allow-file-access is deliberately absent:
 // a shared task file must not be able to grant the browser unrestricted file access.
@@ -108,6 +109,18 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
     }
     return n;
   }
+  if (kind === "count") {
+    if (!/^[0-9]+$/.test(v) || !Number.isSafeInteger(Number(v))) {
+      throw new LineError(`${key} must be a whole number of at least 0, got "${v}"`);
+    }
+    return Number(v);
+  }
+  if (kind === "theme") {
+    if (!(THEME_NAMES as readonly string[]).includes(v)) {
+      throw new LineError(`${key} must be ${THEME_NAMES.join(", ")}, got "${v}"`);
+    }
+    return v;
+  }
   if (kind === "bool") {
     if (v !== "true" && v !== "false") throw new LineError(`${key} must be true or false, got "${v}"`);
     return v === "true";
@@ -145,7 +158,11 @@ export function settingValue(
   }
 }
 
-function parseSettings(lines: [number, string][], baseDir: string, where: string): TaskSettings {
+/** Parse flat `key: value` lines against the `keys` table into settings; `where` names the file in errors. */
+export function parseSettings(
+  lines: [number, string][], baseDir: string, where: string,
+  keys: Readonly<Record<string, readonly [string, Kind]>> = KEYS,
+): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
   for (const [n, line] of lines) {
     try {
@@ -155,8 +172,8 @@ function parseSettings(lines: [number, string][], baseDir: string, where: string
       const key = colon === -1 ? line.trim() : line.slice(0, colon).trim();
       if (colon === -1 || !key) throw new LineError('expected "key: value"');
       if (key === "allow-file-access") throw new LineError("allow-file-access must be passed on the command line");
-      if (!Object.hasOwn(KEYS, key)) throw new LineError(`unknown setting "${key}"`);
-      const [dest, kind] = KEYS[key];
+      if (!Object.hasOwn(keys, key)) throw new LineError(`unknown setting "${key}"`);
+      const [dest, kind] = keys[key];
       if (dest in settings) throw new LineError(`"${key}" is set twice`);
       const v = value(line.slice(colon + 1));
       if (!v) throw new LineError(`"${key}" has no value`);
@@ -166,7 +183,7 @@ function parseSettings(lines: [number, string][], baseDir: string, where: string
       throw e;
     }
   }
-  return settings as TaskSettings;
+  return settings;
 }
 
 /**
@@ -184,7 +201,7 @@ export function loadTaskFile(p: string): TaskFile {
     if (close === -1) throw new TaskFileError(`${p}: front matter is not closed with ---`);
     settings = parseSettings(
       lines.slice(1, close).map((l, i): [number, string] => [i + 2, l]), baseDir, p,
-    );
+    ) as TaskSettings;
     body = lines.slice(close + 1);
   }
   const task = body.join("\n").trim();
