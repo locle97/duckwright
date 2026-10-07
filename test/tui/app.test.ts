@@ -873,3 +873,21 @@ test("a_re_asked_wait_of_the_same_kind_does_not_show_text_typed_for_the_earlier_
   await t.type("\r");
   assert.deepEqual(m.twofaAnswers, []);
 });
+
+test("app_replay_key", async () => {
+  const m = new FakeManager([snapshot(1, "Check the price", { state: "passed", runId: "r1", hasSpec: true })]);
+  const t = mount(m);
+  await settle();
+  await t.type("R");
+  assert.deepEqual(m.log, ["replaySpec:1"]);
+});
+
+test("app_replay_error_toast", async () => {
+  const m = new FakeManager([snapshot(1, "Check the price", { state: "failed", runId: "r1", hasSpec: false })]);
+  m.replayResult = { ok: false, error: "no spec for run r1: only a passed run writes duckwright.spec.ts" };
+  const t = mount(m);
+  await settle();
+  await t.type("R");
+  await settle();
+  assert.match(t.frame(), /no spec for run r1/);
+});

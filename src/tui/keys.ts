@@ -24,6 +24,7 @@ export type Command =
   | { kind: "openEdit"; target: EditTarget; title: string }
   | { kind: "saveEdit" }
   | { kind: "twofaKey"; id: TaskId; wait: TwofaWait; waitKey: string; key: KeyPress }
+  | { kind: "replay"; id: TaskId }
   | { kind: "quit" }
   | { kind: "stopAllAndQuit" } | { kind: "forceExit" };
 
@@ -90,6 +91,16 @@ const SHARED: Binding[] = [
     match: char("o"), when: (c) => hasTask(c) && !isLive(c.t),
     run: (c) => (c.t ? [ui({ type: "form", next: openForm(c.t.id, c.t.effective, c.t.overrides) })] : []),
     hint: { key: "o", label: "options" }, footer: true,
+  },
+  {
+    match: char("R"), when: (c) => c.t !== null && c.t.hasSpec && !isLive(c.t),
+    run: (c) => (c.t ? [{ kind: "replay", id: c.t.id }] : []),
+    hint: { key: "R", label: "replay spec" }, footer: true,
+  },
+  {
+    match: char("R"), when: (c) => c.t !== null && !c.t.hasSpec && !isLive(c.t),
+    run: (c) => (c.t ? [{ kind: "replay", id: c.t.id }] : []),
+    hint: { key: "R", label: "replay spec" }, footer: false,
   },
   {
     match: char("O"), when: (c) => c.s.globals !== null,

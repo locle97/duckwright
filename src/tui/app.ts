@@ -192,6 +192,11 @@ function Workspace(p: AppProps): ReactElement {
         if (r !== null && !r.ok) dispatch({ type: "toast", level: "error", message: r.error });
         return;
       }
+      case "replay":
+        void manager.replaySpec(c.id).then((r) => {
+          if (!r.ok) dispatch({ type: "toast", level: "error", message: r.error });
+        });
+        return;
       case "move":
         manager.movePlanTask(c.id, c.delta);
         return;
