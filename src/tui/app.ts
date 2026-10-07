@@ -239,6 +239,8 @@ function Workspace(p: AppProps): ReactElement {
   }
   const area = { width: columns, height: paneHeight };
   const waiting = pendingTwofa(s);
+  // No wait open: forget anything typed, so a later request (even of the same kind) starts empty.
+  if (waiting === null && twofaText.current.text !== "") twofaText.current = { key: "", text: "" };
   const typed = waiting !== null && twofaText.current.key === twofaWaitKey(waiting) ? twofaText.current.text : "";
   const overlay = s.mode === "confirm" && s.confirm !== null ? h(Confirm, { key: "confirm", s, ...area })
     : waiting !== null && s.mode !== "quitting" ? h(TwofaDialog, { key: "twofa", task: waiting, typed, ...area })

@@ -817,3 +817,21 @@ test("a_waiting_task_is_marked_in_the_sidebar", async () => {
   const row = t.frame().split("\n").find((l) => l.includes('"log in"'))!;
   assert.match(row, /\?/);
 });
+
+test("a_re_asked_wait_of_the_same_kind_does_not_show_text_typed_for_the_earlier_one", async () => {
+  const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m);
+  await settle();
+  m.update(1, { twofa: { kind: "sms" } });
+  await settle();
+  await t.type("1", "2");
+  assert.ok(t.frame().includes("••▌"));
+  m.update(1, { twofa: null });
+  await settle();
+  m.update(1, { twofa: { kind: "sms" } });
+  await settle();
+  assert.match(t.frame(), /SMS code/);
+  assert.ok(!t.frame().includes("•"), "no bullets from the earlier wait");
+  await t.type("\r");
+  assert.deepEqual(m.twofaAnswers, []);
+});
