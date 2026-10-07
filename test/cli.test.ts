@@ -1197,3 +1197,86 @@ test("plain_sink_warning_on_stderr", async () => {
   assert.equal(e2.err.filter((l) => l.startsWith("warning: could not write ")).length, 2);
   assert.ok(!e2.out.some((l) => l.includes("could not write")));
 });
+
+const PLAN_DOC = {
+  setup: "Log in as qa.", notes: ["Start the server"],
+  tasks: [{ id: "S1", title: "Login works", preconditions: [], steps: ["Open /login"], expected: ["Welcome shows"] }],
+  skipped: [{ id: "S2", title: "Exit codes", reason: "needs a shell" }],
+};
+
+test("plan_print_writes_task_files_and_runs_nothing", async () => {
+  const e = env();
+  fs.writeFileSync(path.join(e.tmp, "qa-plan.md"), "# plan");
+  const seen: string[] = [];
+  const planner = async (o: { planFile: string; model: string }) => {
+    seen.push(`${o.planFile}|${o.model}`);
+    return { doc: PLAN_DOC, cost: 0.02 };
+  };
+  assert.equal(await main(["plan", "qa-plan.md", "-p", "--model", "opus", "--skill", e.argv[2]], e.deps({ planner })), 0);
+  assert.deepEqual(seen, ["qa-plan.md|opus"]);
+  const folder = path.join("tasks", "qa-plan");
+  assert.ok(fs.existsSync(path.join(e.tmp, folder, "01-login-works.md")));
+  assert.ok(fs.existsSync(path.join(e.tmp, folder, "plan.json")));
+  assert.equal(runDirs(e.tmp).length, 0, "nothing ran");
+  const out = e.out.join("\n");
+  assert.match(out, /Plan: 1 task in tasks\/qa-plan\/ {2}Cost: \$0\.0200/);
+  assert.match(out, /Shared setup: tasks\/qa-plan\/shared\/setup\.md/);
+  assert.match(out, /Before you run: Start the server/);
+  assert.match(out, /Skipped S2 Exit codes: needs a shell/);
+  assert.match(out, /Review them in the TUI with: duckwright plan tasks\/qa-plan\n/);
+  assert.match(out, /Or run them all with: duckwright -p -f tasks\/qa-plan\//);
+});
+
+test("plan_print_errors", async () => {
+  const e = env();
+  const planner = async () => { throw new Error("claude error: overloaded"); };
+  fs.writeFileSync(path.join(e.tmp, "p.md"), "# plan");
+  assert.equal(await main(["plan", "p.md", "-p"], e.deps({ planner })), 1);
+  assert.ok(e.err.includes("plan error: claude error: overloaded"));
+  assert.equal(await main(["plan", "nope.md", "-p"], e.deps({ planner })), 2);
+  assert.ok(e.err.includes("nope.md: not found"));
+  assert.equal(await main(["plan", "p.md", "-p", "task"], e.deps({ planner })), 2);
+  assert.ok(e.err.some((l) => l.includes("--plan only writes task files with -p")));
+  assert.equal(await main(["plan"], e.deps({ planner })), 2);
+  assert.ok(e.err.some((l) => l.includes("plan: give a plan file or a planned folder")));
+  assert.equal(await main(["plan", "p.md", "-p"], e.deps({ planner, which: () => null })), 2);
+  assert.ok(e.err.includes("claude CLI not found on PATH (install Claude Code)"));
+});
+
+test("plan_opens_the_tui_and_plans_there", async () => {
+  const e = env();
+  fs.writeFileSync(path.join(e.tmp, "qa-plan.md"), "# plan");
+  let manager: ManagerLike | null = null;
+  const planned = new Promise<void>((resolve) => {
+    const load = async (): Promise<TuiModule> => ({
+      startTui(o): TuiHandle {
+        manager = o.manager;
+        const done = new Promise<void>((r) => {
+          o.manager.subscribe((ev: ManagerEvent) => {
+            if (ev.type === "plan:updated" && ev.plan.state === "ready") {
+              resolve();
+              r();
+            }
+          });
+        });
+        return { done, restoreTerminal: () => {}, quit: () => {} };
+      },
+    });
+    void main(["plan", "qa-plan.md", "--skill", e.argv[2]],
+      e.deps({ isTTY: () => true, loadTui: load, planner: async () => ({ doc: PLAN_DOC, cost: 0 }) }));
+  });
+  await planned;
+  const m = manager as unknown as ManagerLike;
+  assert.deepEqual(m.list().map((t) => t.name), ["S1: Login works"]);
+  assert.equal(m.plans()[0]!.folder, path.join("tasks", "qa-plan"));
+  // Nothing runs until asked.
+  assert.equal(m.list()[0]!.state, "idle");
+});
+
+test("plan_in_the_tui_with_a_missing_file_fails_before_load", async () => {
+  const e = env();
+  const fake = fakeTui();
+  assert.equal(await main(["plan", "nope.md", "--skill", e.argv[2]], e.deps({ isTTY: () => true, loadTui: fake.load })), 2);
+  assert.ok(e.err.includes("nope.md: not found"));
+  assert.equal(fake.loads, 0);
+});

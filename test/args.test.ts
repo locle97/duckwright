@@ -257,3 +257,12 @@ test("export_help_mentions_api", () => {
   const p = parseExportArgs(["-h"]);
   assert.match(p.kind === "help" ? p.text : "", /--api/);
 });
+
+test("plan_option", () => {
+  const p = parseRunArgs(["--plan", "docs/qa.md", "--model", "opus"], "s.md");
+  assert.ok(p.kind === "args");
+  assert.equal(p.args.plan, "docs/qa.md");
+  assert.equal(p.args.model, "opus");
+  assert.throws(() => parseRunArgs(["--plan"], "s.md"), /argument --plan: expected one argument/);
+  assert.ok(RUN_USAGE.includes("[--plan PLAN]"));
+});

@@ -44,6 +44,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
 - **API assertions**: with network capture on, the agent can also check the calls its last step made with `expect-request`: method, path or URL, and status, optionally a field of the JSON response. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
+- **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run one after another.
 - **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink. TypeScript and the test tools are development dependencies.
 
 ## Getting started
@@ -109,6 +110,7 @@ duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
                   [--allow-file-access] [--[no-]export] [--[no-]network]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
+duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
 ```
 
@@ -120,6 +122,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | --- | --- | --- |
 | `-p`, `--print` | off | Run the task, print the report and exit, without the [TUI](#interactive-tui). Used automatically when there is no terminal |
 | `-f`, `--file` | none | Read the task, and optional settings, from a [task file](#task-files) instead of the command line. Takes one or more files or folders; several make a [batch](#batch-runs) |
+| `--plan` | none | [Plan mode](#plan-mode): split a test plan file into task files and list them in the TUI, or open a planned folder again. With `-p`, only write the task files. `duckwright plan PLAN` is the same |
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window (`--no-headed` overrides a task file) |
@@ -166,7 +169,8 @@ Six keys to learn first:
 | Key | Does |
 | --- | --- |
 | `a` | Add a task |
-| `space` | Start the selected task |
+| `P` | [Plan](#plan-mode) a test plan file |
+| `space` | Start the selected task (on a plan's row: run the plan) |
 | `⏎` | Show the selected task's details |
 | `p` | Pause or resume it |
 | `s` | Stop it |
@@ -181,6 +185,45 @@ In the add box, `@` mentions task files: `@tasks/login.md` adds that file, and `
 ```
 
 A completion list opens as you type after `@`. `tab` completes (going into a folder), and `⏎` accepts. Write a path with spaces as `@"my tasks/a.md"`, and `\@` for a literal `@`. If any mention fails (a missing file, a folder with no task files, bad front matter), nothing from that line is added and the errors show under the box.
+
+### Plan mode
+
+Plan mode turns a test plan you wrote, such as a QA plan with environment setup, test data, and numbered scenarios like [this one](docs/superpowers/test-plans/2026-10-06-network-capture-redacted-history-test-plan.md), into tasks you review in the TUI and run one after another.
+
+```bash
+duckwright plan docs/qa-plan.md      # or: duckwright --plan docs/qa-plan.md
+```
+
+Or press `P` in the TUI and `@` the plan file. A planner call (`claude -p`, no tools, with the run model) reads the plan and writes a folder of [task files](#task-files):
+
+```text
+tasks/qa-plan/
+  01-login-works.md      one task per scenario, in the plan's order
+  02-logout-works.md
+  shared/setup.md        what every scenario does first in the browser (logging in, opening the app)
+  plan.json              the plan's order, its notes, and the scenarios it skipped
+```
+
+- Each task file keeps its scenario's preconditions, steps, and expected results, and names the shared setup with `setup: shared/setup.md` in its front matter. The setup's text is put first in the task the agent gets, because every task runs in its own fresh browser.
+- Setup a person must do, such as starting a server or loading test data with a script, is listed as notes under **Before you run**, since the agent only has a browser. Scenarios that need more than a browser (a shell, files, several processes) are not planned; they are listed with the reason.
+- An existing folder is never overwritten: planning the same file again writes `tasks/qa-plan-2/`.
+
+The plan shows in the task list as a row with its tasks under it, in run order. Nothing runs until you say so:
+
+| Key | On the plan's row | On one of its tasks |
+| --- | --- | --- |
+| `⏎` | the plan: state, shared setup, notes, tasks, skipped scenarios | the task |
+| `space` | run every task, one after another, in order | run just this task |
+| `F` | run the failed and stopped tasks again, in order | the same, for its plan |
+| `e` | edit the shared setup | edit the task file |
+| `J` / `K` | | move the task down / up |
+| `d` | remove the plan and its tasks from the list (the files stay) | remove the task from the plan |
+| `s` | stop the plan run, or cancel planning | stop the task |
+| `c` | fold or unfold the plan | the same, for its plan |
+
+The editor opens the file as it is, front matter included: `⏎` starts a new line, `ctrl+s` saves, `esc` cancels. A file that no longer loads (a bad front-matter line, an empty task) is not saved, and the reason shows under the text. Moving and removing tasks is saved to `plan.json`, so `duckwright plan tasks/qa-plan/` (or `P` with `@tasks/qa-plan/`) opens the plan again as you left it, without planning it again.
+
+With `-p`, `duckwright plan docs/qa-plan.md -p` only writes the task files and prints where they are, the notes and the skipped scenarios; run them later with `duckwright -p -f tasks/qa-plan/`. The folder's files run in name order there, which is the plan's original order.
 
 ### Authenticated pages
 
@@ -230,10 +273,11 @@ and check the greeting says "Hello, Linh!".
 | `export` | `true` or `false` |
 | `network` | `true` or `false` |
 | `snapshot` | `hybrid`, `full` or `grep` |
+| `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
 - Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
-- Relative `skill` and `state` paths are resolved from the file's folder, not the current directory.
+- Relative `skill`, `state` and `setup` paths are resolved from the file's folder, not the current directory.
 - `allow-file-access` can only be given on the command line, so a shared task file can never turn it on.
 - With `-p`, give either a task or `-f`, not both (the TUI takes both). A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
 
@@ -373,7 +417,8 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`expect.ts`](https://github.com/locle97/duckwright/blob/main/src/expect.ts) | `expect` checks: verified against the live page and recorded as assertions |
 | [`expectRequest.ts`](https://github.com/locle97/duckwright/blob/main/src/expectRequest.ts) | `expect-request` checks: verified against the captured network calls and rendered as `waitForResponse` assertions |
 | [`request.ts`](https://github.com/locle97/duckwright/blob/main/src/request.ts) | `request` action: argument checks, the seen-only gate, the fixed `run-code` call, response excerpt and the exported setup lines |
-| [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
+| [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings, the shared setup and the task text) and expands task folders for batch runs |
+| [`plan.ts`](https://github.com/locle97/duckwright/blob/main/src/plan.ts) | Plan mode: the planner call, its schema, and writing and reading planned folders |
 | [`observe.ts`](https://github.com/locle97/duckwright/blob/main/src/observe.ts) | Tab list and page snapshot |
 | [`prompt.ts`](https://github.com/locle97/duckwright/blob/main/src/prompt.ts) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.ts`](https://github.com/locle97/duckwright/blob/main/src/pw.ts) | `playwright-cli` wrapper |
@@ -433,7 +478,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [x] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [x] **Batch runs**: `duckwright -f tasks/` (or several files) runs task files one after another and prints a summary.
 - [x] **TUI by default**: running `duckwright` with no arguments opens the [TUI](#interactive-tui) directly, and the `--tui` flag goes away. The current one-shot CLI mode becomes `--print` / `-p`, as in Claude Code: `duckwright -p "<task>"` (or `-p -f tasks/login.md`) runs the task, prints the report, and exits, which is the mode to use in scripts and CI. The TUI-only options (`--max-parallel`, `--past`, `--theme`) then apply without a flag, and `--print` with no terminal is the supported non-interactive path.
-- [ ] **Plan mode**: `duckwright plan <plan-file>` (or `--plan`) takes a plan written by the user, such as a QA test plan with environment setup, test data, and numbered scenarios like [this one](docs/superpowers/test-plans/2026-10-06-network-capture-redacted-history-test-plan.md). A planner agent (Claude) first breaks the plan into separate tasks and writes them as task files under `tasks/`, one per scenario, carrying over each scenario's preconditions, steps, and expected results and keeping shared setup out of the individual tasks. The tasks are then added to the TUI task list, where they can be reviewed, reordered, edited, or removed before running, and run one after another like a batch.
+- [x] **Plan mode**: `duckwright plan <plan-file>` (or `--plan`) takes a plan written by the user, such as a QA test plan with environment setup, test data, and numbered scenarios like [this one](docs/superpowers/test-plans/2026-10-06-network-capture-redacted-history-test-plan.md). A planner agent (Claude) first breaks the plan into separate tasks and writes them as task files under `tasks/`, one per scenario, carrying over each scenario's preconditions, steps, and expected results and keeping shared setup out of the individual tasks. The tasks are then added to the TUI task list, where they can be reviewed, reordered, edited, or removed before running, and run one after another like a batch.
 - [ ] **Parallel batches**: `-j N` runs up to N task files at once, giving each its own `--session` name automatically so they never share a browser.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.

@@ -118,7 +118,8 @@ async function planMain(deps: CliDeps, args: RunArgs): Promise<number> {
   for (const t of loaded.tasks) deps.stdout(`  ${t.path}`);
   for (const n of r.doc.notes) deps.stdout(`Before you run: ${n}`);
   for (const x of r.doc.skipped) deps.stdout(`Skipped ${x.id} ${x.title}: ${x.reason}`);
-  deps.stdout(`Review them, then run: duckwright -f ${loaded.folder}${path.sep} (or open them in the TUI: duckwright plan ${loaded.folder})`);
+  deps.stdout(`Review them in the TUI with: duckwright plan ${loaded.folder}`);
+  deps.stdout(`Or run them all with: duckwright -p -f ${loaded.folder}${path.sep}`);
   return 0;
 }
 

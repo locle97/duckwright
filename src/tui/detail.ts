@@ -52,7 +52,7 @@ function PlanDetail({ s, p }: { s: ViewState; p: PlanSnapshot }): ReactElement {
   }
   const cost = p.cost + tally.cost;
   const out: (ReactElement | null)[] = [
-    h(Box, { key: "head", flexDirection: "row" },
+    h(Box, { flexDirection: "row" },
       h(Box, { flexShrink: 1 }, row(h(Text, { bold: true }, sanitize(p.name)))),
       h(Box, { flexShrink: 0, marginLeft: 2 }, row(state, `  $${cost.toFixed(3)}`))),
     row(muted("plan: "), sanitize(p.source), p.folder !== null ? muted("  tasks: ") : null, p.folder !== null ? sanitize(p.folder) : null),
@@ -61,21 +61,21 @@ function PlanDetail({ s, p }: { s: ViewState; p: PlanSnapshot }): ReactElement {
   if (p.state === "planning") out.push(row(muted("Claude is splitting the plan into one task per scenario. s cancels.")));
   const section = (key: string, title: string, items: (ReactElement | string)[]): void => {
     if (items.length === 0) return;
-    out.push(h(Box, { key: `${key}-gap` }, row(" ")), h(Box, { key }, row(h(Text, { bold: true }, title))),
-      ...items.map((x, i) => h(Box, { key: `${key}${i}` }, typeof x === "string" ? row(x) : x)));
+    out.push(row(" "), row(h(Text, { bold: true }, title)), ...items.map((x) => (typeof x === "string" ? row(x) : x)));
   };
   if (p.setup !== null) {
     section("setup", "Shared setup, done first in every task (e edits)", sanitize(p.setup, { multiline: true }).split("\n").map((l) => `  ${l}`));
   }
   section("notes", "Before you run (the agent can't do these)", p.notes.map((n) => `  - ${sanitize(n)}`));
+  section("skipped", "Not planned: they need more than a browser", p.skipped.map((x) => `  - ${sanitize(x.id)} ${sanitize(x.title)}: ${sanitize(x.reason)}`));
   section("tasks", "Tasks, in run order (J/K move a task)", p.taskIds.flatMap((id, i) => {
     const t = s.tasks.find((x) => x.id === id);
     if (!t) return [];
     const icon = p.queued.includes(id) ? { icon: "◌", color: role.running } : theme.taskIcon(t.state);
     return [row(`  ${String(i + 1).padStart(String(p.taskIds.length).length)}. `, h(Text, { color: icon.color }, icon.icon), ` ${sanitize(t.name)}`)];
   }));
-  section("skipped", "Not planned: they need more than a browser", p.skipped.map((x) => `  - ${sanitize(x.id)} ${sanitize(x.title)}: ${sanitize(x.reason)}`));
-  return h(Box, { flexDirection: "column" }, ...out);
+  // Rows never shrink: a plan longer than the pane is cut at the bottom, never squeezed.
+  return h(Box, { flexDirection: "column" }, ...out.map((x, i) => h(Box, { key: i, flexShrink: 0 }, x)));
 }
 
 function IdleTask({ s, t }: { s: ViewState; t: TaskSnapshot }): ReactElement {
@@ -84,7 +84,7 @@ function IdleTask({ s, t }: { s: ViewState; t: TaskSnapshot }): ReactElement {
   const text = sanitize(t.text, { multiline: true }).split("\n");
   const width = Math.max(...SETTINGS.map(([, label]) => label.length)) + 2;
   return h(Box, { flexDirection: "column" },
-    ...text.map((line, i) => h(Box, { key: `t${i}` }, row(line))),
+    ...text.map((line, i) => h(Box, { key: `t${i}` }, row(line || " "))),
     row(" "),
     row(h(Text, { color: role.muted }, "source: "), t.source.kind === "file" ? sanitize(t.source.path) : "typed"),
     plan !== null

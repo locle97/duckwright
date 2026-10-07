@@ -47,9 +47,7 @@ function TaskRow({ t, cost, selected, focused, showCost, indent, queued }: {
     h(Box, { flexShrink: 0 }, marks));
 }
 
-function PlanRow({ s, p, selected, focused, showCost }: {
-  s: ViewState; p: PlanSnapshot; selected: boolean; focused: boolean; showCost: boolean;
-}): ReactElement {
+function PlanRow({ s, p, selected, focused }: { s: ViewState; p: PlanSnapshot; selected: boolean; focused: boolean }): ReactElement {
   const theme = useTheme();
   const tally = planTally(s, p);
   const fold = s.collapsed.includes(p.id) ? "▸" : "▾";
@@ -62,12 +60,12 @@ function PlanRow({ s, p, selected, focused, showCost }: {
       ` ${tally.passed}/${tally.total}`,
       tally.failed > 0 ? h(Text, { color: theme.role.failed }, ` ✗${tally.failed}`) : null);
   }
-  const cost = p.cost + tally.cost;
+  // No cost here: the name needs the room, and the plan's detail shows it.
   return h(Box, { flexDirection: "row" },
     h(Box, { flexGrow: 1, flexShrink: 1 },
       h(Text, { wrap: "truncate-end" }, h(Text, { color: theme.role.accent }, fold), " ",
         h(Text, { inverse: selected && focused, bold: true }, sanitize(p.name)))),
-    h(Box, { flexShrink: 0 }, h(Text, { wrap: "truncate-end" }, status, showCost && cost > 0 ? `  $${cost.toFixed(3)}` : null)));
+    h(Box, { flexShrink: 0 }, h(Text, { wrap: "truncate-end" }, status)));
 }
 
 export function Sidebar({ s, width, height, focused, showCost }: SidebarProps): ReactElement {
@@ -83,7 +81,7 @@ export function Sidebar({ s, width, height, focused, showCost }: SidebarProps): 
   const title = query !== "" ? `TASKS /${sanitize(query)} ${shownTasks}/${s.tasks.length}` : "TASKS";
   const rows = visible.slice(start, start + size).map((r, i) => {
     const selected = start + i === at;
-    if (r.kind === "plan") return h(PlanRow, { key: `p${r.plan.id}`, s, p: r.plan, selected, focused, showCost });
+    if (r.kind === "plan") return h(PlanRow, { key: `p${r.plan.id}`, s, p: r.plan, selected, focused });
     const t = s.tasks[r.index]!;
     const run = t.runId !== null ? s.runs[t.runId] : undefined;
     const queued = r.planId !== null && (s.plans.find((p) => p.id === r.planId)?.queued.includes(t.id) ?? false);

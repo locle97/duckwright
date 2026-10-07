@@ -443,8 +443,12 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
       const after = { ...s, tasks, selected: Math.max(0, tasks.findIndex((t) => t.id === selId)) };
       return keepSelection(s, after);
     }
-    case "plan:added":
-      return { ...s, plans: [...s.plans, e.plan] };
+    case "plan:added": {
+      // A new plan is the top row; while the selection sits on the top row (or nothing yet), it moves to the plan.
+      const atTop = selectedRowIndex(s) <= 0;
+      const next = { ...s, plans: [...s.plans, e.plan] };
+      return atTop ? { ...next, selectedPlan: e.plan.id } : next;
+    }
     case "plan:updated":
       return snap({ ...s, plans: s.plans.map((p) => (p.id === e.plan.id ? e.plan : p)) });
     case "plan:removed":

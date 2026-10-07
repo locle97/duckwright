@@ -140,12 +140,12 @@ const LIST_ONLY: Binding[] = [
   { match: named("tab"), when: () => true, run: compose("task"), hint: { key: "tab", label: "add" }, footer: true },
   { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: false },
   { match: char("h", "l"), when: (c) => c.s.globals !== null, run: () => [ui({ type: "focus", target: "options" })], hint: { key: "h/l", label: "options" }, footer: false },
-  { match: anyOf(named("up"), char("k")), when: hasTask, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
-  { match: anyOf(named("down"), char("j")), when: hasTask, run: move(1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
-  { match: named("pageUp"), when: hasTask, run: move(-PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
-  { match: named("pageDown"), when: hasTask, run: move(PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
-  { match: char("g"), when: hasTask, run: () => [ui({ type: "selectEdge", edge: "first" })], hint: { key: "g/G", label: "first / last" }, footer: false },
-  { match: char("G"), when: hasTask, run: () => [ui({ type: "selectEdge", edge: "last" })], hint: { key: "g/G", label: "first / last" }, footer: false },
+  { match: anyOf(named("up"), char("k")), when: hasRow, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
+  { match: anyOf(named("down"), char("j")), when: hasRow, run: move(1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },
+  { match: named("pageUp"), when: hasRow, run: move(-PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
+  { match: named("pageDown"), when: hasRow, run: move(PAGE), hint: { key: "pgup/pgdn", label: "page" }, footer: false },
+  { match: char("g"), when: hasRow, run: () => [ui({ type: "selectEdge", edge: "first" })], hint: { key: "g/G", label: "first / last" }, footer: false },
+  { match: char("G"), when: hasRow, run: () => [ui({ type: "selectEdge", edge: "last" })], hint: { key: "g/G", label: "first / last" }, footer: false },
 ];
 
 const hasRun = (c: Ctx): boolean => selectedRun(c.s) !== null;
