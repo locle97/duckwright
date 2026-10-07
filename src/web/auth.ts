@@ -41,13 +41,22 @@ export interface AuthRequest {
   headers: Record<string, string | string[] | undefined>;
 }
 
+/**
+ * Authorize a request. When redirectTo is non-null, the caller must send the redirect
+ * response and must not run the request handler (the ?t= branch runs before the Origin check).
+ */
 export function authorize(req: AuthRequest, o: { token: string; port: number }): AuthResult {
   const header = (name: string): string | undefined => {
     const v = req.headers[name];
     return Array.isArray(v) ? v[0] : v;
   };
   if (!hostOk(header("host"), o.port)) return { ok: false, status: 403 };
-  const url = new URL(req.url, `http://localhost:${o.port}`);
+  let url: URL;
+  try {
+    url = new URL(req.url, `http://localhost:${o.port}`);
+  } catch {
+    return { ok: false, status: 401 };
+  }
   const given = url.searchParams.get("t");
   if (given !== null) {
     if (!sameToken(given, o.token)) return { ok: false, status: 401 };
@@ -55,7 +64,7 @@ export function authorize(req: AuthRequest, o: { token: string; port: number }):
     return {
       ok: true,
       setCookie: `${COOKIE_NAME}=${o.token}; HttpOnly; SameSite=Strict; Path=/`,
-      redirectTo: url.pathname + url.search,
+      redirectTo: url.pathname.replace(/^\/+/, "/") + url.search,
     };
   }
   if (!sameToken(cookieValue(header("cookie"), COOKIE_NAME), o.token)) return { ok: false, status: 401 };
