@@ -1,7 +1,7 @@
 import type { PlanSnapshot, TaskSnapshot } from "../../src/runs/manager.ts";
 import type { RunView } from "../../src/runviews.ts";
 import {
-  moveTask, openEditor, planControl, runPlan, taskControl,
+  moveTask, openEditor, planControl, replaySpec, replayTitle, runPlan, taskControl,
 } from "./actions.ts";
 import type { Dispatch } from "./actions.ts";
 import { clean } from "./clean.ts";
@@ -92,6 +92,7 @@ function TaskView(p: { state: WebState; task: TaskSnapshot; dispatch: Dispatch }
           {live ? <Button kind="red" disabled={task.state === "stopping"} onClick={() => void taskControl(dispatch, id, "stop")}>Stop</Button> : null}
           <Button disabled={live || !!task.past} title={task.past ? "A past run cannot be edited" : "Edit the task"} onClick={() => void openEditor(dispatch, { kind: "task", id }, task.name)}>Edit</Button>
           <Button onClick={() => dispatch({ type: "dialog", value: { kind: "options", taskId: id } })}>Options</Button>
+          {replayTitle(task) !== null ? <Button title={replayTitle(task)!} onClick={() => void replaySpec(dispatch, id)}>Replay spec</Button> : null}
           {inPlan ? <Button small onClick={() => void moveTask(dispatch, id, -1)} title="Move up in the plan">↑</Button> : null}
           {inPlan ? <Button small onClick={() => void moveTask(dispatch, id, 1)} title="Move down in the plan">↓</Button> : null}
           <Button kind="red" disabled={live} onClick={() => dispatch({ type: "dialog", value: { kind: "confirm", confirm: { kind: "remove", taskId: id } } })}>Remove</Button>
