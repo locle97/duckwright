@@ -126,7 +126,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
-| `--twofa-timeout` | `300` | Seconds to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
+| `--twofa-timeout` | `300` | Seconds (at most `2147483`) to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
 | `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed or `@`-mentioned inside it, so it takes no task or `--file`, and it needs a terminal |
 | `--max-parallel` | `3` | With `--tui`, how many runs may be active at once |
 | `--past` | `20` | With `--tui`, how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none |
@@ -212,8 +212,9 @@ duckwright "Log in to the demo app as linh and open the dashboard"
 
 - **Print mode** asks on the terminal (prompts go to stderr; a secret is not echoed). With no terminal (CI, a pipe) a step that needs a person fails at once with `no way to ask for a code`, and the agent can finish with `done failure`. `totp` still works unattended when `DUCKWRIGHT_TOTP_SECRET` is set. In a batch the prompt names the task, for example `[2/3] tasks/b.md`.
 - **`--tui`** shows a masked dialog and marks the waiting task with `?` in the list; the other runs keep going, and a second request waits its turn. `esc` cancels that step.
-- **Waiting** is bounded by `--twofa-timeout` (default 300 seconds; also a task-file key). Ctrl-C always stops the wait. A run may use at most 5 `twofa` actions.
-- **Nothing is recorded**: the secret and every code are scrubbed from `history.json`, `events.jsonl`, `network/`, the prompts and the terminal output. The recorded Playwright code shows `[2FA CODE]`.
+- **Waiting** is bounded by `--twofa-timeout` (default 300 seconds, at most 2147483; also a task-file key). Ctrl-C always stops the wait. A run may use at most 5 `twofa` actions.
+- **Nothing is recorded by Duckwright**: the secret and every code are scrubbed from `history.json`, `events.jsonl`, `network/`, `page/snapshot.yml`, the prompts and the step lines it prints. The recorded Playwright code shows `[2FA CODE]`. Two things are outside that: the code you type for an SMS or email prompt is echoed in your own terminal (so it stays in your scrollback; the TOTP secret is not echoed), and playwright-cli keeps its own page snapshots in `.playwright-cli/` in the working folder, which can contain a code (codes expire) and are not part of Duckwright's run folder.
+- **Short codes are masked everywhere**: a human code of only 4 digits is replaced wherever it appears, including in unrelated text such as a year.
 - **An invalid `DUCKWRIGHT_TOTP_SECRET`** stops Duckwright before anything runs (exit `2`).
 - **Exported tests**: a `totp` step becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
 
@@ -248,6 +249,7 @@ and check the greeting says "Hello, Linh!".
 | `state` | a path |
 | `export` | `true` or `false` |
 | `network` | `true` or `false` |
+| `twofa-timeout` | a whole number from 1 to 2147483 |
 | `snapshot` | `hybrid`, `full` or `grep` |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
