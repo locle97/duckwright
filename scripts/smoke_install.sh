@@ -23,6 +23,28 @@ if [ "$got" != "duckwright $version" ]; then
   exit 1
 fi
 
+# The web UI and its server must ship in the tarball and load.
+if [ ! -f "$prefix/lib/node_modules/duckwright/dist/web-ui/index.html" ]; then
+  echo "web UI missing from the package" >&2
+  exit 1
+fi
+"$node_bin" -e "import('$prefix/lib/node_modules/duckwright/dist/web/index.js')"
+
+# --web and -p exclude each other.
+set +e
+err="$("$prefix/bin/duckwright" --web -p x 2>&1 >/dev/null)"
+code=$?
+set -e
+if [ "$code" -ne 2 ]; then
+  echo "expected --web -p exit code 2, got $code" >&2
+  echo "$err" >&2
+  exit 1
+fi
+case "$err" in
+  *"--web cannot be used with -p"*) ;;
+  *) echo "stderr missing '--web cannot be used with -p':" >&2; echo "$err" >&2; exit 1 ;;
+esac
+
 # PATH is empty so a machine that has `claude` installed never starts a real run.
 # Reaching the claude check also proves the bundled prompt files resolved.
 set +e

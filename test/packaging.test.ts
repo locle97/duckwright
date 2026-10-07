@@ -13,7 +13,8 @@ let name = "";
 before(() => {
   execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "ignore" });
   const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: ROOT, encoding: "utf8" });
-  const [pack] = JSON.parse(out);
+  // npm still runs `prepare` during pack, and vite prints its build log ahead of the JSON.
+  const [pack] = JSON.parse(out.slice(out.lastIndexOf("\n[\n") + 1));
   files = pack.files.map((f: { path: string }) => f.path).sort();
   name = pack.name;
 });
@@ -22,9 +23,16 @@ test("package_bundles_build_and_prompts", () => {
   for (const p of [
     "dist/bin.js", "dist/cli.js", "prompts/system.md", "prompts/playwright-cli.md",
     "prompts/snapshot-full.md", "prompts/snapshot-grep.md", "prompts/snapshot-hybrid.md", "prompts/planner.md",
+    "dist/web/index.js", "dist/web/server.js", "dist/web-ui/index.html",
     "package.json", "README.md", "LICENSE",
   ]) assert.ok(files.includes(p), p);
   assert.ok(!files.some((p) => /^(src|test|scripts|docs|examples|benchmark_tasks|benchmark_plans)\//.test(p)));
+});
+
+test("package_ships_the_built_web_ui_with_assets", () => {
+  assert.ok(files.some((p) => /^dist\/web-ui\/assets\/.+\.js$/.test(p)));
+  assert.ok(files.some((p) => /^dist\/web-ui\/assets\/.+\.css$/.test(p)));
+  assert.ok(!files.some((p) => p.startsWith("web/")));
 });
 
 test("package_name_and_command", () => {
