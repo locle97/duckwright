@@ -511,6 +511,13 @@ test("twofa_fill_failure_is_an_error_without_the_code", async () => {
   assert.deepEqual(codes, [null]);
 });
 
+test("twofa_fill_timeout_skips_later_actions", async () => {
+  const [pw, calls] = makePw(-1, "timed out", "");
+  const { results } = await execute(pw, [A("twofa", "totp", "e5"), A("click", "e9")], undefined, undefined, null, null, tf());
+  assert.deepEqual(results, ["error: timed out", "skipped: page may have changed"]);
+  assert.equal(calls.length, 1);
+});
+
 test("twofa_without_a_human_reports_it", async () => {
   const [pw, calls] = makePw();
   const { results } = await execute(pw, [A("twofa", "sms", "e5")], undefined, undefined, null, null, tf(null, null));

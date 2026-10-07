@@ -17,7 +17,8 @@ export function parseSecret(input: string): Buffer {
   if (/^otpauth:\/\//i.test(raw)) {
     let found: string | null = null;
     try {
-      found = new URL(raw).searchParams.get("secret");
+      const uri = new URL(raw);
+      if (uri.hostname.toLowerCase() === "totp") found = uri.searchParams.get("secret");
     } catch {
       found = null;
     }

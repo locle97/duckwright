@@ -70,23 +70,27 @@ export interface ExecuteHooks {
   result?(index: number, result: string, code: string | null): void;
 }
 
-/** Run one `twofa` action: [result, recorded code]. Neither ever contains the code itself. */
-async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[]): Promise<[string, string | null]> {
-  if (tf === null) return ["error: 2FA is not available in this run", null];
+/**
+ * Run one `twofa` action: [result, recorded code, whether the page may have changed]. Neither the
+ * result nor the code ever contains the code itself.
+ */
+async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[]): Promise<[string, string | null, boolean]> {
+  if (tf === null) return ["error: 2FA is not available in this run", null, false];
   const kind = args[0];
   try {
     if (kind === "passkey") {
       await tf.approve();
-      return ["ok", null];
+      return ["ok", null, false];
     }
     const code = kind === "totp" ? await tf.totp() : await tf.code(kind as "sms" | "email");
     const res = await pw.run("fill", [args[1], code, "--submit"]);
-    if (res.code !== 0) return [tf.scrubber.scrub(`error: ${res.stderr.trim() || res.stdout.trim()}`), null];
+    // A timeout (-1) may still have submitted the form.
+    if (res.code !== 0) return [tf.scrubber.scrub(`error: ${res.stderr.trim() || res.stdout.trim()}`), null, res.code === -1];
     const ran = extractCode(res.stdout);
-    return ["ok", ran === null ? null : tf.scrubber.scrub(ran)];
+    return ["ok", ran === null ? null : tf.scrubber.scrub(ran), true];
   } catch (e) {
     // AbortedError and anything unexpected propagate: the run stops.
-    if (e instanceof TwoFactorError) return [`error: ${e.message}`, null];
+    if (e instanceof TwoFactorError) return [`error: ${e.message}`, null, false];
     throw e;
   }
 }
@@ -153,11 +157,11 @@ export async function execute(
       return;
     }
     if (a.cmd === "twofa") {
-      const [result, code] = await runTwofa(pw, twofa ?? null, a.args);
+      const [result, code, changed] = await runTwofa(pw, twofa ?? null, a.args);
       results.push(clip(result));
       if (code !== null) ran.set(i, code);
-      // The form was submitted, so the page may have changed.
-      if (result === "ok" && a.args[0] !== "passkey") skip = "skipped: page may have changed";
+      // The form was submitted (or may have been), so the page may have changed.
+      if (changed) skip = "skipped: page may have changed";
       return;
     }
     const res = await pw.run(a.cmd, a.args);

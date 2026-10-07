@@ -36,3 +36,10 @@ test("invalid_secrets_throw_without_quoting_the_input", () => {
       e instanceof TotpSecretError && e.message === "not a valid TOTP secret" && !e.message.includes(bad.trim() || "\0"));
   }
 });
+
+test("only_totp_otpauth_uris_are_accepted_and_errors_never_quote_a_secret", () => {
+  for (const bad of ["otpauth://hotp/x?secret=GEZDGNBVGY3TQOJQ&counter=1", "OTPAUTH://HOTP/x?secret=GEZDGNBVGY3TQOJQ", "GEZDGNBV!"]) {
+    assert.throws(() => parseSecret(bad), (e: unknown) =>
+      e instanceof TotpSecretError && e.message === "not a valid TOTP secret" && !e.message.includes("GEZDGNBV"));
+  }
+});

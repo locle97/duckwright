@@ -47,6 +47,7 @@ function env(): Env {
       createAgent: never,
       stdout: (l) => out.push(...l.split("\n")),
       stderr: (l) => err.push(...l.split("\n")),
+      env: {},
       ...over,
     }),
   };
