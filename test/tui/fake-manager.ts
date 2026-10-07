@@ -11,7 +11,8 @@ export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> =
   return {
     id, text, name: taskName(text), source: { kind: "typed" }, state: "idle", overrides: {},
     effective: { model: "sonnet", maxSteps: 25, headed: false, export: false, snapshot: "hybrid" },
-    error: null, runId: null, runCount: 0, createdAt: 0, ...over,
+    error: null, runId: null, runCount: 0, createdAt: 0,
+    twofa: null, ...over,
   };
 }
 
@@ -43,12 +44,19 @@ export class FakeManager implements ManagerLike {
   globalsValue: Globals = { base: snapshot(0, "").effective, overrides: {} };
   /** Every setGlobals argument, in order. */
   globalsSaved: Overrides[] = [];
+  /** Every answerTwoFactor call, in order (null = cancel). */
+  twofaAnswers: Array<{ id: TaskId; value: string | null }> = [];
   #listeners: Array<(e: ManagerEvent) => void> = [];
   #nextId: number;
 
   constructor(tasks: TaskSnapshot[] = []) {
     this.tasks = tasks;
     this.#nextId = tasks.reduce((m, t) => Math.max(m, t.id), 0) + 1;
+  }
+
+  answerTwoFactor(id: TaskId, value: string | null): void {
+    this.log.push(`answerTwoFactor:${id}`);
+    this.twofaAnswers.push({ id, value });
   }
 
   list(): TaskSnapshot[] {

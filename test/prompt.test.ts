@@ -144,3 +144,13 @@ test("system_md_mentions_network", () => {
   const para = md.split("\n").find((l) => l.includes("<tabs>...</tabs>") && l.includes("untrusted"))!;
   assert.ok(para.includes("<network>"));
 });
+
+test("system_md_documents_twofa", () => {
+  const md = fs.readFileSync(new URL("../prompts/system.md", import.meta.url), "utf8");
+  assert.match(md, /goto, click, .*request, twofa, done\./);
+  assert.ok(md.includes("## Two-factor verification"));
+  assert.ok(md.includes('"args": ["totp", "e15"]'));
+  assert.ok(md.includes('"args": ["passkey"]'));
+  assert.ok(md.includes("never type or guess a code"));
+  assert.ok(md.includes("A page-changing action (goto, click, press, tab-new, tab-select, tab-close, go-back, twofa)"));
+});

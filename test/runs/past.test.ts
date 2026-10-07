@@ -263,3 +263,13 @@ test("past_events_from_history_carry_network", () => {
   assert.deepEqual(end[0].record.networkErrors, ["requests: x"]);
   if (end.length > 1) assert.equal(end[1].record.network, undefined);
 });
+
+test("events_jsonl_accepts_twofa_events", () => {
+  const end = { type: "run:end", at: 3, outcome: { status: "pass", exitCode: 0, success: true, answer: "a", steps: 0, costUsd: 0, historyPath: null, export: { kind: "off" }, warnings: [], error: null } };
+  const text = [
+    { type: "twofa:wait", at: 1, kind: "sms", deadline: 301000 },
+    { type: "twofa:done", at: 2, outcome: "answered" },
+    end,
+  ].map((e) => JSON.stringify(e)).join("\n") + "\n";
+  assert.equal(readEventsJsonl(text)?.length, 3);
+});

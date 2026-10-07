@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { parseRunArgs } from "../args.ts";
 import type { RunArgs } from "../args.ts";
-import type { ControlState, RunEvent, RunOutcome } from "../events.ts";
+import type { ControlState, RunEvent, RunOutcome, TwofaWait } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
 import { resolvePath } from "../paths.ts";
 import { PlanError, isPlanFolder, loadPlan, writeManifest, writePlan } from "../plan.ts";
@@ -13,6 +13,8 @@ import type { LoadedPlan, Manifest, PlanDoc, PlanEntry, Skipped } from "../plan.
 import { loadTaskFile, TaskFileError, taskPaths } from "../taskfile.ts";
 import type { TaskFile, TaskSettings } from "../taskfile.ts";
 import { fixed4, mentionToken } from "../text.ts";
+import type { Human } from "../twofa.ts";
+import { HumanBridge } from "./humanBridge.ts";
 import type { PastRun } from "./past.ts";
 import type { RunHandle, RunSpec } from "./run.ts";
 
@@ -34,6 +36,8 @@ export type AddResult =
 export interface TaskSnapshot {
   id: TaskId; text: string; name: string; source: TaskSource; state: TaskState; overrides: Overrides; effective: Effective;
   error: string | null; runId: string | null; runCount: number;
+  /** Set while the task's active run waits for a 2FA answer. */
+  twofa: { kind: TwofaWait } | null;
   /** Epoch ms the task was created (past runs: the run's start). Never changes. */
   createdAt: number;
   /** Set for tasks that came from a past run folder. */
@@ -98,6 +102,7 @@ export interface ManagerLike {
   resume(id: TaskId): void;
   step(id: TaskId): void;
   stop(id: TaskId): void;
+  answerTwoFactor(id: TaskId, value: string | null): void;
   activeCount(): number;
   stopAll(): Promise<void>;
   plans(): PlanSnapshot[];
@@ -122,7 +127,7 @@ export interface ManagerOptions {
   argv: string[];
   defaultSkill: string;
   maxParallel: number;
-  startRun(spec: RunSpec): RunHandle;
+  startRun(spec: RunSpec, human: Human): RunHandle;
   preflight(args: RunArgs): string | null;
   /** The folder file-task names are relative to. Default: the process's current folder. */
   cwd?: string;
@@ -151,6 +156,7 @@ interface RunRecord {
   handle: RunHandle;
   slot: number;
   session: string;
+  bridge: HumanBridge;
   active: boolean; // until `done` settles
   quitStopped: boolean;
   outcome: RunOutcome | null;
@@ -357,10 +363,11 @@ export class RunManager implements ManagerLike {
     task.error = null;
     const slot = this.#freeSlot();
     const session = `${args.session}-${slot}`;
+    const bridge = new HumanBridge(() => this.#updated(task));
     let handle: RunHandle;
     try {
       const taskFile = task.source.kind === "file" ? task.source.path : null;
-      handle = this.#o.startRun({ task: task.text, taskFile, args: { ...args, session } });
+      handle = this.#o.startRun({ task: task.text, taskFile, args: { ...args, session } }, bridge);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       task.error = message;
@@ -368,7 +375,7 @@ export class RunManager implements ManagerLike {
       this.#emit({ type: "toast", level: "error", message });
       return { ok: false, reason: message };
     }
-    const run: RunRecord = { handle, slot, session, active: true, quitStopped: false, outcome: null };
+    const run: RunRecord = { handle, slot, session, bridge, active: true, quitStopped: false, outcome: null };
     task.runs.push(run);
     task.state = CONTROL_TO_STATE[handle.control.state];
     let started = false;
@@ -430,6 +437,10 @@ export class RunManager implements ManagerLike {
 
   step(id: TaskId): void {
     this.#activeRunOf(id)?.handle.control.step();
+  }
+
+  answerTwoFactor(id: TaskId, value: string | null): void {
+    this.#activeRunOf(id)?.bridge.answer(value);
   }
 
   stop(id: TaskId): void {
@@ -816,6 +827,7 @@ export class RunManager implements ManagerLike {
       effective: effectiveOf(a),
       error: task.error, runId: latest ? latest.handle.id : (task.past?.id ?? null), runCount: task.runs.length,
       createdAt: task.createdAt,
+      twofa: this.#activeRun(task)?.bridge.pending ?? null,
     };
     // runId is the latest session run's id after a re-run (else the folder id), like the snapshot's runId; the UI only replays at mount.
     if (task.past) snap.past = { runId: snap.runId ?? task.past.id, events: task.past.events };

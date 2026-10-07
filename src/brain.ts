@@ -11,7 +11,7 @@ export const TOOL_TIMEOUT = 120;
 export const ALLOWED_COMMANDS = [
   "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
   "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
-  "screenshot", "expect", "expect-request", "request", "done",
+  "screenshot", "expect", "expect-request", "request", "twofa", "done",
 ] as const;
 
 export const DECISION_SCHEMA = {
@@ -65,7 +65,7 @@ export const DECISION_SCHEMA = {
             properties: {
               cmd: {
                 type: "string",
-                enum: ALLOWED_COMMANDS.filter((c) => c !== "done" && c !== "expect" && c !== "expect-request" && c !== "request"),
+                enum: ALLOWED_COMMANDS.filter((c) => c !== "done" && c !== "expect" && c !== "expect-request" && c !== "request" && c !== "twofa"),
               },
               args: { type: "array", items: { type: "string" } },
             },
@@ -86,6 +86,21 @@ export const DECISION_SCHEMA = {
             properties: {
               cmd: { const: "request" },
               args: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4 },
+            },
+          },
+          // twofa: a kind, then the code field's ref (none for passkey); twofa.ts checks the shape.
+          {
+            type: "object",
+            required: ["cmd", "args"],
+            properties: {
+              cmd: { const: "twofa" },
+              args: {
+                type: "array",
+                items: { type: "string" },
+                contains: { enum: ["totp", "sms", "email", "passkey"] },
+                minItems: 1,
+                maxItems: 2,
+              },
             },
           },
         ],

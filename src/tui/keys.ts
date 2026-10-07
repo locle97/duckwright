@@ -2,12 +2,13 @@
 // Bindings live in tables so the footer hints and the help overlay are generated from the same data.
 // No ink/react here.
 import type { EditTarget, Overrides, PlanId, PlanSnapshot, TaskId, TaskSnapshot } from "../runs/manager.ts";
+import type { TwofaWait } from "../events.ts";
 import { applyCompletion, composeKey, deleteMentionBefore, insertText, mentionAt, submission } from "./compose.ts";
 import type { ComposeState, Mention } from "./compose.ts";
 import { formKey, formResult, openForm } from "./form.ts";
 import type { KeyPress } from "./keypress.ts";
 import { filterKey } from "./filter.ts";
-import { completionItems, planOf, planTally, selectedPlan, selectedRun, selectedTask } from "./state.ts";
+import { completionItems, pendingTwofa, planOf, planTally, selectedPlan, selectedRun, selectedTask, twofaWaitKey } from "./state.ts";
 import type { UiAction, ViewState } from "./state.ts";
 
 export type Command =
@@ -22,6 +23,7 @@ export type Command =
   | { kind: "move"; id: TaskId; delta: number }
   | { kind: "openEdit"; target: EditTarget; title: string }
   | { kind: "saveEdit" }
+  | { kind: "twofaKey"; id: TaskId; wait: TwofaWait; waitKey: string; key: KeyPress }
   | { kind: "quit" }
   | { kind: "stopAllAndQuit" } | { kind: "forceExit" };
 
@@ -292,8 +294,16 @@ function confirmCommands(k: KeyPress, s: ViewState): Command[] {
   return [];
 }
 
+/** While a run waits for 2FA, every key belongs to the dialog (Ctrl-C and the quit question aside). */
+function twofaCommands(k: KeyPress, t: TaskSnapshot): Command[] {
+  if (t.twofa === null) return [];
+  return [{ kind: "twofaKey", id: t.id, wait: t.twofa.kind, waitKey: twofaWaitKey(t), key: k }];
+}
+
 export function keymap(k: KeyPress, s: ViewState, activeRuns: number): Command[] {
   if (isCtrlC(k)) return ctrlC(s, activeRuns);
+  const waiting = pendingTwofa(s);
+  if (waiting !== null && s.mode !== "quitting" && s.mode !== "confirm") return twofaCommands(k, waiting);
   switch (s.mode) {
     case "compose":
       return composeCommands(k, s);
@@ -339,6 +349,12 @@ const dedupe = (list: Hint[]): Hint[] => list.filter((h, i) => list.findIndex((x
 
 /** Footer hints: only the bindings that act right now. */
 export function hints(s: ViewState): Hint[] {
+  const waiting = pendingTwofa(s);
+  if (waiting?.twofa && s.mode !== "quitting" && s.mode !== "confirm") {
+    return waiting.twofa.kind === "passkey"
+      ? [{ key: "y/⏎", label: "approved" }, { key: "n/esc", label: "cancel" }]
+      : [{ key: "⏎", label: "submit" }, { key: "esc", label: "cancel" }];
+  }
   switch (s.mode) {
     case "compose":
       if (s.completion !== null) {

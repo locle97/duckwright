@@ -302,6 +302,16 @@ export function selectedRun(s: ViewState): RunView | null {
   return runId ? (s.runs[runId] ?? null) : null;
 }
 
+/** The first task (in the order they were added) whose run waits for a 2FA answer. */
+export function pendingTwofa(s: ViewState): TaskSnapshot | null {
+  return s.tasks.find((t) => t.twofa !== null) ?? null;
+}
+
+/** Identifies one wait, so text typed for one request is never shown for another. */
+export function twofaWaitKey(t: TaskSnapshot): string {
+  return t.twofa === null ? "" : `${t.id}:${t.twofa.kind}:${t.runCount}`;
+}
+
 /** Tasks whose latest run has not ended yet. */
 export function liveCount(s: ViewState): number {
   return s.tasks.filter((t) => t.state === "running" || t.state === "paused" || t.state === "stopping").length;
@@ -419,6 +429,9 @@ function reduceRunEvent(r: RunView, e: RunEvent): RunView {
         network: entriesOf(e.record.network), networkErrors: stringsOf(e.record.networkErrors),
         status: v.status === "brain" ? "brain" : stepStatus(e.record.results, v.actions),
       }));
+    case "twofa:wait":
+    case "twofa:done":
+      return r;
     case "control": {
       if (e.state === "paused") {
         return { ...r, control: e.state, pausedSince: r.pausedSince ?? e.at };
