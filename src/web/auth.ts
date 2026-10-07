@@ -3,7 +3,8 @@
 // other sites from posting to it).
 import crypto from "node:crypto";
 
-export const COOKIE_NAME = "dw_token";
+// Cookies are scoped to the host, not the port, so each instance names its own.
+export const cookieName = (port: number): string => `dw_token_${port}`;
 
 export const newToken = (): string => crypto.randomBytes(24).toString("base64url");
 
@@ -63,11 +64,11 @@ export function authorize(req: AuthRequest, o: { token: string; port: number }):
     url.searchParams.delete("t");
     return {
       ok: true,
-      setCookie: `${COOKIE_NAME}=${o.token}; HttpOnly; SameSite=Strict; Path=/`,
+      setCookie: `${cookieName(o.port)}=${o.token}; HttpOnly; SameSite=Strict; Path=/`,
       redirectTo: url.pathname.replace(/^\/+/, "/") + url.search,
     };
   }
-  if (!sameToken(cookieValue(header("cookie"), COOKIE_NAME), o.token)) return { ok: false, status: 401 };
+  if (!sameToken(cookieValue(header("cookie"), cookieName(o.port)), o.token)) return { ok: false, status: 401 };
   const mutating = req.method !== "GET" && req.method !== "HEAD";
   if (mutating && !originOk(header("origin"), o.port)) return { ok: false, status: 403 };
   return { ok: true, setCookie: null, redirectTo: null };

@@ -46,7 +46,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
 - **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run one after another.
 - **Web mode**: `duckwright --web` serves the same workspace as the TUI in a browser, in a neo-brutalist style: task list, plans, past runs, a live timeline of every step with its network calls, pause/step/stop, options, editing, and 2FA prompts. It listens on `127.0.0.1` only, behind a random per-launch token.
-- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p` and in the TUI. Codes and the secret never reach `history.json`, the prompts or an exported test.
+- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p`, in the TUI and in the web UI. Codes and the secret never reach `history.json`, the prompts or an exported test.
 - **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink; the web UI is built with React and Vite, which are development dependencies. TypeScript and the test tools are development dependencies.
 
 ## Getting started
@@ -116,7 +116,7 @@ duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
 ```
 
-`duckwright` on its own opens the [interactive TUI](#interactive-tui). Given a task or `-f`, it opens the TUI and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
+`duckwright` on its own opens the [interactive TUI](#interactive-tui). With `--web` it serves the [web UI](#web-mode) instead. Given a task or `-f`, it opens the TUI (or the web UI with `--web`) and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
 
 Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
 
@@ -201,11 +201,11 @@ duckwright --web                       # a free port; the URL is printed
 duckwright --web --port 4173 -f tasks/ # run a folder of tasks, watch them in the browser
 ```
 
-It does what the TUI does: queue typed tasks and `@` task files, plan a test plan file, start several runs at once (up to `--max-parallel`), pause, step and stop them, edit task files, set global and per-task options, answer 2FA prompts, and browse past runs. Press `?` for the keyboard shortcuts, which match the TUI's.
+It does what the TUI does: queue typed tasks and `@` task files, plan a test plan file, start several runs at once (up to `--max-parallel`), pause, step and stop them, edit task files, set global and per-task options, answer 2FA prompts, and browse past runs. Press `?` for the keyboard shortcuts, which are like the TUI's with a few differences: `x` removes a task or plan (the TUI uses `d`), `p` pauses or resumes (the TUI has `p` and `r`), `E` and `C` expand and collapse all steps (the TUI uses `e` and `c`; in the web UI `e` edits), and the TUI-only `g`, `r`, `h`/`l`, `J`/`K` and `F` have no key.
 
 Like the TUI, `--web` needs `claude` and `playwright-cli` on your `PATH`; without them it exits with `2` before the server starts. A browser opened mid-run shows every run's steps since the server started.
 
-The server is a local tool that can start browsers and read and write your task files, so it is locked down: it listens on `127.0.0.1` only (there is no option to change that), every request needs the random token from the printed URL (kept in a cookie after the first visit), requests with another `Host` or `Origin` are refused, and request bodies are capped at 1 MiB. Closing the tab does not stop the runs; `q`, the Quit button or Ctrl-C in the terminal stops them all, prints the batch summary and exits.
+The server is a local tool that can start browsers and read and write your task files, so it is locked down: it listens on `127.0.0.1` only (there is no option to change that), every request needs the random token from the printed URL (kept in a cookie after the first visit), a request with another `Host` is refused, and so is a request that changes something (POST, PUT or DELETE) with another `Origin`, and request bodies are capped at 1 MiB. Closing the tab does not stop the runs; `q`, the Quit button or Ctrl-C in the terminal stops them all, prints the batch summary and exits.
 
 The web UI is built with Vite when the package is built (`npm run build`); a clone must be built before `--web` works.
 

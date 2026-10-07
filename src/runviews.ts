@@ -40,7 +40,7 @@ export interface RunView {
   past?: boolean;
 }
 
-export type TimelineOp = "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll";
+export type TimelineOp = "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll" | "unfollow";
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
 
@@ -160,6 +160,8 @@ export function reduceTimeline(r: RunView, op: TimelineOp, delta: number): RunVi
       return { ...r, selected: clamp(r.selected + delta, 0, last), follow: delta < 0 ? false : r.follow };
     case "first":
       return { ...r, selected: 0, follow: false };
+    case "unfollow":
+      return { ...r, follow: false };
     case "last": {
       const expanded = r.expanded.includes(last) ? r.expanded : [...r.expanded, last];
       return { ...r, selected: last, follow: true, expanded };

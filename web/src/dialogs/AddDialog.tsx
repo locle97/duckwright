@@ -3,6 +3,7 @@ import type { KeyboardEvent } from "react";
 
 import type { Candidate } from "../../../src/tui/candidates.ts";
 import { applyCompletion, mentionAt, submission } from "../../../src/tui/compose.ts";
+import { checked } from "../actions.ts";
 import type { Dispatch } from "../actions.ts";
 import { api } from "../api.ts";
 import { clean } from "../clean.ts";
@@ -19,6 +20,7 @@ export function AddDialog(p: { mode: "task" | "plan"; dispatch: Dispatch }) {
   const [busy, setBusy] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const seq = useRef(0);
+  const sending = useRef(false);
 
   const query = mentionAt(text, cursor)?.path ?? null;
   const showList = listOpen && query !== null && items.length > 0;
@@ -31,7 +33,7 @@ export function AddDialog(p: { mode: "task" | "plan"; dispatch: Dispatch }) {
     }
     const mine = ++seq.current;
     const timer = setTimeout(async () => {
-      const r = await api.get(`/api/candidates?q=${encodeURIComponent(query)}`);
+      const r = await checked(p.dispatch, api.get(`/api/candidates?q=${encodeURIComponent(query)}`));
       if (mine === seq.current && r.ok) {
         setItems(r.items as Candidate[]);
         setHl(0);
@@ -54,11 +56,21 @@ export function AddDialog(p: { mode: "task" | "plan"; dispatch: Dispatch }) {
   };
 
   const send = async (): Promise<void> => {
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      await submit();
+    } finally {
+      sending.current = false;
+    }
+  };
+
+  const submit = async (): Promise<void> => {
     const sub = submission(text);
     if (p.mode === "task") {
       if (sub.mentions.length === 0 && sub.typed === null) return setErrors(["Type a task, or @ a task file."]);
       setBusy(true);
-      const r = await api.post("/api/tasks", { mentions: sub.mentions.map((m) => m.path), typed: sub.typed });
+      const r = await checked(p.dispatch, api.post("/api/tasks", { mentions: sub.mentions.map((m) => m.path), typed: sub.typed }));
       setBusy(false);
       if (!r.ok) {
         setErrors(Array.isArray(r.errors) ? (r.errors as { message: string }[]).map((e) => e.message) : [r.error]);
@@ -74,7 +86,7 @@ export function AddDialog(p: { mode: "task" | "plan"; dispatch: Dispatch }) {
     const source = sub.mentions[0]?.path ?? sub.typed;
     if (!source) return setErrors(["Give a plan file or a planned folder (@ picks one)."]);
     setBusy(true);
-    const r = await api.post("/api/plans", { source: source.trim() });
+    const r = await checked(p.dispatch, api.post("/api/plans", { source: source.trim() }));
     setBusy(false);
     if (!r.ok) return setErrors([r.error]);
     close();

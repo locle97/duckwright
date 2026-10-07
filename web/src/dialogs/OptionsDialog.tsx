@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Overrides, TaskId } from "../../../src/runs/manager.ts";
+import { checked } from "../actions.ts";
 import type { Dispatch } from "../actions.ts";
 import { api } from "../api.ts";
 import { clean } from "../clean.ts";
@@ -41,7 +42,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
     if (draft.export !== "") o.export = draft.export === "on";
     if (draft.snapshot !== "") o.snapshot = draft.snapshot;
     setBusy(true);
-    const r = task ? await api.put(`/api/tasks/${task.id}/overrides`, o) : await api.put("/api/globals", o);
+    const r = task ? await checked(p.dispatch, api.put(`/api/tasks/${task.id}/overrides`, o)) : await checked(p.dispatch, api.put("/api/globals", o));
     setBusy(false);
     if (r.ok) close();
     else setError(r.error);

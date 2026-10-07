@@ -100,3 +100,14 @@ test("foldPast with a malformed event keeps just the outcome", () => {
   assert.deepEqual(v.steps, []);
   assert.equal(v.outcome?.status, "pass");
 });
+
+test("reduceTimeline unfollow stops following without touching selection or expanded steps", () => {
+  const d = dec("g", [["goto", "u"]]);
+  let v: RunView = newRunView("r1", start());
+  for (const e of [stepStart(1), decision(1, d), stepEnd(1, d, ["ok"]), stepStart(2), decision(2, d, 0)]) v = reduceRunEvent(v, e);
+  assert.equal(v.follow, true);
+  const u = reduceTimeline(v, "unfollow", 0);
+  assert.equal(u.follow, false);
+  assert.equal(u.selected, v.selected);
+  assert.deepEqual(u.expanded, v.expanded);
+});

@@ -12,6 +12,18 @@ const ICON: Record<StepView["status"], string> = { running: "⋯", ok: "✓", wa
 /** A step lists at most this many calls, then "…and N more". */
 const MAX_CALLS = 8;
 
+/** Within this many pixels of the bottom still counts as following. */
+const NEAR_BOTTOM = 40;
+
+/** The nearest ancestor that scrolls vertically. */
+function scroller(el: HTMLElement | null): HTMLElement | null {
+  for (let e = el?.parentElement ?? null; e; e = e.parentElement) {
+    const o = getComputedStyle(e).overflowY;
+    if (o === "auto" || o === "scroll") return e;
+  }
+  return null;
+}
+
 const ms = (n: number | null): string => (n === null ? "" : n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(1)}s`);
 
 function StepCard(p: { step: StepView; open: boolean; selected: boolean; onToggle(): void; innerRef?: Ref<HTMLDivElement> }) {
@@ -57,18 +69,32 @@ function StepCard(p: { step: StepView; open: boolean; selected: boolean; onToggl
 export function Timeline(p: { run: RunView; dispatch(a: Action): void }) {
   const { run, dispatch } = p;
   const lastRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const last = run.steps.length - 1;
-  // Following the run keeps the newest step in view.
+  const lastStep = run.steps[last];
+  const grown = (lastStep?.actions.length ?? 0) + (lastStep?.network.length ?? 0);
+  // Following the run keeps the newest step in view (also as the newest step gains content).
   useEffect(() => {
     if (run.follow) lastRef.current?.scrollIntoView({ block: "nearest" });
-  }, [run.steps.length, run.follow]);
+  }, [run.steps.length, run.follow, grown]);
+  // Scrolling away from the bottom by hand stops following; the Follow button resumes it.
+  useEffect(() => {
+    if (!run.follow) return;
+    const box = scroller(sectionRef.current);
+    if (!box) return;
+    const onScroll = (): void => {
+      if (box.scrollHeight - box.scrollTop - box.clientHeight > NEAR_BOTTOM) dispatch({ type: "timeline", op: "unfollow" });
+    };
+    box.addEventListener("scroll", onScroll);
+    return () => box.removeEventListener("scroll", onScroll);
+  }, [run.follow, run.steps.length > 0, dispatch]);
   if (run.steps.length === 0) return <p className="muted">No steps yet.</p>;
   const toggle = (i: number): void => {
     dispatch({ type: "timeline", op: "move", delta: i - run.selected });
     dispatch({ type: "timeline", op: "toggle" });
   };
   return (
-    <section aria-label="Timeline" className="main" style={{ padding: 0, overflow: "visible" }}>
+    <section aria-label="Timeline" className="main" ref={sectionRef} style={{ padding: 0, overflow: "visible" }}>
       <div className="row-actions">
         <Button small onClick={() => dispatch({ type: "timeline", op: "expandAll" })}>Expand all</Button>
         <Button small onClick={() => dispatch({ type: "timeline", op: "collapseAll" })}>Collapse all</Button>

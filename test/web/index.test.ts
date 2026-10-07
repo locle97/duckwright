@@ -5,6 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import { test } from "node:test";
 
+import { cookieName } from "../../src/web/auth.ts";
 import { startWeb } from "../../src/web/index.ts";
 import { tmpDir } from "../helpers.ts";
 import { FakeManager, ev, snapshot } from "../tui/fake-manager.ts";
@@ -27,7 +28,7 @@ function request(url: URL, method: string, urlPath: string, headers: Record<stri
   });
 }
 
-const cookieOf = (url: URL) => ({ cookie: `dw_token=${url.searchParams.get("t")}`, origin: `http://127.0.0.1:${url.port}` });
+const cookieOf = (url: URL) => ({ cookie: `${cookieName(Number(url.port))}=${url.searchParams.get("t")}`, origin: `http://127.0.0.1:${url.port}` });
 
 test("startWeb serves on loopback, prints a tokened URL and opens the browser", async () => {
   const m = new FakeManager([snapshot(1, "one")]);

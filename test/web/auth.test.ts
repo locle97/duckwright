@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { COOKIE_NAME, authorize, cookieValue, hostOk, newToken, originOk, sameToken } from "../../src/web/auth.ts";
+import { authorize, cookieName, cookieValue, hostOk, newToken, originOk, sameToken } from "../../src/web/auth.ts";
 
 const o = { token: "secret-token", port: 4321 };
-const cookie = `${COOKIE_NAME}=${o.token}`;
+const cookie = `${cookieName(o.port)}=${o.token}`;
 const get = (headers: Record<string, string>, url = "/api/state") => authorize({ method: "GET", url, headers }, o);
 const post = (headers: Record<string, string>) => authorize({ method: "POST", url: "/api/tasks", headers }, o);
 const put = (headers: Record<string, string>) => authorize({ method: "PUT", url: "/api/tasks", headers }, o);
@@ -23,9 +23,9 @@ test("sameToken compares in full", () => {
 });
 
 test("cookieValue finds a named cookie among several", () => {
-  assert.equal(cookieValue(`a=1; ${COOKIE_NAME}=xyz; b=2`, COOKIE_NAME), "xyz");
-  assert.equal(cookieValue("a=1", COOKIE_NAME), undefined);
-  assert.equal(cookieValue(undefined, COOKIE_NAME), undefined);
+  assert.equal(cookieValue("a=1; x=xyz; b=2", "x"), "xyz");
+  assert.equal(cookieValue("a=1", "x"), undefined);
+  assert.equal(cookieValue(undefined, "x"), undefined);
 });
 
 test("only loopback Host and Origin on the right port pass", () => {
@@ -46,7 +46,7 @@ test("a wrong Host is forbidden even with the token", () => {
 
 test("no cookie or a wrong cookie is unauthorized", () => {
   assert.deepEqual(get({ host: "127.0.0.1:4321" }), { ok: false, status: 401 });
-  assert.deepEqual(get({ host: "127.0.0.1:4321", cookie: `${COOKIE_NAME}=nope` }), { ok: false, status: 401 });
+  assert.deepEqual(get({ host: "127.0.0.1:4321", cookie: `${cookieName(o.port)}=nope` }), { ok: false, status: 401 });
 });
 
 test("the cookie lets a GET through", () => {
@@ -58,7 +58,7 @@ test("a valid ?t= sets the cookie and redirects to the bare URL", () => {
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.redirectTo, "/");
-  assert.ok(r.setCookie!.startsWith(`${COOKIE_NAME}=${o.token};`));
+  assert.ok(r.setCookie!.startsWith(`${cookieName(o.port)}=${o.token};`));
   assert.ok(r.setCookie!.includes("HttpOnly"));
   assert.ok(r.setCookie!.includes("SameSite=Strict"));
 });
@@ -104,4 +104,9 @@ test("?t= redirect collapses leading slashes", () => {
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.ok(!r.redirectTo!.startsWith("//"));
+});
+
+test("the cookie name depends on the port", () => {
+  assert.notEqual(cookieName(4321), cookieName(4322));
+  assert.deepEqual(get({ host: "127.0.0.1:4321", cookie: `${cookieName(4322)}=${o.token}` }), { ok: false, status: 401 });
 });

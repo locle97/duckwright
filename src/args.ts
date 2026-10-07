@@ -115,9 +115,9 @@ options:
                         into the prompt
   --snapshot-grep       never paste the page snapshot; Claude always greps the
                         saved file
-  --max-parallel N      TUI: most runs at once (default 3)
-  --past N              TUI: past runs to show (default 20, 0 = none)
-  --theme NAME          TUI: auto, dark or light (default auto)
+  --max-parallel N      TUI and web UI: most runs at once (default 3)
+  --past N              TUI and web UI: past runs to show (default 20, 0 = none)
+  --theme NAME          TUI and web UI: auto, dark or light (default auto)
   --web                 open the web UI in a browser instead of the TUI: start a
                         local server on 127.0.0.1 (see --port) and print its
                         URL. Cannot be used with -p

@@ -181,7 +181,7 @@ test("help lists the print and tui flags", () => {
   const text = (parseRunArgs(["--help"], "/s") as { text: string }).text;
   assert.ok(text.includes("[-p] [-f FILE [FILE ...]]"));
   assert.ok(text.includes("-p, --print           run the task"));
-  assert.ok(text.includes("TUI: most runs at once (default 3)"));
+  assert.ok(text.includes("TUI and web UI: most runs at once (default 3)"));
   assert.ok(!text.includes("--tui"));
 });
 
@@ -209,8 +209,8 @@ test("theme_flag_values", () => {
 test("help_lists_past_and_theme", () => {
   const text = (parseRunArgs(["--help"], "/s") as { text: string }).text;
   assert.ok(text.includes("[--max-parallel N] [--past N] [--theme {auto,dark,light}]"));
-  assert.ok(text.includes("TUI: past runs to show (default 20, 0 = none)"));
-  assert.ok(text.includes("TUI: auto, dark or light (default auto)"));
+  assert.ok(text.includes("TUI and web UI: past runs to show (default 20, 0 = none)"));
+  assert.ok(text.includes("TUI and web UI: auto, dark or light (default auto)"));
 });
 
 test("network_default_on", () => {

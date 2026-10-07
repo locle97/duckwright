@@ -6,9 +6,16 @@ import type { Action, EditDraft } from "./store.ts";
 
 export type Dispatch = (a: Action) => void;
 
+/** Waits for `call`; a 401 means the page's token no longer works, so the session has expired. */
+export async function checked(d: Dispatch, call: Promise<Reply>): Promise<Reply> {
+  const r = await call;
+  if (!r.ok && r.unauthorized === true) d({ type: "expired" });
+  return r;
+}
+
 /** Waits for `call`; a failure becomes an error toast. */
 export async function shown(d: Dispatch, call: Promise<Reply>): Promise<Reply> {
-  const r = await call;
+  const r = await checked(d, call);
   if (!r.ok) d({ type: "toast", level: "error", message: r.error });
   return r;
 }
@@ -32,7 +39,7 @@ export async function openEditor(d: Dispatch, target: EditTarget, title: string)
 }
 
 export async function saveEditor(d: Dispatch, draft: EditDraft): Promise<boolean> {
-  const r = await api.put("/api/source", { target: draft.target, text: draft.text });
+  const r = await checked(d, api.put("/api/source", { target: draft.target, text: draft.text }));
   if (r.ok) {
     d({ type: "dialog", value: null });
     return true;

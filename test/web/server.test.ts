@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 
 import type { ManagerEvent } from "../../src/runs/manager.ts";
 import type { ApiContext } from "../../src/web/api.ts";
+import { cookieName } from "../../src/web/auth.ts";
 import { startServer } from "../../src/web/server.ts";
 import type { RunningServer } from "../../src/web/server.ts";
 import { tmpDir } from "../helpers.ts";
@@ -87,7 +88,8 @@ let tmp: string;
 let manager: CountingManager;
 let server: RunningServer;
 let ctx: ApiContext;
-const authed = { cookie: `dw_token=${TOKEN}` };
+const authedFor = (port: number) => ({ cookie: `${cookieName(port)}=${TOKEN}` });
+const authed = { get cookie() { return authedFor(server.port).cookie; } };
 const changing = () => ({ ...authed, origin: `http://127.0.0.1:${server.port}`, "content-type": "application/json" });
 
 function makeCtx(m: FakeManager): ApiContext {
@@ -128,7 +130,7 @@ test("?t= sets the cookie and redirects to the bare URL", async () => {
   const r = await request(server.port, "GET", `/?t=${TOKEN}`);
   assert.equal(r.status, 302);
   assert.equal(r.headers.location, "/");
-  assert.ok(String(r.headers["set-cookie"]).startsWith(`dw_token=${TOKEN};`));
+  assert.ok(String(r.headers["set-cookie"]).startsWith(`${cookieName(server.port)}=${TOKEN};`));
 });
 
 test("a wrong Host header is forbidden", async () => {
@@ -214,7 +216,7 @@ test("the event stream needs the token too", async () => {
 test("close ends open streams instead of hanging", { timeout: 5000 }, async () => {
   const m = new CountingManager([]);
   const s2 = await startServer({ ctx: makeCtx(m), token: TOKEN, uiDir: path.join(tmp, "ui") });
-  const stream = await openStream(s2.port, authed);
+  const stream = await openStream(s2.port, authedFor(s2.port));
   await stream.next();
   await s2.close();
   assert.equal(m.subs, 0);
@@ -242,7 +244,7 @@ test("close with a manager event in flight does not crash and unsubscribes", { t
   try {
     const m = new CountingManager([]);
     const s2 = await startServer({ ctx: makeCtx(m), token: TOKEN, uiDir: path.join(tmp, "ui") });
-    const stream = await openStream(s2.port, authed);
+    const stream = await openStream(s2.port, authedFor(s2.port));
     await stream.next();
     m.emit({ type: "toast", level: "info", message: "before" });
     const closing = s2.close();

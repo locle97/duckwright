@@ -147,7 +147,7 @@ The UI can start browsers and read and write task files, so the server is a loca
 ### Layout (two panes)
 
 - **Header** (yellow): logo, `N/limit running · $cost`, Help, Quit.
-- **Sidebar** (about 34%, resizable): Add task and Plan buttons, a filter input, then plans (collapsible
+- **Sidebar** (about 34%): Add task and Plan buttons, a filter input, then plans (collapsible
   rows with a progress tag and Run, Stop, Run-failed), their tasks (with up/down move), typed and file
   tasks, and muted past runs. Each row has a state tag (IDLE, RUN, PAUSED, PASS, FAIL, STOPPED) and a `?`
   badge while the task waits on 2FA.
@@ -160,7 +160,7 @@ The UI can start browsers and read and write task files, so the server is a loca
   snapshot). Per-task overrides open from the main pane in the same style.
 - **Dialogs** (modals): Add task (textarea with `@` completion dropdown), Plan (path input with the same
   completion), Editor (textarea; save errors inline), 2FA (masked code input, or Approve/Cancel for a
-  passkey, with a countdown to the deadline), Confirm quit (shown while runs are active), Help.
+  passkey), Confirm quit (shown while runs are active), Help.
 - **Keyboard:** the TUI's main keys work outside inputs (`a`, `P`, space, `p`, `s`, `j`/`k`, `/`, `?`).
 - Below about 800 px the sidebar becomes a drawer.
 
@@ -195,6 +195,14 @@ never conveyed by colour alone (tags carry text), controls are real buttons with
 - One Playwright smoke test of the built UI against a fake agent: add a task, watch it finish, open a
   step, answer a 2FA prompt.
 - `npm test`, `npm run build` and `smoke_install.sh` stay green in CI on Node 22 and 24.
+
+## Not in the first version
+
+- A countdown to the deadline on the 2FA dialog.
+- A resizable sidebar.
+- Buffering toasts that fire before a browser connects.
+- A final `ended` message to other tabs when the server quits.
+- Caching `@` candidates per dialog.
 
 ## Documentation
 

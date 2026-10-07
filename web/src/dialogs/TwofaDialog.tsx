@@ -23,6 +23,7 @@ function TwofaForm(p: { task: TaskSnapshot; dispatch: Dispatch }) {
     <Modal
       title={title}
       onClose={() => answer(null)}
+      dismissOnBackdrop={false}
       footer={
         <>
           <Button onClick={() => answer(null)}>Cancel</Button>
