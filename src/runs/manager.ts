@@ -7,9 +7,11 @@ import { parseRunArgs } from "../args.ts";
 import type { RunArgs } from "../args.ts";
 import type { ControlState, RunEvent, RunOutcome, TwofaWait } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
+import { SPEC_NAME } from "../export.ts";
 import { resolvePath } from "../paths.ts";
 import { PlanError, isPlanFolder, loadPlan, writeManifest, writePlan } from "../plan.ts";
 import type { LoadedPlan, Manifest, PlanDoc, PlanEntry, Skipped } from "../plan.ts";
+import { SpecReplays } from "../replay.ts";
 import { loadTaskFile, TaskFileError, taskPaths } from "../taskfile.ts";
 import type { TaskFile, TaskSettings } from "../taskfile.ts";
 import { fixed4, mentionToken } from "../text.ts";
@@ -38,6 +40,8 @@ export interface TaskSnapshot {
   error: string | null; runId: string | null; runCount: number;
   /** Set while the task's active run waits for a 2FA answer. */
   twofa: { kind: TwofaWait } | null;
+  /** True when the task is not live and its latest run folder holds `duckwright.spec.ts`. */
+  hasSpec: boolean;
   /** Epoch ms the task was created (past runs: the run's start). Never changes. */
   createdAt: number;
   /** Set for tasks that came from a past run folder. */
@@ -121,6 +125,8 @@ export interface ManagerLike {
   movePlanTask(id: TaskId, delta: number): void;
   readSource(target: EditTarget): { ok: true; text: string } | { ok: false; error: string };
   saveSource(target: EditTarget, text: string): Result;
+  /** Open the task's latest run spec in the Playwright Inspector. */
+  replaySpec(id: TaskId): Promise<Result>;
 }
 
 export interface ManagerOptions {
@@ -139,7 +145,18 @@ export interface ManagerOptions {
   planner?: Planner;
   /** Where planned folders are written. Default: "tasks". */
   plansRoot?: string;
+  /** Launches the Playwright Inspector. Default: a real `SpecReplays`. */
+  replays?: SpecReplays;
 }
+
+export const stillRunning = (name: string) => `${name} is still running; replay its spec when it finishes`;
+export const notRunYet = (name: string) => `${name} has not run yet`;
+export const noSpec = (runId: string) => `no spec for run ${runId}: only a passed run writes duckwright.spec.ts`;
+export const openingToast = (runId: string) => `opening ${runId}/duckwright.spec.ts in the Playwright Inspector`;
+export const closedToast = (runId: string, code: number | null, specDir: string) =>
+  code === 0 || code === null
+    ? `Playwright Inspector closed for ${runId}`
+    : `Playwright exited with code ${code} for ${runId}; run "npx playwright test duckwright.spec.ts --debug" in ${specDir} to see why`;
 
 /** `"<first line>"`, cut with … so it holds at most `max` code points. */
 export function taskName(text: string, max = 40): string {
@@ -223,9 +240,11 @@ export class RunManager implements ManagerLike {
   #queued: TaskId[] = [];
   #plans: Plan[] = [];
   #nextPlanId = 1;
+  #replays: SpecReplays;
 
   constructor(o: ManagerOptions) {
     this.#o = o;
+    this.#replays = o.replays ?? new SpecReplays();
     this.#now = o.now ?? Date.now;
     for (const p of o.past ?? []) {
       const name = p.source.kind === "file" ? this.#fileName(p.source.path) : taskName(p.text);
@@ -397,10 +416,9 @@ export class RunManager implements ManagerLike {
       this.#startQueued();
       this.#advancePlans();
       // A run that failed before run:start has no run view to show why: put it on the task.
-      if (!started && outcome.error !== null) {
-        task.error = outcome.error;
-        this.#updated(task);
-      }
+      if (!started && outcome.error !== null) task.error = outcome.error;
+      // Once per settle, so the snapshot carries the final hasSpec.
+      this.#updated(task);
       if (outcome.error?.startsWith("playwright error:")) {
         this.#emit({
           type: "toast", level: "error",
@@ -636,6 +654,24 @@ export class RunManager implements ManagerLike {
     return { ok: true };
   }
 
+  async replaySpec(id: TaskId): Promise<Result> {
+    const task = this.#find(id);
+    if (!task) return { ok: false, error: "no such task" };
+    if (task.state === "running" || task.state === "paused" || task.state === "stopping") {
+      return { ok: false, error: stillRunning(task.name) };
+    }
+    const spec = this.#specOf(task);
+    if (!spec) return { ok: false, error: notRunYet(task.name) };
+    if (!fs.existsSync(spec.path)) return { ok: false, error: noSpec(spec.runId) };
+    const specDir = path.dirname(spec.path);
+    const r = await this.#replays.launch(spec.runId, spec.path, (code) => {
+      this.notify("info", closedToast(spec.runId, code, specDir));
+    });
+    if (!r.ok) return r;
+    this.notify("info", openingToast(spec.runId));
+    return { ok: true };
+  }
+
   summary(): { lines: string[]; exitCode: number } {
     const rows: Array<{ name: string; outcome: RunOutcome }> = [];
     let total = 0;
@@ -817,6 +853,19 @@ export class RunManager implements ManagerLike {
     return args;
   }
 
+  /** The folder of the task's latest run (the session's, else the past one) and its spec path. */
+  #specOf(task: Task): { runId: string; path: string } | null {
+    const latest = task.runs[task.runs.length - 1];
+    let workdir: string | undefined;
+    if (latest) workdir = latest.active ? undefined : latest.handle.workdir;
+    else workdir = task.past?.workdir;
+    if (!workdir) return null;
+    return {
+      runId: path.basename(workdir),
+      path: path.resolve(this.#o.cwd ?? process.cwd(), workdir, SPEC_NAME),
+    };
+  }
+
   #snapshot(task: Task): TaskSnapshot {
     const a = this.#argsFor(task);
     const latest = task.runs[task.runs.length - 1];
@@ -827,11 +876,22 @@ export class RunManager implements ManagerLike {
       error: task.error, runId: latest ? latest.handle.id : (task.past?.id ?? null), runCount: task.runs.length,
       createdAt: task.createdAt,
       twofa: this.#activeRun(task)?.bridge.pending ?? null,
+      hasSpec: this.#hasSpec(task),
     };
     // runId is the latest session run's id after a re-run (else the folder id), like the snapshot's runId; the UI only replays at mount.
     if (task.past) snap.past = { runId: snap.runId ?? task.past.id, events: task.past.events };
     if (task.planId !== null) snap.planId = task.planId;
     return snap;
+  }
+
+  #hasSpec(task: Task): boolean {
+    if (task.state === "running" || task.state === "paused" || task.state === "stopping") return false;
+    try {
+      const spec = this.#specOf(task);
+      return spec !== null && fs.existsSync(spec.path);
+    } catch {
+      return false;
+    }
   }
 
   #addTask(source: TaskSource, text: string, fileSettings: TaskSettings, name: string, planId: PlanId | null = null): TaskId {

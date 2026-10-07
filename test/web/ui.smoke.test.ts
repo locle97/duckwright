@@ -62,10 +62,14 @@ test("add a task, watch a run, open a step, answer a 2FA prompt, quit", { skip, 
 
   // Start the first task, then play a run through the manager's events.
   await page.getByText("Open the shop and add a hat").first().click();
+  const replay = page.getByRole("button", { name: "Replay spec" });
+  await replay.waitFor({ state: "visible" });
+  assert.equal(await replay.getAttribute("title"), "No spec yet: only a passed run writes duckwright.spec.ts");
   await page.getByRole("button", { name: "Start" }).click();
   assert.ok(manager.log.includes("start:1"));
   manager.update(1, { state: "running", runId: "r1", runCount: 1 });
   const d = decision("browse the storefront", [["goto", "https://shop.test"]]);
+  await replay.waitFor({ state: "hidden" });
   manager.run(1, "r1", [ev.start(), ev.step(1), ev.decision(1, d, 0.02), ev.actionStart(1, 0), ev.actionResult(1, 0, "ok"), ev.stepEnd(1, d, ["ok"])]);
   await page.waitForSelector("text=browse the storefront");
 
@@ -90,6 +94,17 @@ test("add a task, watch a run, open a step, answer a 2FA prompt, quit", { skip, 
   })]);
   manager.update(1, { state: "passed" });
   await page.waitForSelector("text=Added a hat");
+
+  // With a spec written, Replay spec is titled for the Inspector and calls the manager.
+  manager.update(1, { hasSpec: true });
+  await replay.waitFor({ state: "visible" });
+  assert.equal(await replay.getAttribute("title"), "Open duckwright.spec.ts in the Playwright Inspector");
+  await replay.click();
+  for (let i = 0; i < 50 && !manager.log.includes("replaySpec:1"); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(manager.log.includes("replaySpec:1"));
+  manager.replayResult = { ok: false, error: "no spec for run r1: only a passed run writes duckwright.spec.ts" };
+  await replay.click();
+  await page.waitForSelector("text=no spec for run r1");
 
   // Quit from the header.
   await page.getByRole("button", { name: "Quit" }).click();

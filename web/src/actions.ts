@@ -1,5 +1,5 @@
 // The browser's operations on the server: each is one API call whose failure is shown as a toast.
-import type { EditTarget, PlanId, TaskId } from "../../src/runs/manager.ts";
+import type { EditTarget, PlanId, TaskId, TaskSnapshot } from "../../src/runs/manager.ts";
 import { api } from "./api.ts";
 import type { Reply } from "./api.ts";
 import type { Action, EditDraft } from "./store.ts";
@@ -29,6 +29,14 @@ export const runPlan = (d: Dispatch, id: PlanId, which: "all" | "failed") =>
 export const removeTask = (d: Dispatch, id: TaskId) => shown(d, api.del(`/api/tasks/${id}`));
 export const removePlan = (d: Dispatch, id: PlanId) => shown(d, api.del(`/api/plans/${id}`));
 export const moveTask = (d: Dispatch, id: TaskId, delta: number) => shown(d, api.post(`/api/tasks/${id}/move`, { delta }));
+
+export const replaySpec = (d: Dispatch, id: TaskId) => shown(d, api.post(`/api/tasks/${id}/replay`));
+
+/** The Replay spec button's title, or null when the button is hidden (the task is live). */
+export function replayTitle(task: TaskSnapshot): string | null {
+  if (task.state === "running" || task.state === "paused" || task.state === "stopping") return null;
+  return task.hasSpec ? "Open duckwright.spec.ts in the Playwright Inspector" : "No spec yet: only a passed run writes duckwright.spec.ts";
+}
 
 export async function openEditor(d: Dispatch, target: EditTarget, title: string): Promise<void> {
   const q = target.kind === "task" ? `kind=task&id=${target.id}` : `kind=setup&planId=${target.planId}`;

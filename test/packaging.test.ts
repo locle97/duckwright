@@ -41,8 +41,9 @@ test("package_name_and_command", () => {
   assert.ok(fs.readFileSync(path.join(ROOT, "dist", "bin.js"), "utf8").startsWith("#!/usr/bin/env node\n"));
 });
 
-test("package_runtime_deps_are_ink_and_react", () => {
-  assert.deepEqual(Object.keys(pkg.dependencies ?? {}).sort(), ["ink", "react"]);
+test("package_runtime_deps_are_ink_react_and_playwright_test", () => {
+  assert.deepEqual(Object.keys(pkg.dependencies ?? {}).sort(), ["@playwright/test", "ink", "react"]);
+  assert.equal(pkg.dependencies["@playwright/test"], "^1.63.0");
   assert.equal(pkg.engines.node, ">=22.18");
 });
 

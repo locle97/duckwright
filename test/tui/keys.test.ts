@@ -16,7 +16,7 @@ function task(id: number, state: TaskState = "idle"): TaskSnapshot {
   return {
     id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid" },
-    error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0, createdAt: 0, twofa: null,
+    error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0, createdAt: 0, twofa: null, hasSpec: false,
   };
 }
 
@@ -556,4 +556,43 @@ test("pending_twofa_picks_the_first_waiting_task", () => {
 test("twofa_footer_hints", () => {
   assert.deepEqual(hints(waiting("sms")), [{ key: "⏎", label: "submit" }, { key: "esc", label: "cancel" }]);
   assert.deepEqual(hints(waiting("passkey")), [{ key: "y/⏎", label: "approved" }, { key: "n/esc", label: "cancel" }]);
+});
+
+const withSpec = (t: TaskSnapshot, hasSpec: boolean): TaskSnapshot => ({ ...t, hasSpec });
+const replayCmd: Command[] = [{ kind: "replay", id: 1 }];
+
+test("replay_key_on_a_passed_task_with_a_spec", () => {
+  const s = initialState(0, [withSpec(task(1, "passed"), true)]);
+  assert.deepEqual(press(s, "R"), replayCmd);
+  assert.deepEqual(press(reduce(s, { type: "focus", target: "detail" }), "R"), replayCmd);
+});
+
+test("replay_key_fires_without_a_spec", () => {
+  for (const st of ["passed", "failed", "idle"] as TaskState[]) {
+    assert.deepEqual(press(initialState(0, [withSpec(task(1, st), false)]), "R"), replayCmd, st);
+  }
+});
+
+test("replay_key_is_inert_for_live_tasks_and_empty_lists", () => {
+  for (const st of ["running", "paused", "stopping"] as TaskState[]) {
+    assert.deepEqual(press(initialState(0, [withSpec(task(1, st), true)]), "R"), [], st);
+  }
+  assert.deepEqual(press(initialState(0, []), "R"), []);
+});
+
+test("replay_footer_hint_only_for_idle_tasks_with_a_spec", () => {
+  assert.ok(footer(initialState(0, [withSpec(task(1, "passed"), true)])).includes("R replay spec"));
+  assert.ok(!footer(initialState(0, [withSpec(task(1, "passed"), false)])).includes("R replay spec"));
+  assert.ok(!footer(initialState(0, [withSpec(task(1, "running"), true)])).includes("R replay spec"));
+});
+
+test("replay_help_lists_the_key_once", () => {
+  const s = initialState(0, [task(1, "passed")]);
+  for (const view of [s, reduce(s, { type: "focus", target: "detail" })]) {
+    assert.equal(helpBindings(view).filter((h) => h.key === "R" && h.label === "replay spec").length, 1);
+  }
+});
+
+test("lowercase_r_still_resumes_a_paused_task", () => {
+  assert.deepEqual(press(mk("paused"), "r"), [{ kind: "manager", call: "resume", id: 1 }]);
 });
