@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/duckwright/blob/main/LICENSE)
 [![CI](https://github.com/locle97/duckwright/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/duckwright/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.18-blue)
-![Dependencies](https://img.shields.io/badge/dependencies-ink%20for%20the%20TUI-brightgreen)
+![Dependencies](https://img.shields.io/badge/dependencies-ink%20%2B%20%40playwright%2Ftest-brightgreen)
 
 **The rubber duck that drives your browser, then writes the regression test.**
 
@@ -47,7 +47,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run one after another.
 - **Web mode**: `duckwright --web` serves the same workspace as the TUI in a browser, in a shadcn-style UI: task list, plans, past runs, a live timeline of every step with its network calls, pause/step/stop, options, editing, and 2FA prompts. It listens on `127.0.0.1` only, behind a random per-launch token.
 - **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p`, in the TUI and in the web UI. Codes and the secret never reach `history.json`, the prompts or an exported test.
-- **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink; the web UI is built with React and Vite, which are development dependencies. TypeScript and the test tools are development dependencies.
+- **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink; `@playwright/test` is a runtime dependency, used for spec replay; the web UI is built with React and Vite, which are development dependencies. TypeScript and the test tools are development dependencies.
 
 ## Getting started
 
@@ -179,6 +179,7 @@ Keys to learn first:
 | `⏎` | Show the selected task's details |
 | `p` | Pause or resume it |
 | `s` | Stop it |
+| `R` | Open the selected run's spec in the Playwright Inspector |
 | `q` | Quit (asks first if runs are active) |
 
 Press `?` inside the TUI for the rest.
@@ -200,7 +201,7 @@ duckwright --web                       # a free port; the URL is printed
 duckwright --web --port 4173 -f tasks/ # run a folder of tasks, watch them in the browser
 ```
 
-It does what the TUI does: queue typed tasks and `@` task files, plan a test plan file, start several runs at once (up to `--max-parallel`), pause, step and stop them, edit task files, set global and per-task options, answer 2FA prompts, and browse past runs. The sidebar has the TUI's two tabs, Tasks and History (past runs, newest `--past N`); click a tab or press `t` to switch (the TUI uses `tab`, which the browser keeps for moving focus). Each tab keeps its own selection and filter, and running a past run again moves it to Tasks. `i` adds a task (`a` works too). Press `?` for the keyboard shortcuts, which are like the TUI's with a few differences: `x` removes a task or plan (the TUI uses `d`), `p` pauses or resumes (the TUI has `p` and `r`), `E` and `C` expand and collapse all steps (the TUI uses `e` and `c`; in the web UI `e` edits), and the TUI-only `g`, `r`, `h`/`l`, `J`/`K` and `F` have no key.
+It does what the TUI does: queue typed tasks and `@` task files, plan a test plan file, start several runs at once (up to `--max-parallel`), pause, step and stop them, edit task files, set global and per-task options, answer 2FA prompts, and browse past runs. The sidebar has the TUI's two tabs, Tasks and History (past runs, newest `--past N`); click a tab or press `t` to switch (the TUI uses `tab`, which the browser keeps for moving focus). Each tab keeps its own selection and filter, and running a past run again moves it to Tasks. `i` adds a task (`a` works too). Press `?` for the keyboard shortcuts, which are like the TUI's with a few differences: `x` removes a task or plan (the TUI uses `d`), `p` pauses or resumes (the TUI has `p` and `r`), `E` and `C` expand and collapse all steps (the TUI uses `e` and `c`; in the web UI `e` edits), and the TUI-only `g`, `r`, `R`, `h`/`l`, `J`/`K` and `F` have no key. A task's card has a **Replay spec** button that does what `R` does in the TUI.
 
 Like the TUI, `--web` needs `claude` and `playwright-cli` on your `PATH`; without them it exits with `2` before the server starts. A browser opened mid-run shows every run's steps since the server started.
 
@@ -423,7 +424,9 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
 
    **API-only spec.** `duckwright export --api` replays the run's captured `fetch`/`xhr` calls with the `request` fixture and asserts each call's status, so the backend flow runs without the UI. It needs network capture. Only the `content-type` and `accept` headers are kept, and captured values are redacted, so the export warns wherever `[REDACTED]` appears; supply auth by hand, and for a `--state` run add `test.use({ storageState: 'auth.json' })`. It exits `1` when there are no captured API calls. A run itself still writes the UI spec only.
 2. Add any further assertions the agent did not record.
-3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
+3. Run it with `npx playwright test` and fix any locator that fails. To watch the spec step by step first, press `R` in the TUI or click **Replay spec** in the web UI. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
+
+**Replaying in the Playwright Inspector.** `R` (TUI) and **Replay spec** (web) run `playwright test duckwright.spec.ts --debug` in the run folder. Each run can have one replay open at a time. Playwright's output is discarded, so a non-zero exit shows only as a toast. It needs a display and Playwright's browser; run `npx playwright install chromium` if the close toast shows a non-zero exit.
 
 Only successful runs can be exported. `duckwright export` exits with `0` when the test was written, `1` when it refused (the run did not succeed, or it recorded no Playwright code), and `2` when the path or `history.json` cannot be used. When a run exports its test automatically, a failed export is reported on stderr but does not change the run's exit code.
 
