@@ -498,7 +498,7 @@ test("keys_global_options", () => {
   assert.ok(!hints(initialState(0, [task(1)], [], globals)).some((h) => h.key === "O"), "help only, not the footer");
 });
 
-const waiting = (kind: "secret" | "sms" | "email" | "passkey" = "sms"): ViewState =>
+const waiting = (kind: "totp" | "sms" | "email" | "passkey" = "sms"): ViewState =>
   initialState(0, [{ ...task(1, "running"), twofa: { kind } }]);
 
 test("pending_twofa_takes_every_key_as_a_twofa_command", () => {

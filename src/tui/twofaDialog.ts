@@ -1,4 +1,4 @@
-// The 2FA dialog: a masked input for a code or the TOTP secret, or an approve/cancel question for a passkey.
+// The 2FA dialog: a masked input for a code, or an approve/cancel question for a passkey.
 import { Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
@@ -15,8 +15,8 @@ export function TwofaDialog({ task, typed, width, height }: TwofaDialogProps): R
   if (task.twofa === null) return null;
   const kind = task.twofa.kind;
   const name = sanitize(task.name);
-  const title = kind === "secret" ? "TOTP secret" : kind === "passkey" ? "Passkey" : kind === "sms" ? "SMS code" : "Email code";
-  const ask = kind === "secret" ? `Enter the TOTP secret for ${name}`
+  const title = kind === "totp" ? "Authenticator code" : kind === "passkey" ? "Passkey" : kind === "sms" ? "SMS code" : "Email code";
+  const ask = kind === "totp" ? `Enter the authenticator (TOTP) code for ${name}`
     : kind === "passkey" ? `Approve the passkey prompt on your device for ${name}`
     : `Enter the ${kind === "sms" ? "SMS" : "email"} code for ${name}`;
   const rows: ReactElement[] = [h(Text, { bold: true, wrap: "truncate-end" }, ask)];

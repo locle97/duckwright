@@ -305,7 +305,6 @@ test("run_without_an_env_secret_has_no_secret_and_no_human_by_default", async ()
 test("run_humanfor_gets_the_run_signal_and_events_and_the_timeout_comes_from_args", async () => {
   const seen: unknown[] = [];
   const human: Human = {
-    secret: async () => RFC_SECRET,
     code: (_k, signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new AbortedError()), { once: true })),
     approve: async () => {},
   };

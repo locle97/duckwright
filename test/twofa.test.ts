@@ -17,7 +17,6 @@ function human(over: Partial<Human> = {}): Human & { asked: string[] } {
   const asked: string[] = [];
   return {
     asked,
-    secret: async () => { asked.push("secret"); return SECRET; },
     code: async (kind) => { asked.push(kind); return "493817"; },
     approve: async () => { asked.push("passkey"); },
     ...over,
@@ -42,19 +41,30 @@ test("totp_works_with_no_human_when_the_env_secret_is_set", async () => {
   assert.equal(await make({ secret: SECRET }).totp(), AT_59);
 });
 
-test("totp_asks_for_the_secret_once_and_keeps_it_in_memory", async () => {
+test("totp_without_an_env_secret_asks_the_human_for_the_code_every_call_and_scrubs_it", async () => {
   const h = human();
   const tf = make({ human: h });
-  assert.equal(await tf.totp(), AT_59);
-  assert.equal(await tf.totp(), AT_59);
-  assert.deepEqual(h.asked, ["secret"]);
-  assert.equal(tf.scrubber.scrub(SECRET), "[REDACTED]");
+  assert.equal(await tf.totp(), "493817");
+  assert.equal(await tf.totp(), "493817");
+  assert.deepEqual(h.asked, ["totp", "totp"]);
+  assert.equal(tf.scrubber.scrub("got 493817"), `got ${CODE_MASK}`);
 });
 
-test("a_bad_typed_secret_is_refused_without_quoting_it", async () => {
-  const tf = make({ human: human({ secret: async () => "hunter2!" }) });
-  await assert.rejects(tf.totp(), (e: unknown) =>
-    e instanceof TwoFactorError && e.message === "not a valid TOTP secret" && !e.message.includes("hunter2"));
+test("an_empty_typed_totp_code_is_refused", async () => {
+  const tf = make({ human: human({ code: async () => "  " }) });
+  await assert.rejects(tf.totp(), (e: unknown) => e instanceof TwoFactorError && /empty/.test(e.message));
+});
+
+test("totp_with_no_human_and_no_env_secret_is_no_human", async () => {
+  await assert.rejects(make().totp(), (e: unknown) => e instanceof TwoFactorError && e.message === NO_HUMAN);
+});
+
+test("totp_with_an_env_secret_never_asks_the_human_even_repeatedly", async () => {
+  const h = human();
+  const tf = make({ secret: SECRET, human: h });
+  await tf.totp();
+  await tf.totp();
+  assert.deepEqual(h.asked, []);
 });
 
 test("an_invalid_env_secret_throws_when_the_provider_is_built", () => {

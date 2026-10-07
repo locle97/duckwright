@@ -22,11 +22,7 @@ export class HumanBridge implements Human {
     return this.#waiting === null ? null : { kind: this.#waiting.kind };
   }
 
-  secret(signal: AbortSignal): Promise<string> {
-    return this.#ask("secret", signal);
-  }
-
-  code(kind: "sms" | "email", signal: AbortSignal): Promise<string> {
+  code(kind: "totp" | "sms" | "email", signal: AbortSignal): Promise<string> {
     return this.#ask(kind, signal);
   }
 

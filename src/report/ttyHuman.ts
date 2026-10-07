@@ -1,5 +1,5 @@
-// Asks the person at the terminal for a 2FA secret, code or approval. Prompts go to stderr so stdout
-// keeps only the run's own output. Reading is by hand (raw mode when there is one) so a secret is never echoed.
+// Asks the person at the terminal for a 2FA code or approval. Prompts go to stderr so stdout
+// keeps only the run's own output. Reading is by hand (raw mode when there is one) so the echo can be switched off.
 import { AbortedError } from "../proc.ts";
 import type { Human } from "../twofa.ts";
 
@@ -73,9 +73,11 @@ export function createTtyHuman(o: TtyOptions): Human {
   }
 
   return {
-    secret: (signal) => readLine(`${o.label}: TOTP secret (input hidden): `, false, signal),
     code: (kind, signal) =>
-      readLine(`${o.label}: ${kind === "sms" ? "SMS" : "email"} verification code: `, true, signal),
+      readLine(
+        kind === "totp" ? `${o.label}: authenticator (TOTP) code: `
+          : `${o.label}: ${kind === "sms" ? "SMS" : "email"} verification code: `,
+        true, signal),
     approve: async (signal) => {
       await readLine(`${o.label}: approve the passkey prompt on your device, then press Enter: `, true, signal);
     },

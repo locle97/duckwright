@@ -6,18 +6,18 @@ Date: 2026-10-07 · Branch: `claude/great-clarke-sdie1u`
 
 A run can get past a 2FA prompt. A new `twofa` action tells the harness that the page is asking for a verification code or a passkey approval. The harness, not the model, obtains the code and submits it:
 
-- **TOTP:** the code is generated from a secret the user supplies (`DUCKWRIGHT_TOTP_SECRET`, or typed when first needed).
+- **TOTP:** the code is generated from a secret the user supplies in `DUCKWRIGHT_TOTP_SECRET`; without it, the run asks the human for the current code from their authenticator app, like an SMS or email code.
 - **SMS and email:** the run pauses and asks the human for the code.
 - **Passkey:** the run pauses and asks the human to approve on their device.
 
-It works in print mode and in `--tui`. The secret and every code stay out of `history.json`, `events.jsonl`, `network/`, prompts and the exported spec.
+It works in print mode and in `--tui`. The secret (when supplied) and every code stay out of `history.json`, `events.jsonl`, `network/`, prompts and the exported spec.
 
 ## Intent
 
 - **Goal:** let an agent run, and the regression test exported from it, get past a login that has 2FA.
-- **Constraints (user-stated):** TOTP codes come from a user-supplied secret and are never recorded in `history.json`. SMS, email and passkeys pause the run and ask the human. Print mode and TUI mode must both work.
+- **Constraints (user-stated):** TOTP codes come from a user-supplied secret, or are typed by the user when there is none, and are never recorded in `history.json`. SMS, email and passkeys pause the run and ask the human. Print mode and TUI mode must both work.
 - **Decisions made with the user:**
-  - Secret source: a single env var, with a prompt on first need as the fallback (not a flag, not named secrets).
+  - Secret source: a single env var; without it the human is asked for the current code each time (not a flag, not named secrets, never asked for the secret).
   - Agent interface: a dedicated `twofa` action (not placeholders in `fill`, not harness-side detection).
   - Export: TOTP becomes an inline helper in the spec; SMS, email and passkey become marked manual steps (option C).
   - No human attached: fail fast. Human attached: wait up to a timeout (default 5 minutes).
@@ -25,6 +25,8 @@ It works in print mode and in `--tui`. The secret and every code stay out of `hi
 - **Success:** `duckwright "log in to the demo app"` with `DUCKWRIGHT_TOTP_SECRET` set completes a TOTP login unattended. The same task with an SMS code asks on the terminal in print mode and in a dialog in the TUI, then continues. A grep of every file the run wrote finds neither the secret nor any code.
 
 ## Decisions
+
+> Revision: D9 changed. The human is asked for the current TOTP code, not the secret. There is no secret prompt, and the `TwofaWait` kind `"secret"` became `"totp"`.
 
 | # | Topic | Decision |
 |---|---|---|
@@ -36,15 +38,15 @@ It works in print mode and in `--tui`. The secret and every code stay out of `hi
 | D6 | Loop cap | At most 5 `twofa` actions per run. The 6th returns `error: too many 2FA attempts in this run`. This stops loops on a page that keeps rejecting the code. |
 | D7 | Provider | `interface TwoFactor { totp(signal): Promise<string>; askCode(kind: "sms" \| "email", signal): Promise<string>; askApproval(signal): Promise<void> }`. The run is given one through `RunDeps` and `AgentOptions`, like `createAgent`. The agent loop and `execute()` know only this interface. Tests pass a fake. |
 | D8 | TOTP generation | `src/totp.ts`: RFC 6238, HMAC-SHA1, 30-second step, 6 digits, `node:crypto` only, no new dependency. It accepts a base32 secret (spaces and case ignored, padding optional) or an `otpauth://totp/...?secret=...` URI. Invalid input throws a `TotpSecretError` whose message never includes the secret. |
-| D9 | Secret source | `DUCKWRIGHT_TOTP_SECRET`, read once at run start. If unset, the first `twofa totp` asks the human for the secret (hidden or masked input) and keeps it in memory for the rest of the run only. It is never written to disk or to the environment. |
+| D9 | Code source | `DUCKWRIGHT_TOTP_SECRET`, read once at run start: the code is generated and the human is not asked. If unset, every `twofa totp` asks the human for the current 6-digit code from their authenticator app (echoed like an SMS or email code in print mode, masked in the TUI), through the same wait, timeout, attempt count, empty-code check and scrubbing as `sms` and `email`. The code rotates every 30 seconds, so each call asks again. No secret is ever requested. |
 | D10 | Preflight | If `DUCKWRIGHT_TOTP_SECRET` is set but invalid, the run exits `2` before the browser opens, with `DUCKWRIGHT_TOTP_SECRET is not a valid TOTP secret`. In a batch the check runs once, before the first task. |
 | D11 | Scrubber | A per-run `Scrubber` holds the secret and every code the provider has returned. `scrub(text)` replaces each value with `[2FA CODE]` (codes) or `[REDACTED]` (the secret). It is applied to the recorded Playwright `code` for the fill, to action results, and to everything written to `history.json`, `events.jsonl` and `network/`, and to the prompt text built for the next step, in case a page echoes a code back. Codes shorter than 4 characters are not scrubbed from free text, to avoid mangling unrelated output. |
 | D12 | Recorded action | `history.json` stores `{cmd:"twofa", args:["sms","e12"], code:<fill line with the code replaced by "[2FA CODE]">}`. For `passkey` and for failed actions `code` is `null`. The result is `ok` or an `error:`. |
-| D13 | Print mode, with a TTY | The prompt goes to stderr so stdout stays clean. Codes are read as a line. The secret is read with echo off. A passkey prompt says to approve on the device and press Enter. In a batch the prompt names the task, for example `[2/3] tasks/b.md: SMS code?`. Tasks run one at a time, so prompts never interleave. |
-| D14 | Print mode, no TTY | Uses the existing `isTTY()` in `cli.ts`. Without a TTY every human-needed call returns `error: no way to ask for a code (stdin is not a terminal)` at once. `totp` still works unattended when the env secret is set. |
+| D13 | Print mode, with a TTY | The prompt goes to stderr so stdout stays clean. Codes are read as a line. A passkey prompt says to approve on the device and press Enter. In a batch the prompt names the task, for example `[2/3] tasks/b.md: SMS code?`. Tasks run one at a time, so prompts never interleave. |
+| D14 | Print mode, no TTY | Uses the existing `isTTY()` in `cli.ts`. Without a TTY every human-needed call returns `error: no way to ask for a code (stdin is not a terminal)` at once. `totp` still works unattended when the env secret is set; without it, `totp` needs a human like `sms`. |
 | D15 | Wait and timeout | A human wait lasts at most `--twofa-timeout <sec>` (default 300, also a task-file setting). On timeout the action returns `error: timed out waiting for the 2FA code`. Ctrl-C in print mode aborts the whole run through the existing `AbortSignal`: exit `130`, `history.json` still written. |
 | D16 | TUI provider | The TUI never reads stdin directly, because Ink owns it. Its provider emits `twofa:wait` (kind, task id, deadline) and awaits an answer. `runs/manager.ts` keeps the pending request on that run's state and exposes `answerTwoFactor(id, value \| null)`. `null` is cancel and returns `error: cancelled` for that action, and the run continues. |
-| D17 | TUI presentation | The sidebar marks a waiting run "needs input". Other runs keep going. A modal dialog, in the style of `dialog.ts`, `form.ts` and `confirm.ts`, takes the answer: masked input for codes and the secret, approve or cancel for a passkey. Typed characters are never put in TUI state, the event log or the timeline. A second request while a dialog is open queues. The timeline shows `twofa sms e12 → ok` with no code. |
+| D17 | TUI presentation | The sidebar marks a waiting run "needs input". Other runs keep going. A modal dialog, in the style of `dialog.ts`, `form.ts` and `confirm.ts`, takes the answer: masked input for codes (TOTP, SMS and email), approve or cancel for a passkey. Typed characters are never put in TUI state, the event log or the timeline. A second request while a dialog is open queues. The timeline shows `twofa sms e12 → ok` with no code. |
 | D18 | Events | `RunEvents` gains `twofa:wait` (`kind`, `deadline`) and `twofa:done` (`outcome`: `answered`, `cancelled` or `timeout`). Neither carries a value. Print mode ignores both. |
 | D19 | Export (`totp`) | `renderSpec` emits one small inline helper (RFC 6238 via `node:crypto`, about 15 lines) that reads `process.env.DUCKWRIGHT_TOTP_SECRET` and throws a clear error if it is unset. The step becomes `await <locator>.fill(totp()); // 2FA`, with the locator derived from the recorded fill code, as for `fill` today. The spec contains no code and no secret. |
 | D20 | Export (`sms`, `email`, `passkey`) | Each becomes a marked manual step: `// MANUAL: enter the <kind> code here` (or `approve the passkey prompt`) followed by `await page.pause();`. The spec gets a header comment saying it cannot run unattended. A warning names the steps. |
@@ -62,19 +64,19 @@ All are returned as the action's `error:` result so the agent can react, and non
 | No TTY and no env secret, or no human available | `error: no way to ask for a code (stdin is not a terminal)` |
 | Wait timed out | `error: timed out waiting for the 2FA code` |
 | TUI cancel | `error: cancelled` |
-| Invalid secret typed at the prompt | `error: not a valid TOTP secret` (never includes the secret) |
 | Page rejects the code | Not a harness error. The agent sees the page and may retry, within D6. |
 | More than 5 `twofa` actions | `error: too many 2FA attempts in this run` |
 
 ## Testing
 
 - `test/totp.test.ts`: RFC 6238 SHA-1 vectors, base32 and `otpauth://` parsing, invalid input, and that error messages omit the secret.
+- `test/twofa.test.ts`: without an env secret `totp` asks the human every call, scrubs and refuses an empty code; with one it never asks.
 - `test/scrubber.test.ts`: values replaced in nested JSON, strings and `code` fields. Short codes are not over-matched.
 - `test/actions.test.ts`: arg validation per kind, page-changing skip, the loop cap, and results that never contain the code. A fake provider drives the action path.
 - `test/export.test.ts`: fixtures for the TOTP helper and the manual-step placeholders, the header comment, and the failed-step and no-code cases.
-- Print mode (`test/cli.test.ts`): a fake TTY provider covers the prompt, hidden input, timeout and the no-TTY fallback, plus the preflight exit `2`.
-- TUI (`test/tui/`): state and manager tests for `twofa:wait` and `answerTwoFactor`, queueing, cancel and the sidebar marker. Rendering tests cover the masked dialog, and a test checks that typed characters never reach state or the event log.
-- Leak test, end to end with a fake brain: run a `twofa totp` task and a `twofa sms` task, then search `history.json`, `events.jsonl`, `network/`, the exported spec, and captured stdout and stderr for the secret and the codes. Nothing may match.
+- Print mode (`test/cli.test.ts`): a fake TTY provider covers the prompts (including the TOTP code prompt), timeout and the no-TTY fallback, plus the preflight exit `2`.
+- TUI (`test/tui/`): state and manager tests for `twofa:wait` and `answerTwoFactor`, queueing, cancel and the sidebar marker. Rendering tests cover the masked dialog (including the authenticator code dialog), and a test checks that typed characters never reach state or the event log.
+- Leak test, end to end with a fake brain: run a `twofa totp` task and a `twofa sms` task, once with the env secret and once with the TOTP code typed by the human, then search `history.json`, `events.jsonl`, `network/`, the exported spec, and captured stdout and stderr for the secret and the codes. Nothing may match.
 
 ## Out of scope
 

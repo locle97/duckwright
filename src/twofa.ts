@@ -12,7 +12,6 @@ export const DEFAULT_TWOFA_TIMEOUT_SEC = 300;
 /** The longest wait setTimeout can hold: Node clamps delays above 2^31-1 ms to 1 ms. */
 export const MAX_TWOFA_TIMEOUT_SEC = 2147483;
 export const NO_HUMAN = "no way to ask for a code (stdin is not a terminal)";
-const BAD_SECRET = "not a valid TOTP secret";
 const REF = /^[A-Za-z0-9_-]+$/;
 
 export class TwoFactorError extends Error {
@@ -35,15 +34,14 @@ export class CancelledError extends Error {
  * AbortedError when `signal` aborts (run stopped, or the wait timed out) and with CancelledError on cancel.
  */
 export interface Human {
-  secret(signal: AbortSignal): Promise<string>;
-  code(kind: "sms" | "email", signal: AbortSignal): Promise<string>;
+  code(kind: "totp" | "sms" | "email", signal: AbortSignal): Promise<string>;
   approve(signal: AbortSignal): Promise<void>;
 }
 
 export interface TwoFactor {
   readonly scrubber: Scrubber;
   totp(): Promise<string>;
-  code(kind: "sms" | "email"): Promise<string>;
+  code(kind: "totp" | "sms" | "email"): Promise<string>;
   approve(): Promise<void>;
 }
 
@@ -108,30 +106,25 @@ export function createTwoFactor(o: TwoFactorOptions): TwoFactor {
     }
   }
 
+  async function typedCode(kind: "totp" | "sms" | "email"): Promise<string> {
+    count();
+    const typed = (await ask(kind, (h, signal) => h.code(kind, signal))).trim();
+    if (typed === "") throw new TwoFactorError("empty code");
+    scrubber.addCode(typed);
+    return typed;
+  }
+
   return {
     scrubber,
     async totp() {
+      // No env secret: ask the human for the current code, like an SMS or email code.
+      if (key === null) return typedCode("totp");
       count();
-      if (key === null) {
-        const typed = await ask("secret", (h, signal) => h.secret(signal));
-        try {
-          key = parseSecret(typed);
-        } catch {
-          throw new TwoFactorError(BAD_SECRET);
-        }
-        scrubber.addSecret(typed);
-      }
       const code = totpAt(key, now());
       scrubber.addCode(code);
       return code;
     },
-    async code(kind) {
-      count();
-      const typed = (await ask(kind, (h, signal) => h.code(kind, signal))).trim();
-      if (typed === "") throw new TwoFactorError("empty code");
-      scrubber.addCode(typed);
-      return typed;
-    },
+    code: typedCode,
     async approve() {
       count();
       await ask("passkey", (h, signal) => h.approve(signal));

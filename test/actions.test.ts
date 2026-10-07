@@ -469,7 +469,7 @@ const SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 const TWOFA_OUT = "### Ran Playwright code\n```js\nawait page.getByLabel('Code').fill('287082');\n```\n";
 const tf = (human: Human | null = null, secret: string | null = SECRET) =>
   createTwoFactor({ secret, human, timeoutSec: 5, signal: new AbortController().signal, now: () => 59_000 });
-const sayHuman = (code: string): Human => ({ secret: async () => SECRET, code: async () => code, approve: async () => {} });
+const sayHuman = (code: string): Human => ({ code: async () => code, approve: async () => {} });
 
 test("twofa_totp_fills_and_submits_and_never_exposes_the_code", async () => {
   const [pw, calls] = makePw(0, "", TWOFA_OUT);

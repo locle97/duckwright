@@ -1214,7 +1214,7 @@ test("invalid_totp_secret_exits_2_before_anything_runs", async () => {
 test("print_mode_asks_the_tty_human_with_the_label", async () => {
   const e = env();
   const labels: string[] = [];
-  const human: Human = { secret: async () => "", code: async () => "493817", approve: async () => {} };
+  const human: Human = { code: async () => "493817", approve: async () => {} };
   let got = "";
   const code = await main(["-p", ...e.argv], e.deps({
     isTTY: () => true,

@@ -44,7 +44,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
 - **API assertions**: with network capture on, the agent can also check the calls its last step made with `expect-request`: method, path or URL, and status, optionally a field of the JSON response. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
-- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply, SMS and email codes and passkey approvals pause the run and ask you, with `-p` and in the TUI. Codes and the secret never reach `history.json`, the prompts or an exported test.
+- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p` and in the TUI. Codes and the secret never reach `history.json`, the prompts or an exported test.
 - **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink. TypeScript and the test tools are development dependencies.
 
 ## Getting started
@@ -206,7 +206,7 @@ When a login asks for a second factor, the agent uses a `twofa` action: the harn
 
 | Kind | Where the code comes from |
 |---|---|
-| `totp` | Generated from your authenticator secret. Set it as `DUCKWRIGHT_TOTP_SECRET` (a base32 secret, or an `otpauth://` URI). If it is unset, Duckwright asks for it the first time it is needed (hidden input) and keeps it in memory for that run only. |
+| `totp` | Generated from your authenticator secret. Set it as `DUCKWRIGHT_TOTP_SECRET` (a base32 secret, or an `otpauth://` URI). If it is unset, Duckwright asks you to type the current 6-digit code from your authenticator app, like an SMS or email code, each time a `totp` step needs one (the code rotates every 30 seconds). It never asks for the secret. |
 | `sms`, `email` | The run pauses and asks you for the code. |
 | `passkey` | The run pauses until you approve the prompt on your device and confirm. |
 
@@ -215,13 +215,13 @@ export DUCKWRIGHT_TOTP_SECRET=JBSWY3DPEHPK3PXP
 duckwright "Log in to the demo app as linh and open the dashboard"
 ```
 
-- **With `-p` (print mode)** it asks on the terminal (prompts go to stderr; a secret is not echoed). With no terminal (CI, a pipe) a step that needs a person fails at once with `no way to ask for a code`, and the agent can finish with `done failure`. `totp` still works unattended when `DUCKWRIGHT_TOTP_SECRET` is set. In a batch the prompt names the task, for example `[2/3] tasks/b.md`.
+- **With `-p` (print mode)** it asks on the terminal (prompts go to stderr). With no terminal (CI, a pipe) a step that needs a person fails at once with `no way to ask for a code`, and the agent can finish with `done failure`. `totp` still works unattended when `DUCKWRIGHT_TOTP_SECRET` is set; without it, `totp` needs a person like `sms` and `email`. In a batch the prompt names the task, for example `[2/3] tasks/b.md`.
 - **The TUI** (the default on a terminal) shows a masked dialog and marks the waiting task with `?` in the list; the other runs keep going, and a second request waits its turn. `esc` cancels that step.
 - **Waiting** is bounded by `--twofa-timeout` (default 300 seconds, at most 2147483; also a task-file key). Ctrl-C always stops the wait. A run may use at most 5 `twofa` actions.
-- **Nothing is recorded by Duckwright**: the secret and every code are scrubbed from `history.json`, `events.jsonl`, `network/`, `page/snapshot.yml`, the prompts and the step lines it prints. The recorded Playwright code shows `[2FA CODE]`. Two things are outside that: the code you type for an SMS or email prompt is echoed in your own terminal (so it stays in your scrollback; the TOTP secret is not echoed), and playwright-cli keeps its own page snapshots in `.playwright-cli/` in the working folder, which can contain a code (codes expire) and are not part of Duckwright's run folder.
+- **Nothing is recorded by Duckwright**: the secret and every code are scrubbed from `history.json`, `events.jsonl`, `network/`, `page/snapshot.yml`, the prompts and the step lines it prints. The recorded Playwright code shows `[2FA CODE]`. Two things are outside that: the code you type for a TOTP, SMS or email prompt is echoed in your own terminal (so it stays in your scrollback), and playwright-cli keeps its own page snapshots in `.playwright-cli/` in the working folder, which can contain a code (codes expire) and are not part of Duckwright's run folder.
 - **Short codes are masked everywhere**: a human code of only 4 digits is replaced wherever it appears, including in unrelated text such as a year.
 - **An invalid `DUCKWRIGHT_TOTP_SECRET`** stops Duckwright before anything runs (exit `2`).
-- **Exported tests**: a `totp` step becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
+- **Exported tests**: a `totp` step becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. Tests exported from a run where you typed the codes still need `DUCKWRIGHT_TOTP_SECRET` set in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
 
 ### Task files
 
@@ -448,7 +448,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Authentication**
 
-- [ ] **Two-factor verification**: get past 2FA prompts during a run. TOTP codes are generated from a secret supplied by the user (and never recorded in `history.json`). SMS and email codes, and passkeys, pause the run and ask the user for the code or approval.
+- [ ] **Two-factor verification**: get past 2FA prompts during a run. TOTP codes are generated from a secret supplied by the user, or typed by the user when there is none (never recorded in `history.json`). SMS and email codes, and passkeys, pause the run and ask the user for the code or approval.
 
 **Network and API testing**
 

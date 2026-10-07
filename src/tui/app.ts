@@ -98,7 +98,7 @@ function Workspace(p: AppProps): ReactElement {
   if (thrown !== null) throw thrown;
   const toastsSeen = useRef(0);
   // What the user has typed into the 2FA dialog. Kept here, not in the view state or the manager,
-  // so a code or secret is never held anywhere but on its way to the run.
+  // so a code is never held anywhere but on its way to the run.
   const twofaText = useRef({ key: "", text: "" });
   const quitting = useRef(false);
   const terminal = useWindowSize();

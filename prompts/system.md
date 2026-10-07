@@ -55,7 +55,7 @@ It only works for a method and path that appear in an earlier `<network>` sectio
 ## Two-factor verification
 
 When the page asks for a verification code (an authenticator app code, or a code sent by SMS or email) or for a passkey, use `twofa`. The harness gets the code and enters it for you: never type or guess a code with `fill`. Args are the kind, then the ref of the code field:
-- `{"cmd": "twofa", "args": ["totp", "e15"]}`: an authenticator app code
+- `{"cmd": "twofa", "args": ["totp", "e15"]}`: an authenticator app code (generated from the authenticator secret if the harness has one, otherwise the user is asked to type the current code)
 - `{"cmd": "twofa", "args": ["sms", "e15"]}` or `{"cmd": "twofa", "args": ["email", "e15"]}`: a code the user is asked to type in
 - `{"cmd": "twofa", "args": ["passkey"]}`: the user approves the passkey prompt on their device
 

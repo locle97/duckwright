@@ -32,13 +32,13 @@ test("email_prompt_names_email", async () => {
   assert.ok(t.text().includes("email verification code"));
 });
 
-test("secret_is_not_echoed", async () => {
+test("totp_prompt_names_the_authenticator_and_echoes_the_code", async () => {
   const t = setup();
-  const p = t.human.secret(live());
-  t.stdin.write("GEZDGNBV\n");
-  assert.equal(await p, "GEZDGNBV");
-  assert.ok(t.text().includes("TOTP secret"));
-  assert.ok(!t.text().includes("GEZDGNBV"));
+  const p = t.human.code("totp", live());
+  t.stdin.write("493817\n");
+  assert.equal(await p, "493817");
+  assert.ok(t.text().includes("authenticator (TOTP) code"));
+  assert.ok(t.text().includes("493817"));
 });
 
 test("backspace_edits_the_input", async () => {

@@ -15,6 +15,7 @@ import { tmpDir } from "./helpers.ts";
 
 const SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 const SMS = "493817";
+const TYPED_TOTP = "718305";
 
 /** Echoes whatever was last filled into the code field in the tab list, like a page that shows what you typed. */
 class EchoPW extends PlaywrightCLI {
@@ -60,11 +61,16 @@ function filesUnder(dir: string): string[] {
   });
 }
 
-for (const snapshot of ["full", "grep"] as const) test(`no_secret_or_code_reaches_any_file_prompt_or_output_${snapshot}`, async () => {
+const scenarios = [
+  { name: "env_secret", env: { DUCKWRIGHT_TOTP_SECRET: SECRET } as Record<string, string>, typedTotp: false },
+  { name: "typed_totp_code", env: {} as Record<string, string>, typedTotp: true },
+];
+
+for (const sc of scenarios) for (const snapshot of ["full", "grep"] as const) test(`no_secret_or_code_reaches_any_file_prompt_or_output_${sc.name}_${snapshot}`, async () => {
   const tmp = tmpDir();
   const pw = new EchoPW();
   const brain = new ScriptBrain();
-  const human: Human = { secret: async () => SECRET, code: async () => SMS, approve: async () => {} };
+  const human: Human = { code: async (kind) => (kind === "totp" ? TYPED_TOTP : SMS), approve: async () => {} };
   const args: RunArgs = {
     task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
     state: null, allowFileAccess: false, export: true, snapshot, print: false, maxParallel: null, network: true,
@@ -73,7 +79,7 @@ for (const snapshot of ["full", "grep"] as const) test(`no_secret_or_code_reache
   const printed: string[] = [];
   const handle = startRun({ task: "log in", taskFile: null, args }, {
     prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"),
-    env: { DUCKWRIGHT_TOTP_SECRET: SECRET },
+    env: sc.env,
     humanFor: () => human,
     createAgent: (opts) => new Agent({ ...opts, pw, brain }),
   });
@@ -83,13 +89,14 @@ for (const snapshot of ["full", "grep"] as const) test(`no_secret_or_code_reache
   assert.equal(pw.filled.length, 2);
   const [totp, sms] = pw.filled;
   assert.match(totp, /^\d{6}$/);
+  if (sc.typedTotp) assert.equal(totp, TYPED_TOTP);
   assert.equal(sms, SMS);
 
   assert.ok(filesUnder(handle.workdir).some((f) => f.endsWith(path.join("page", "snapshot.yml"))), "no snapshot file, so the scan would be vacuous");
   const networkFiles = filesUnder(path.join(handle.workdir, "network"));
   assert.ok(networkFiles.length > 0, "network capture wrote no files, so the scan would be vacuous");
 
-  const secrets = [SECRET, totp, SMS];
+  const secrets = sc.typedTotp ? [totp, SMS] : [SECRET, totp, SMS];
   const haystacks: [string, string][] = [
     ...filesUnder(handle.workdir).map((f): [string, string] => [f, fs.readFileSync(f, "utf8")]),
     ...brain.prompts.map((p, i): [string, string] => [`prompt ${i + 1}`, p]),

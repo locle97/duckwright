@@ -19,12 +19,12 @@ test("a_request_is_pending_until_answered", async () => {
   assert.equal(changes, 2);
 });
 
-test("secret_and_passkey_kinds", async () => {
+test("totp_and_passkey_kinds", async () => {
   const b = new HumanBridge(() => {});
-  const s = b.secret(live());
-  assert.deepEqual(b.pending, { kind: "secret" });
-  b.answer("GEZD");
-  assert.equal(await s, "GEZD");
+  const s = b.code("totp", live());
+  assert.deepEqual(b.pending, { kind: "totp" });
+  b.answer("493817");
+  assert.equal(await s, "493817");
   const a = b.approve(live());
   assert.deepEqual(b.pending, { kind: "passkey" });
   b.answer("");

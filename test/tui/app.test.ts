@@ -763,6 +763,21 @@ test("twofa_dialog_masks_input_and_answers_the_manager", async () => {
   assert.ok(!m.log.join("\n").includes("123456"), "the code is not in the manager call log");
 });
 
+test("twofa_totp_dialog_shows_authenticator_code_masks_input_and_answers_the_manager", async () => {
+  const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m);
+  await settle();
+  m.update(1, { twofa: { kind: "totp" } });
+  await settle();
+  assert.match(t.frame(), /Authenticator code/);
+  assert.match(t.frame(), /authenticator \(TOTP\) code/);
+  await t.type("4", "9", "3", "8", "1", "7");
+  assert.ok(t.frame().includes("••••••"));
+  assert.ok(!t.frame().includes("493817"), "the code is never drawn");
+  await t.type("\r");
+  assert.deepEqual(m.twofaAnswers, [{ id: 1, value: "493817" }]);
+});
+
 test("twofa_dialog_does_not_leak_keys_to_the_workspace", async () => {
   const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1 })]);
   const t = mount(m);

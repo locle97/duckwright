@@ -11,7 +11,7 @@ test("typing_appends_and_backspace_removes", () => {
 });
 
 test("a_paste_keeps_printable_characters_only", () => {
-  assert.deepEqual(twofaKey("secret", "", { ...key("x"), input: "GEZD\n GNBV\x1b" }), { buffer: "GEZD GNBV" });
+  assert.deepEqual(twofaKey("totp", "", { ...key("x"), input: "GEZD\n GNBV\x1b" }), { buffer: "GEZD GNBV" });
 });
 
 test("return_submits_a_trimmed_non_empty_code_and_ignores_an_empty_one", () => {
