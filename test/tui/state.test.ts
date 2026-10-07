@@ -13,7 +13,7 @@ function task(id: number, state: TaskState = "idle", runId: string | null = null
   return {
     id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
     effective: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid" },
-    error: null, runId, runCount: runId ? 1 : 0, createdAt: 0, twofa: null,
+    error: null, runId, runCount: runId ? 1 : 0, createdAt: 0, twofa: null, hasSpec: false,
   };
 }
 

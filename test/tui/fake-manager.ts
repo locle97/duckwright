@@ -12,7 +12,7 @@ export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> =
     id, text, name: taskName(text), source: { kind: "typed" }, state: "idle", overrides: {},
     effective: { model: "sonnet", maxSteps: 25, headed: false, snapshot: "hybrid" },
     error: null, runId: null, runCount: 0, createdAt: 0,
-    twofa: null, ...over,
+    twofa: null, hasSpec: false, ...over,
   };
 }
 
@@ -36,6 +36,8 @@ export class FakeManager implements ManagerLike {
   log: string[] = [];
   overrides: Array<{ id: TaskId; o: Overrides }> = [];
   active = 0;
+  /** What replaySpec() returns. */
+  replayResult: Result = { ok: true };
   startResult: StartResult = { ok: true, runId: "r1" };
   stopAllResult: Promise<void> = Promise.resolve();
   /** What add() returns; by default it adds the typed task and reports it. */
@@ -135,6 +137,11 @@ export class FakeManager implements ManagerLike {
 
   stop(id: TaskId): void {
     this.log.push(`stop:${id}`);
+  }
+
+  async replaySpec(id: TaskId): Promise<Result> {
+    this.log.push(`replaySpec:${id}`);
+    return this.replayResult;
   }
 
   activeCount(): number {

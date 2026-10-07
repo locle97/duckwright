@@ -7,7 +7,10 @@ import type { RunArgs } from "../../src/args.ts";
 import { RunControl } from "../../src/control.ts";
 import { RunEvents } from "../../src/events.ts";
 import type { RunOutcome } from "../../src/events.ts";
-import { RunManager, taskName } from "../../src/runs/manager.ts";
+import { EventEmitter } from "node:events";
+import { RunManager, closedToast, noSpec, notRunYet, openingToast, stillRunning, taskName } from "../../src/runs/manager.ts";
+import { NOT_INSTALLED, SpecReplays } from "../../src/replay.ts";
+import type { SpawnFn } from "../../src/replay.ts";
 import type { ManagerEvent, ManagerOptions } from "../../src/runs/manager.ts";
 import { AbortedError } from "../../src/proc.ts";
 import { CancelledError } from "../../src/twofa.ts";
@@ -31,7 +34,7 @@ interface Fake {
   finish(o: RunOutcome): void;
 }
 
-function setup(over: Partial<ManagerOptions> = {}) {
+function setup(over: Partial<ManagerOptions> = {}, extra: { workdir?: (n: number) => string } = {}) {
   const fakes: Fake[] = [];
   const events: ManagerEvent[] = [];
   const mgr = new RunManager({
@@ -41,7 +44,7 @@ function setup(over: Partial<ManagerOptions> = {}) {
       const control = new RunControl(new AbortController(), ev);
       let resolve!: (o: RunOutcome) => void;
       const done = new Promise<RunOutcome>((r) => { resolve = r; });
-      const handle: RunHandle = { id: `run-${fakes.length + 1}`, workdir: "/tmp/x", events: ev, control, done };
+      const handle: RunHandle = { id: `run-${fakes.length + 1}`, workdir: extra.workdir ? extra.workdir(fakes.length + 1) : "/tmp/x", events: ev, control, done };
       fakes.push({
         handle, spec,
         finish(o) {
@@ -679,4 +682,164 @@ test("twofa_stopping_the_run_clears_the_request", async () => {
   ac.abort();
   await assert.rejects(p, AbortedError);
   assert.equal(mgr.list()[0].twofa, null);
+});
+
+// ---- replaySpec / hasSpec ----
+
+class FakeChild extends EventEmitter { unref() {} }
+
+function replaySetup(over: Partial<ManagerOptions> = {}, extra: { workdir?: (n: number) => string } = {}, cli = true) {
+  const calls: Array<{ cmd: string; args: string[]; opts: { cwd?: string | URL } }> = [];
+  const children: FakeChild[] = [];
+  const spawn = ((cmd: string, args: string[], opts: { cwd?: string | URL }) => {
+    calls.push({ cmd, args, opts });
+    const c = new FakeChild();
+    children.push(c);
+    return c;
+  }) as unknown as SpawnFn;
+  const replays = new SpecReplays({ spawn, cli: () => (cli ? { cli: "/pw/cli.js", nodeModules: "/pw" } : null) });
+  const s = setup({ replays, ...over }, extra);
+  return { ...s, calls, children };
+}
+
+function specDir(withSpec = true): string {
+  const d = tmpDir();
+  if (withSpec) fs.writeFileSync(path.join(d, "duckwright.spec.ts"), "");
+  return d;
+}
+
+const noToast = (events: ManagerEvent[]) => assert.equal(events.some((e) => e.type === "toast"), false);
+
+test("hasSpec reflects the past folder's spec file", () => {
+  const a = specDir();
+  const b = specDir(false);
+  const { mgr } = replaySetup({ past: [pastRun("a", "pass", { workdir: a }), pastRun("b", "pass", { workdir: b })] });
+  mgr.addTyped("never ran");
+  assert.deepEqual(mgr.list().map((t) => t.hasSpec), [true, false, false]);
+});
+
+test("hasSpec is false while live and true after a passed run", async () => {
+  const dir = specDir();
+  const { mgr, fakes } = replaySetup({}, { workdir: () => dir });
+  const id = mgr.addTyped("t");
+  mgr.start(id);
+  assert.equal(mgr.list()[0].hasSpec, false);
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  assert.equal(mgr.list()[0].hasSpec, true);
+});
+
+test("hasSpec is true in the snapshot emitted when the run settles", async () => {
+  const dir = specDir();
+  const { mgr, fakes, events } = replaySetup({}, { workdir: () => dir });
+  mgr.start(mgr.addTyped("t"));
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  const last = [...events].reverse().find((e) => e.type === "task:updated");
+  assert.ok(last && last.type === "task:updated" && last.task.hasSpec);
+});
+
+test("replaySpec error texts", async () => {
+  const noFile = specDir(false);
+  const { mgr, events, calls } = replaySetup({ past: [pastRun("p", "pass", { workdir: noFile })] });
+  const idle = mgr.addTyped("t");
+  const live = mgr.addTyped("t");
+  mgr.start(live);
+  events.length = 0;
+  assert.deepEqual(await mgr.replaySpec(99), { ok: false, error: "no such task" });
+  assert.deepEqual(await mgr.replaySpec(live), { ok: false, error: stillRunning('"t"') });
+  assert.deepEqual(await mgr.replaySpec(idle), { ok: false, error: notRunYet('"t"') });
+  assert.deepEqual(await mgr.replaySpec(1), { ok: false, error: noSpec(path.basename(noFile)) });
+  assert.equal(calls.length, 0);
+  noToast(events);
+  assert.equal(stillRunning('"t"'), '"t" is still running; replay its spec when it finishes');
+});
+
+test("replaySpec on a run without a folder", async () => {
+  const dir = specDir();
+  const { mgr, fakes, calls } = replaySetup(
+    { past: [pastRun("p", "pass", { workdir: dir, source: { kind: "typed" } })] }, { workdir: () => "" });
+  mgr.start(1);
+  fakes[0].handle.id = "";
+  fakes[0].finish(outcome("fail"));
+  await tick();
+  assert.deepEqual(await mgr.replaySpec(1), { ok: false, error: notRunYet(mgr.list()[0].name) });
+  assert.equal(mgr.list()[0].hasSpec, false);
+  assert.equal(calls.length, 0);
+});
+
+test("replaySpec already open", async () => {
+  const dir = specDir();
+  const { mgr, calls, children } = replaySetup({ past: [pastRun("p", "pass", { workdir: dir })] });
+  const first = mgr.replaySpec(1);
+  children[0].emit("spawn");
+  assert.deepEqual(await first, { ok: true });
+  const r = await mgr.replaySpec(1);
+  assert.deepEqual(r, { ok: false, error: `the spec of run ${path.basename(dir)} is already open in the Playwright Inspector` });
+  assert.equal(calls.length, 1);
+});
+
+test("replaySpec spawn failure", async () => {
+  const dir = specDir();
+  const { mgr, children, events } = replaySetup({ past: [pastRun("p", "pass", { workdir: dir })] });
+  const p = mgr.replaySpec(1);
+  children[0].emit("error", new Error("boom"));
+  assert.deepEqual(await p, { ok: false, error: "cannot start Playwright: boom" });
+  noToast(events);
+});
+
+test("replaySpec not installed", async () => {
+  const dir = specDir();
+  const { mgr, calls } = replaySetup({ past: [pastRun("p", "pass", { workdir: dir })] }, {}, false);
+  assert.deepEqual(await mgr.replaySpec(1), { ok: false, error: NOT_INSTALLED });
+  assert.equal(calls.length, 0);
+});
+
+test("replaySpec success toasts", async () => {
+  const dir = specDir();
+  const id = path.basename(dir);
+  const { mgr, calls, children, events } = replaySetup({ past: [pastRun("p", "pass", { workdir: dir })] });
+  const p = mgr.replaySpec(1);
+  children[0].emit("spawn");
+  assert.deepEqual(await p, { ok: true });
+  assert.deepEqual(calls[0].args.slice(-2), ["duckwright.spec.ts", "--debug"]);
+  assert.equal(calls[0].opts.cwd, dir);
+  const toasts = () => events.filter((e) => e.type === "toast");
+  assert.deepEqual(toasts().at(-1), { type: "toast", level: "info", message: `opening ${id}/duckwright.spec.ts in the Playwright Inspector` });
+  children[0].emit("exit", 0);
+  assert.deepEqual(toasts().at(-1), { type: "toast", level: "info", message: `Playwright Inspector closed for ${id}` });
+  const p2 = mgr.replaySpec(1);
+  children[1].emit("spawn");
+  await p2;
+  children[1].emit("exit", 2);
+  assert.equal(
+    (toasts().at(-1) as { message: string }).message,
+    `Playwright exited with code 2 for ${id}; run "npx playwright test duckwright.spec.ts --debug" in ${dir} to see why`);
+  assert.equal(closedToast("r", null, "/d"), "Playwright Inspector closed for r");
+  assert.equal(openingToast("r"), "opening r/duckwright.spec.ts in the Playwright Inspector");
+});
+
+test("replaySpec uses the latest session run after a re-run", async () => {
+  const a = specDir();
+  const b = specDir();
+  const { mgr, fakes, calls, children, events } = replaySetup(
+    { past: [pastRun("p", "fail", { workdir: a })] }, { workdir: () => b });
+  mgr.start(1);
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  const p = mgr.replaySpec(1);
+  children[0].emit("spawn");
+  await p;
+  assert.equal(calls[0].opts.cwd, b);
+  assert.ok(events.some((e) => e.type === "toast" && e.message.startsWith(`opening ${path.basename(b)}/`)));
+});
+
+test("replaySpec resolves a relative workdir against cwd", async () => {
+  const dir = specDir();
+  const rel = path.relative(process.cwd(), dir);
+  const { mgr, calls, children } = replaySetup({ past: [pastRun("p", "pass", { workdir: rel })] });
+  const p = mgr.replaySpec(1);
+  children[0].emit("spawn");
+  await p;
+  assert.equal(calls[0].opts.cwd, dir);
 });
