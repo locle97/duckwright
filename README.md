@@ -44,6 +44,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
 - **API assertions**: with network capture on, the agent can also check the calls its last step made with `expect-request`: method, path or URL, and status, optionally a field of the JSON response. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
+- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply, SMS and email codes and passkey approvals pause the run and ask you, in print mode and in the TUI. Codes and the secret never reach `history.json`, the prompts or an exported test.
 - **Minimal dependencies**: the core loop uses only Node's standard library; `--tui` uses Ink. TypeScript and the test tools are development dependencies.
 
 ## Getting started
@@ -125,6 +126,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
+| `--twofa-timeout` | `300` | Seconds to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
 | `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed or `@`-mentioned inside it, so it takes no task or `--file`, and it needs a terminal |
 | `--max-parallel` | `3` | With `--tui`, how many runs may be active at once |
 | `--past` | `20` | With `--tui`, how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none |
@@ -192,6 +194,28 @@ duckwright "Open https://app.example.com/settings and report my plan" --state au
 
 > [!CAUTION]
 > `auth.json` holds live session tokens. Keep it out of git, and remember the agent can act as you on every site in the file.
+
+### Two-factor verification
+
+When a login asks for a second factor, the agent uses a `twofa` action: the harness gets the code and types it, so the model never sees one.
+
+| Kind | Where the code comes from |
+|---|---|
+| `totp` | Generated from your authenticator secret. Set it as `DUCKWRIGHT_TOTP_SECRET` (a base32 secret, or an `otpauth://` URI). If it is unset, Duckwright asks for it the first time it is needed (hidden input) and keeps it in memory for that run only. |
+| `sms`, `email` | The run pauses and asks you for the code. |
+| `passkey` | The run pauses until you approve the prompt on your device and confirm. |
+
+```bash
+export DUCKWRIGHT_TOTP_SECRET=JBSWY3DPEHPK3PXP
+duckwright "Log in to the demo app as linh and open the dashboard"
+```
+
+- **Print mode** asks on the terminal (prompts go to stderr; a secret is not echoed). With no terminal (CI, a pipe) a step that needs a person fails at once with `no way to ask for a code`, and the agent can finish with `done failure`. `totp` still works unattended when `DUCKWRIGHT_TOTP_SECRET` is set. In a batch the prompt names the task, for example `[2/3] tasks/b.md`.
+- **`--tui`** shows a masked dialog and marks the waiting task with `?` in the list; the other runs keep going, and a second request waits its turn. `esc` cancels that step.
+- **Waiting** is bounded by `--twofa-timeout` (default 300 seconds; also a task-file key). Ctrl-C always stops the wait. A run may use at most 5 `twofa` actions.
+- **Nothing is recorded**: the secret and every code are scrubbed from `history.json`, `events.jsonl`, `network/`, the prompts and the terminal output. The recorded Playwright code shows `[2FA CODE]`.
+- **An invalid `DUCKWRIGHT_TOTP_SECRET`** stops Duckwright before anything runs (exit `2`).
+- **Exported tests**: a `totp` step becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
 
 ### Task files
 
@@ -273,7 +297,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 - `duckwright.spec.ts`: the generated regression test, only with `--export`
 
 > [!CAUTION]
-> `code` contains whatever the agent typed, passwords included. Treat `history.json` and any exported spec like `auth.json`.
+> `code` contains whatever the agent typed, passwords included. Treat `history.json` and any exported spec like `auth.json`. 2FA codes are the exception: they are replaced by `[2FA CODE]`.
 
 > [!CAUTION]
 > Redaction of captured network data is pattern-based (secret-named headers, secret-named keys in JSON, form and URL query data, and Bearer/Basic credentials). Captured bodies can still hold secrets it misses, and binary response bodies are not redacted at all. Treat `network/` like `history.json`.
@@ -369,6 +393,9 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`expectRequest.ts`](https://github.com/locle97/duckwright/blob/main/src/expectRequest.ts) | `expect-request` checks: verified against the captured network calls and rendered as `waitForResponse` assertions |
 | [`request.ts`](https://github.com/locle97/duckwright/blob/main/src/request.ts) | `request` action: argument checks, the seen-only gate, the fixed `run-code` call, response excerpt and the exported setup lines |
 | [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings and the task text) and expands task folders for batch runs |
+| [`totp.ts`](https://github.com/locle97/duckwright/blob/main/src/totp.ts) | RFC 6238 one-time passwords from a user-supplied secret |
+| [`twofa.ts`](https://github.com/locle97/duckwright/blob/main/src/twofa.ts) | The per-run 2FA provider: env secret, human prompts, timeout and attempt cap |
+| [`scrub.ts`](https://github.com/locle97/duckwright/blob/main/src/scrub.ts) | Removes the secret and 2FA codes from everything a run keeps or sends |
 | [`observe.ts`](https://github.com/locle97/duckwright/blob/main/src/observe.ts) | Tab list and page snapshot |
 | [`prompt.ts`](https://github.com/locle97/duckwright/blob/main/src/prompt.ts) | Prompt sections, history lines, escaping untrusted content |
 | [`pw.ts`](https://github.com/locle97/duckwright/blob/main/src/pw.ts) | `playwright-cli` wrapper |
