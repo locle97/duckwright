@@ -114,6 +114,7 @@ duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
+duckwright init
 ```
 
 `duckwright` on its own opens the [interactive TUI](#interactive-tui). With `--web` it serves the [web UI](#web-mode) instead. Given a task or `-f`, it opens the TUI (or the web UI with `--web`) and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
@@ -144,7 +145,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
 
 > [!NOTE]
-> When the first argument is exactly `export`, it is read as the `export` subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
+> When the first argument is exactly `export` or `init`, it is read as that subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
 
 > [!IMPORTANT]
 > Two runs at the same time must use different `--session` names. Otherwise they drive the same browser. The same goes for two TUIs: give each its own `--session`. Inside one TUI, runs get their own sessions automatically.
@@ -328,6 +329,28 @@ and check the greeting says "Hello, Linh!".
 
 [`examples/task.md`](https://github.com/locle97/duckwright/blob/main/examples/task.md) is a commented template to copy.
 
+#### Global config
+
+Defaults shared by every run live in one per-user file, so you do not repeat flags on every command:
+
+| System | File |
+| --- | --- |
+| Linux, macOS | `$XDG_CONFIG_HOME/duckwright/duckwright.conf`, or `~/.config/duckwright/duckwright.conf` when `XDG_CONFIG_HOME` is unset |
+| Windows | `%APPDATA%\duckwright\duckwright.conf` (usually `C:\Users\<you>\AppData\Roaming\duckwright\duckwright.conf`) |
+
+It is flat `key: value` lines (same comment rules as front matter) with the keys of the table above, minus `setup`, plus `max-parallel`, `past` and `theme` (the [options of the same names](#usage)). `duckwright init` writes a commented template there with every key at its default; it never overwrites an existing file.
+
+```
+model: opus
+max-steps: 40
+theme: dark
+```
+
+- Precedence, lowest first: built-in defaults, the config, a task file's front matter, flags on the command line.
+- A missing file is fine. An invalid line prints `<file>:LINE: problem` and exits with `2` before anything runs.
+- Relative `skill` and `state` paths are resolved from the folder holding the config.
+- `allow-file-access` can only be given on the command line, as in task files.
+
 #### Batch runs
 
 Give `-p -f` several files, or a folder, to run them one after another and print a summary, as in scripts and CI (without `-p`, on a terminal, they open in the [TUI](#interactive-tui) instead):
@@ -463,6 +486,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`expect.ts`](https://github.com/locle97/duckwright/blob/main/src/expect.ts) | `expect` checks: verified against the live page and recorded as assertions |
 | [`expectRequest.ts`](https://github.com/locle97/duckwright/blob/main/src/expectRequest.ts) | `expect-request` checks: verified against the captured network calls and rendered as `waitForResponse` assertions |
 | [`request.ts`](https://github.com/locle97/duckwright/blob/main/src/request.ts) | `request` action: argument checks, the seen-only gate, the fixed `run-code` call, response excerpt and the exported setup lines |
+| [`config.ts`](https://github.com/locle97/duckwright/blob/main/src/config.ts) | Reads the per-user global config that sits under task-file settings and flags |
 | [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings, the shared setup and the task text) and expands task folders for batch runs |
 | [`plan.ts`](https://github.com/locle97/duckwright/blob/main/src/plan.ts) | Plan mode: the planner call, its schema, and writing and reading planned folders |
 | [`totp.ts`](https://github.com/locle97/duckwright/blob/main/src/totp.ts) | RFC 6238 one-time passwords from a user-supplied secret |

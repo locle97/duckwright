@@ -122,7 +122,8 @@ options:
 With no -p, duckwright opens the interactive TUI (or the web UI with --web) and starts any task or task
 files given. Run a task file and exit: duckwright -p -f tasks/login.md. To
 re-export an earlier run's test: duckwright export runs/<id>. Plan a test
-plan: duckwright plan docs/qa-plan.md
+plan: duckwright plan docs/qa-plan.md. Write the default global config, if
+there is none: duckwright init
 `;
 
 export const EXPORT_USAGE = "usage: duckwright export [-h] [--api] [-o FILE] run";
