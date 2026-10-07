@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 
 import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
@@ -15,10 +14,11 @@ import type { PastRun } from "./runs/past.ts";
 import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
 import type { AgentLike, PromptPaths } from "./runs/run.ts";
 import { fixed4 } from "./text.ts";
+import { which } from "./which.ts";
 import type { ThemeName } from "./tui/theme.ts";
 import { TaskFileError, loadTaskFile, taskPaths } from "./taskfile.ts";
 
-export { PROMPTS, historyJson };
+export { PROMPTS, historyJson, which };
 export type { AgentLike, PromptPaths };
 
 export function version(): string {
@@ -44,21 +44,6 @@ export interface CliDeps {
   isTTY(): boolean;
   loadTui(): Promise<TuiModule>;
   loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
-}
-
-/** The first executable called `name` on PATH, like shutil.which. */
-export function which(name: string): string | null {
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (!dir) continue;
-    const p = path.join(dir, name);
-    try {
-      fs.accessSync(p, fs.constants.X_OK);
-      if (fs.statSync(p).isFile()) return p;
-    } catch {
-      // not here
-    }
-  }
-  return null;
 }
 
 const DEFAULT_DEPS: CliDeps = {
