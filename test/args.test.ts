@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
-    print: false, maxParallel: null, network: true,
+    print: false, maxParallel: null, network: true, twofaTimeout: 300,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
-    print: false, maxParallel: null, network: true,
+    print: false, maxParallel: null, network: true, twofaTimeout: 300,
   });
 });
 
@@ -256,4 +256,19 @@ test("export_api_flag", () => {
 test("export_help_mentions_api", () => {
   const p = parseExportArgs(["-h"]);
   assert.match(p.kind === "help" ? p.text : "", /--api/);
+});
+
+test("twofa_timeout_default_and_flag", () => {
+  assert.equal(parse("t").twofaTimeout, 300);
+  assert.equal(parse("t", "--twofa-timeout", "60").twofaTimeout, 60);
+  assert.equal(parse("t", "--twofa-timeout=90").twofaTimeout, 90);
+});
+
+test("twofa_timeout_must_be_a_positive_int", () => {
+  assert.throws(() => parse("t", "--twofa-timeout", "0"), /argument --twofa-timeout: must be at least 1/);
+  assert.throws(() => parse("t", "--twofa-timeout", "soon"), /argument --twofa-timeout: invalid int value: 'soon'/);
+  assert.throws(() => parse("t", "--twofa-timeout"), /argument --twofa-timeout: expected one argument/);
+  assert.equal(parse("t", "--twofa-timeout", "2147483").twofaTimeout, 2147483);
+  assert.throws(() => parse("t", "--twofa-timeout", "2147484"), /argument --twofa-timeout: must be at most 2147483/);
+  assert.throws(() => parse("t", "--twofa-timeout", "99999999999999"), /argument --twofa-timeout: must be at most 2147483/);
 });

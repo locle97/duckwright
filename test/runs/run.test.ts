@@ -4,10 +4,12 @@ import path from "node:path";
 import { test } from "node:test";
 
 import type { RunArgs } from "../../src/args.ts";
+import { RunEvents } from "../../src/events.ts";
 import type { RunEvent } from "../../src/events.ts";
 import type { AgentOptions, RunResult } from "../../src/loop.ts";
 import type { StepRecord } from "../../src/prompt.ts";
 import { AbortedError } from "../../src/proc.ts";
+import type { Human } from "../../src/twofa.ts";
 import { PROMPTS, startRun } from "../../src/runs/run.ts";
 import type { AgentLike, RunDeps, RunSpec } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
@@ -18,7 +20,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, allowFileAccess: false, export: false, snapshot: "full", print: false, maxParallel: null, network: true, ...over,
+    session: "s-1", state: null, allowFileAccess: false, export: false, snapshot: "full", print: false, maxParallel: null, network: true, twofaTimeout: 300, ...over,
   };
 }
 
@@ -273,4 +275,58 @@ test("history_json_writes_request_origins_only_when_used", async () => {
   };
   assert.deepEqual((await run(mk(["https://shop.example.com"]))).request_origins, ["https://shop.example.com"]);
   assert.equal("request_origins" in (await run(mk([null]))), false);
+});
+
+const RFC_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+test("run_gives_the_agent_a_twofa_provider_built_from_the_env_secret", async () => {
+  let code = "";
+  const { spec, deps } = setup(agentWith(async (opts) => {
+    code = await opts.twofa!.totp();
+    return result(true);
+  }));
+  deps.env = { DUCKWRIGHT_TOTP_SECRET: RFC_SECRET };
+  const o = await startRun(spec, deps).done;
+  assert.equal(o.status, "pass");
+  assert.match(code, /^\d{6}$/);
+});
+
+test("run_without_an_env_secret_has_no_secret_and_no_human_by_default", async () => {
+  let message = "";
+  const { spec, deps } = setup(agentWith(async (opts) => {
+    try { await opts.twofa!.totp(); } catch (e) { message = (e as Error).message; }
+    return result(true);
+  }));
+  deps.env = {};
+  await startRun(spec, deps).done;
+  assert.equal(message, "no way to ask for a code (stdin is not a terminal)");
+});
+
+test("run_humanfor_gets_the_run_signal_and_events_and_the_timeout_comes_from_args", async () => {
+  const seen: unknown[] = [];
+  const human: Human = {
+    code: (_k, signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new AbortedError()), { once: true })),
+    approve: async () => {},
+  };
+  let message = "";
+  const { spec, deps } = setup(agentWith(async (opts) => {
+    try { await opts.twofa!.code("sms"); } catch (e) { message = (e as Error).message; }
+    return result(true);
+  }), { twofaTimeout: 0.05 });
+  deps.env = {};
+  deps.humanFor = (ctx) => { seen.push(ctx.signal instanceof AbortSignal, ctx.events instanceof RunEvents); return human; };
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.deepEqual(seen, [true, true]);
+  assert.equal(message, "timed out waiting for the 2FA code");
+  const types = fs.readFileSync(path.join(h.workdir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).type);
+  assert.ok(types.includes("twofa:wait") && types.includes("twofa:done"));
+});
+
+test("run_with_an_invalid_env_secret_fails_the_run", async () => {
+  const { spec, deps } = setup(agentWith(async () => result(true)));
+  deps.env = { DUCKWRIGHT_TOTP_SECRET: "!!" };
+  const o = await startRun(spec, deps).done;
+  assert.equal(o.status, "fail");
+  assert.match(o.error ?? "", /not a valid TOTP secret/);
 });

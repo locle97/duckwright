@@ -10,6 +10,9 @@ export type ExportOutcome =
   | { kind: "written"; path: string }
   | { kind: "failed"; message: string };
 
+/** What a 2FA wait is for: a code the human types (TOTP, SMS or email), or a passkey approval. */
+export type TwofaWait = "totp" | "sms" | "email" | "passkey";
+
 export interface RunOutcome {
   status: "pass" | "fail" | "stop";
   exitCode: 0 | 1 | 130;
@@ -32,6 +35,8 @@ export type RunEvent =
   | { type: "action:result"; at: number; step: number; index: number; result: string; code: string | null }
   | { type: "brain:error"; at: number; step: number; message: string; cost: number; failures: number }
   | { type: "step:end"; at: number; record: StepRecord; cost: number; durationMs: number }
+  | { type: "twofa:wait"; at: number; kind: TwofaWait; deadline: number }
+  | { type: "twofa:done"; at: number; outcome: "answered" | "cancelled" | "timeout" }
   | { type: "control"; at: number; state: ControlState }
   | { type: "run:end"; at: number; outcome: RunOutcome };
 

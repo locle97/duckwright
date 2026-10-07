@@ -9,6 +9,9 @@ import { RunEvents } from "../../src/events.ts";
 import type { RunOutcome } from "../../src/events.ts";
 import { RunManager, taskName } from "../../src/runs/manager.ts";
 import type { ManagerEvent, ManagerOptions } from "../../src/runs/manager.ts";
+import { AbortedError } from "../../src/proc.ts";
+import { CancelledError } from "../../src/twofa.ts";
+import type { Human } from "../../src/twofa.ts";
 import type { PastRun } from "../../src/runs/past.ts";
 import type { RunHandle, RunSpec } from "../../src/runs/run.ts";
 import { resolvePath } from "../../src/paths.ts";
@@ -623,4 +626,57 @@ test("manager_notify_emits_toast", () => {
   const { mgr, events } = setup();
   mgr.notify("error", "x");
   assert.deepEqual(events[events.length - 1], { type: "toast", level: "error", message: "x" });
+});
+
+function twofaSetup() {
+  const humans: Human[] = [];
+  const aborts: AbortController[] = [];
+  const mgr = new RunManager({
+    argv: [], defaultSkill: "/s.md", maxParallel: 3, preflight: () => null,
+    startRun: (_spec, human) => {
+      humans.push(human);
+      const events = new RunEvents();
+      const ac = new AbortController();
+      aborts.push(ac);
+      return { id: `r${humans.length}`, workdir: "/w", events, control: new RunControl(ac, events), done: new Promise(() => {}) };
+    },
+  });
+  const id = mgr.addTyped("log in");
+  assert.deepEqual(mgr.start(id), { ok: true, runId: "r1" });
+  return { mgr, id, humans, aborts };
+}
+
+test("twofa_request_shows_on_the_task_snapshot_and_is_answered_through_the_manager", async () => {
+  const { mgr, id, humans } = twofaSetup();
+  const updates: (string | null)[] = [];
+  mgr.subscribe((e: ManagerEvent) => { if (e.type === "task:updated") updates.push(e.task.twofa?.kind ?? null); });
+  assert.equal(mgr.list()[0].twofa, null);
+  const p = humans[0].code("sms", new AbortController().signal);
+  assert.deepEqual(mgr.list()[0].twofa, { kind: "sms" });
+  mgr.answerTwoFactor(id, "493817");
+  assert.equal(await p, "493817");
+  assert.equal(mgr.list()[0].twofa, null);
+  assert.deepEqual(updates.slice(-2), ["sms", null]);
+});
+
+test("twofa_cancel_rejects_the_request", async () => {
+  const { mgr, id, humans } = twofaSetup();
+  const p = humans[0].approve(new AbortController().signal);
+  mgr.answerTwoFactor(id, null);
+  await assert.rejects(p, CancelledError);
+});
+
+test("twofa_answer_for_a_task_that_is_not_waiting_is_ignored", () => {
+  const { mgr, id } = twofaSetup();
+  assert.doesNotThrow(() => mgr.answerTwoFactor(id, "x"));
+  assert.doesNotThrow(() => mgr.answerTwoFactor(999, "x"));
+});
+
+test("twofa_stopping_the_run_clears_the_request", async () => {
+  const { mgr, humans } = twofaSetup();
+  const ac = new AbortController();
+  const p = humans[0].code("sms", ac.signal);
+  ac.abort();
+  await assert.rejects(p, AbortedError);
+  assert.equal(mgr.list()[0].twofa, null);
 });

@@ -32,6 +32,7 @@ function TaskRow({ t, cost, selected, focused, showCost }: {
   const marks = h(Text, { wrap: "truncate-end" },
     Object.keys(t.overrides).length > 0 ? h(Text, { color: theme.role.accent }, " ↻") : null,
     t.error !== null ? h(Text, { color: theme.role.error, bold: true }, " !") : null,
+    t.twofa !== null ? h(Text, { color: theme.role.accent, bold: true }, " ?") : null,
     showCost && cost !== null ? `  $${cost.toFixed(3)}` : null);
   return h(Box, { flexDirection: "row" },
     h(Box, { flexGrow: 1, flexShrink: 1 },

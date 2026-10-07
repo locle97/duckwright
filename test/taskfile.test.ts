@@ -324,3 +324,15 @@ test("network_key_bad_value", () => {
   const p = w(tmpDir(), "---\nnetwork: maybe\n---\nGo\n");
   assert.equal(err(p), `${p}:2: network must be true or false, got "maybe"`);
 });
+
+test("front_matter_twofa_timeout", () => {
+  const tmp = tmpDir();
+  const file = w(tmp, "---\ntwofa-timeout: 45\n---\nlog in\n");
+  assert.equal(loadTaskFile(file).settings.twofaTimeout, 45);
+  w(tmp, "---\ntwofa-timeout: 0\n---\nlog in\n");
+  assert.match(err(file), /twofa-timeout must be a whole number of at least 1/);
+  w(tmp, "---\ntwofa-timeout: 2147483\n---\nlog in\n");
+  assert.equal(loadTaskFile(file).settings.twofaTimeout, 2147483);
+  w(tmp, "---\ntwofa-timeout: 2147484\n---\nlog in\n");
+  assert.match(err(file), /twofa-timeout must be a whole number of at most 2147483, got "2147484"/);
+});

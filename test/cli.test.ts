@@ -13,6 +13,8 @@ import type { AgentOptions, RunResult } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightError } from "../src/pw.ts";
+import { TwoFactorError } from "../src/twofa.ts";
+import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
 
 const cwd = process.cwd();
@@ -46,6 +48,7 @@ function env(): Env {
       isTTY: () => false,
       stdout: (l) => out.push(...l.split("\n")),
       stderr: (l) => err.push(...l.split("\n")),
+      env: {},
       ...over,
     }),
   };
@@ -250,7 +253,7 @@ test("version_flag", async () => {
 
 test("system_prompt_documents_expect", () => {
   const text = fs.readFileSync(PROMPTS.system, "utf8");
-  assert.ok(text.includes("screenshot, expect, expect-request, request, done"));
+  assert.ok(text.includes("screenshot, expect, expect-request, request, twofa, done"));
   assert.ok(text.includes('{"cmd": "request", "args": ["POST", "/api/todos", "{\\"title\\":\\"x\\"}", "201"]}'));
   assert.ok(text.includes("Safe to batch before it: fill, type, select, check, uncheck, hover, expect, request."));
   assert.ok(text.includes('{"cmd": "expect-request", "args": ["POST", "/api/login", "201"]}'));
@@ -1196,4 +1199,72 @@ test("plain_sink_warning_on_stderr", async () => {
   assert.equal(await main(["-f", "a.md", "b.md", "--skill", e2.argv[2]], e2.deps({ createAgent: sinkBlocker() })), 0);
   assert.equal(e2.err.filter((l) => l.startsWith("warning: could not write ")).length, 2);
   assert.ok(!e2.out.some((l) => l.includes("could not write")));
+});
+
+const OKRESULT: RunResult = { success: true, answer: "a", steps: 0, costUsd: 0, history: [] };
+
+test("invalid_totp_secret_exits_2_before_anything_runs", async () => {
+  const e = env();
+  const code = await main(e.argv, e.deps({ env: { DUCKWRIGHT_TOTP_SECRET: "!!" } }));
+  assert.equal(code, 2);
+  assert.ok(e.err.join("\n").includes("DUCKWRIGHT_TOTP_SECRET is not a valid TOTP secret"));
+  assert.equal(runDirs(e.tmp).length, 0);
+});
+
+test("print_mode_asks_the_tty_human_with_the_label", async () => {
+  const e = env();
+  const labels: string[] = [];
+  const human: Human = { code: async () => "493817", approve: async () => {} };
+  let got = "";
+  const code = await main(["-p", ...e.argv], e.deps({
+    isTTY: () => true,
+    env: {},
+    human: (label) => { labels.push(label); return human; },
+    createAgent: (opts) => ({ costUsd: 0, run: async () => { got = await opts.twofa!.code("sms"); return OKRESULT; } }),
+  }));
+  assert.equal(code, 0);
+  assert.equal(got, "493817");
+  assert.deepEqual(labels, ["duckwright"]);
+});
+
+test("print_mode_without_a_tty_fails_fast", async () => {
+  const e = env();
+  let humanCalled = false;
+  let message = "";
+  await main(e.argv, e.deps({
+    isTTY: () => false,
+    env: {},
+    human: () => { humanCalled = true; return null; },
+    createAgent: (opts) => ({ costUsd: 0, run: async () => {
+      try { await opts.twofa!.code("sms"); } catch (err) { message = (err as TwoFactorError).message; }
+      return OKRESULT;
+    } }),
+  }));
+  assert.equal(humanCalled, false);
+  assert.equal(message, "no way to ask for a code (stdin is not a terminal)");
+});
+
+test("print_mode_totp_works_without_a_tty_when_the_env_secret_is_set", async () => {
+  const e = env();
+  let code = "";
+  await main(e.argv, e.deps({
+    isTTY: () => false,
+    env: { DUCKWRIGHT_TOTP_SECRET: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" },
+    createAgent: (opts) => ({ costUsd: 0, run: async () => { code = await opts.twofa!.totp(); return OKRESULT; } }),
+  }));
+  assert.match(code, /^\d{6}$/);
+});
+
+test("batch_prompts_are_labelled_with_position_and_file", async () => {
+  const e = env();
+  const a = taskFile(e.tmp, "task a", "tasks/a.md");
+  const b = taskFile(e.tmp, "task b", "tasks/b.md");
+  const labels: string[] = [];
+  await main(["-p", ...e.argv.slice(1), "-f", a, b], e.deps({
+    isTTY: () => true,
+    env: {},
+    human: (label) => { labels.push(label); return null; },
+    createAgent: (opts) => ({ costUsd: 0, run: async () => { await opts.twofa!.approve().catch(() => {}); return OKRESULT; } }),
+  }));
+  assert.deepEqual(labels, ["[1/2] tasks/a.md", "[2/2] tasks/b.md"]);
 });

@@ -35,7 +35,7 @@ const nodeFs: PastFs = {
 const RUN_DIR = /^\d{8}-\d{6}-/;
 const EVENT_TYPES = new Set([
   "run:start", "step:start", "phase", "decision", "action:start", "action:result",
-  "brain:error", "step:end", "control", "run:end",
+  "brain:error", "step:end", "control", "twofa:wait", "twofa:done", "run:end",
 ]);
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -84,7 +84,7 @@ export function readEventsJsonl(text: string): RunEvent[] | null {
     }
     if (!isObject(v) || typeof v.type !== "string" || !EVENT_TYPES.has(v.type) || typeof v.at !== "number") return null;
     if (v.type !== "run:start" && v.type !== "run:end" && v.type !== "control" && v.type !== "step:end"
-      && typeof v.step !== "number") return null;
+      && v.type !== "twofa:wait" && v.type !== "twofa:done" && typeof v.step !== "number") return null;
     if (v.type === "step:end" && !(isObject(v.record) && typeof v.record.step === "number")) return null;
     out.push(v as unknown as RunEvent);
   }
