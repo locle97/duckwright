@@ -1,0 +1,23 @@
+/** The keys that work outside a text field; shown in the help dialog and handled by keys.ts. */
+export const SHORTCUTS: { key: string; label: string }[] = [
+  { key: "a", label: "Add a task" },
+  { key: "P", label: "Plan a test plan file" },
+  { key: "space", label: "Start the selected task (on a plan: run the plan)" },
+  { key: "j / ↓", label: "Next row" },
+  { key: "k / ↑", label: "Previous row" },
+  { key: "p", label: "Pause or resume the selected run" },
+  { key: "n", label: "Step a paused run" },
+  { key: "s", label: "Stop the selected run" },
+  { key: "e", label: "Edit the selected task (or the plan's setup)" },
+  { key: "o", label: "Options of the selected task" },
+  { key: "O", label: "Global options" },
+  { key: "x", label: "Remove the selected task or plan" },
+  { key: "[ / ]", label: "Previous or next step" },
+  { key: "enter", label: "Expand or collapse the selected step" },
+  { key: "E / C", label: "Expand or collapse all steps" },
+  { key: "G", label: "Jump to the newest step and follow the run" },
+  { key: "/", label: "Filter the list" },
+  { key: "q", label: "Quit (stops every run)" },
+  { key: "?", label: "This help" },
+  { key: "esc", label: "Close a dialog" },
+];
