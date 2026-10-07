@@ -24,4 +24,5 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: DUCKWRIGHT_UI_SMOKE=1 node --test --test-timeout=60000 test/web/ui.smoke.test.ts
       - run: bash scripts/smoke_install.sh
