@@ -57,7 +57,7 @@ export interface CliDeps {
   loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
   /** Plan mode's planner; by default `claude -p` with the planner prompt. */
   planner?: Planner;
-  /** The global config (config/duckwright.conf); throws TaskFileError when it is invalid. */
+  /** The global config (duckwright.conf in the user config folder); throws TaskFileError when it is invalid. */
   loadConfig(): GlobalConfig;
   /** Where the TOTP secret is read from. */
   env: Record<string, string | undefined>;

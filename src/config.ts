@@ -1,6 +1,7 @@
-// The global config: flat `key: value` lines in config/duckwright.conf, read once at startup.
+// The global config: flat `key: value` lines in the user's duckwright.conf, read once at startup.
 // Built-in defaults < config < task-file settings < flags on the command line.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { resolvePath } from "./paths.ts";
@@ -8,8 +9,22 @@ import { KEYS, TaskFileError, parseSettings } from "./taskfile.ts";
 import type { Kind, TaskSettings } from "./taskfile.ts";
 import type { ThemeName } from "./tui/theme.ts";
 
-export const CONFIG_DIR = "config";
 export const CONFIG_NAME = "duckwright.conf";
+
+/**
+ * The user's config folder: %APPDATA%\\duckwright on Windows, otherwise
+ * $XDG_CONFIG_HOME/duckwright, falling back to ~/.config/duckwright.
+ */
+export function configDir(
+  env: Record<string, string | undefined> = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home: string = os.homedir(),
+): string {
+  if (platform === "win32") {
+    return path.win32.join(env.APPDATA || path.win32.join(home, "AppData", "Roaming"), "duckwright");
+  }
+  return path.posix.join(env.XDG_CONFIG_HOME && path.posix.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path.posix.join(home, ".config"), "duckwright");
+}
 
 /** Run settings every task starts from, plus the TUI and web options. */
 export type GlobalConfig = TaskSettings & Partial<{
@@ -32,7 +47,7 @@ const CONFIG_KEYS: Readonly<Record<string, readonly [string, Kind]>> = {
  * Read `<dir>/duckwright.conf`; no file means no config. Relative paths in it (`skill`,
  * `state`) are resolved from the folder holding the file. Errors name the file and line.
  */
-export function loadConfig(dir: string = CONFIG_DIR): GlobalConfig {
+export function loadConfig(dir: string = configDir()): GlobalConfig {
   const file = path.join(dir, CONFIG_NAME);
   let text: string;
   try {

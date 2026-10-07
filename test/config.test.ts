@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 
-import { loadConfig } from "../src/config.ts";
+import { configDir, loadConfig } from "../src/config.ts";
 import { main } from "../src/cli.ts";
 import type { AgentLike } from "../src/cli.ts";
 import type { AgentOptions } from "../src/loop.ts";
@@ -14,14 +14,14 @@ const cwd = process.cwd();
 afterEach(() => process.chdir(cwd));
 
 function conf(tmp: string, text: string): string {
-  const dir = path.join(tmp, "config");
+  const dir = path.join(tmp, "userconf");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "duckwright.conf"), text);
   return dir;
 }
 
 test("a missing config folder is an empty config", () => {
-  assert.deepEqual(loadConfig(path.join(tmpDir(), "config")), {});
+  assert.deepEqual(loadConfig(path.join(tmpDir(), "userconf")), {});
 });
 
 test("config reads run settings and TUI options; paths resolve from the config folder", () => {
@@ -41,10 +41,18 @@ test("config rejects unknown keys, setup and allow-file-access with the line", (
   }
 });
 
+test("configDir follows XDG on unix and APPDATA on Windows", () => {
+  assert.equal(configDir({}, "linux", "/home/u"), "/home/u/.config/duckwright");
+  assert.equal(configDir({ XDG_CONFIG_HOME: "/x" }, "darwin", "/Users/u"), "/x/duckwright");
+  assert.equal(configDir({ XDG_CONFIG_HOME: "rel" }, "linux", "/home/u"), "/home/u/.config/duckwright");
+  assert.equal(configDir({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, "win32", "C:\\Users\\u"), "C:\\Users\\u\\AppData\\Roaming\\duckwright");
+  assert.equal(configDir({}, "win32", "C:\\Users\\u"), "C:\\Users\\u\\AppData\\Roaming\\duckwright");
+});
+
 function setup(confText: string) {
   const tmp = tmpDir();
   process.chdir(tmp);
-  conf(tmp, confText);
+  const dir = conf(tmp, confText);
   const skill = path.join(tmp, "SKILL.md");
   fs.writeFileSync(skill, "x");
   const err: string[] = [];
@@ -55,7 +63,7 @@ function setup(confText: string) {
       seen.push(o);
       return { costUsd: 0, run: async () => ({ success: true, answer: "a", steps: 1, costUsd: 0, history: [] }) };
     },
-    isTTY: () => false, stdout: () => {}, stderr: (l: string) => err.push(l), env: {},
+    loadConfig: () => loadConfig(dir), isTTY: () => false, stdout: () => {}, stderr: (l: string) => err.push(l), env: {},
   };
   return { tmp, skill, err, seen, deps };
 }
