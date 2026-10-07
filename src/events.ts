@@ -10,7 +10,7 @@ export type ExportOutcome =
   | { kind: "written"; path: string }
   | { kind: "failed"; message: string };
 
-/** What a 2FA wait is for: the TOTP secret itself, a code the human types, or a passkey approval. */
+/** What a 2FA wait is for: a code the human types (TOTP, SMS or email), or a passkey approval. */
 export type TwofaWait = "totp" | "sms" | "email" | "passkey";
 
 export interface RunOutcome {
