@@ -6,6 +6,7 @@ import { SNAPSHOT_MODES } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { resolvePath } from "./paths.ts";
 import { compareCodePoints } from "./text.ts";
+import { MAX_TWOFA_TIMEOUT_SEC } from "./twofa.ts";
 
 export type TaskSettings = Partial<{
   maxSteps: number;
@@ -81,6 +82,9 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
     const n = /^[0-9]+$/.test(v) ? Number(v) : 0;
     if (!(n >= 1 && n <= Number.MAX_SAFE_INTEGER)) {
       throw new LineError(`${key} must be a whole number of at least 1, got "${v}"`);
+    }
+    if (key === "twofa-timeout" && n > MAX_TWOFA_TIMEOUT_SEC) {
+      throw new LineError(`${key} must be a whole number of at most ${MAX_TWOFA_TIMEOUT_SEC}, got "${v}"`);
     }
     return n;
   }

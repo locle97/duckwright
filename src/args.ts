@@ -5,6 +5,7 @@ import type { SnapshotMode } from "./observe.ts";
 import { THEME_NAMES } from "./tui/theme.ts";
 import type { ThemeName } from "./tui/theme.ts";
 import type { TaskSettings } from "./taskfile.ts";
+import { MAX_TWOFA_TIMEOUT_SEC } from "./twofa.ts";
 
 export interface RunArgs {
   task: string | null;
@@ -88,7 +89,8 @@ options:
                         record the API calls the page makes each step,
                         redacted, under runs/<id>/network (default on)
   --twofa-timeout SEC   seconds to wait for a person to enter a 2FA code or
-                        approve a passkey before the step fails (default 300)
+                        approve a passkey before the step fails (default 300, at
+                        most 2147483)
   --snapshot-hybrid     default: paste page snapshots of up to 5,000
                         characters into the prompt, and let Claude grep larger
                         ones from the saved file
@@ -254,6 +256,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
         if (!PY_INT.test(v!)) fail(`argument --twofa-timeout: invalid int value: '${v}'`);
         const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
         if (n < 1) fail("argument --twofa-timeout: must be at least 1");
+        if (n > MAX_TWOFA_TIMEOUT_SEC) fail(`argument --twofa-timeout: must be at most ${MAX_TWOFA_TIMEOUT_SEC}`);
         args.twofaTimeout = n;
       } else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;

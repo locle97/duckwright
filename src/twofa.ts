@@ -8,6 +8,9 @@ import { parseSecret, totpAt } from "./totp.ts";
 export const SECRET_ENV = "DUCKWRIGHT_TOTP_SECRET";
 export const TWOFA_KINDS = ["totp", "sms", "email", "passkey"] as const;
 export const MAX_TWOFA_ATTEMPTS = 5;
+export const DEFAULT_TWOFA_TIMEOUT_SEC = 300;
+/** The longest wait setTimeout can hold: Node clamps delays above 2^31-1 ms to 1 ms. */
+export const MAX_TWOFA_TIMEOUT_SEC = 2147483;
 export const NO_HUMAN = "no way to ask for a code (stdin is not a terminal)";
 const BAD_SECRET = "not a valid TOTP secret";
 const REF = /^[A-Za-z0-9_-]+$/;
@@ -75,7 +78,8 @@ export function createTwoFactor(o: TwoFactorOptions): TwoFactor {
   async function ask<T>(kind: TwofaWait, call: (human: Human, signal: AbortSignal) => Promise<T>): Promise<T> {
     const human = o.human;
     if (human === null) throw new TwoFactorError(NO_HUMAN);
-    const ms = Math.round(o.timeoutSec * 1000);
+    const sec = Number.isFinite(o.timeoutSec) && o.timeoutSec > 0 ? o.timeoutSec : DEFAULT_TWOFA_TIMEOUT_SEC;
+    const ms = Math.round(Math.min(sec, MAX_TWOFA_TIMEOUT_SEC) * 1000);
     // A ref'd timer (AbortSignal.timeout is unref'd, so a lone wait would let the process exit).
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), ms);

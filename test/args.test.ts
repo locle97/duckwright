@@ -263,4 +263,7 @@ test("twofa_timeout_must_be_a_positive_int", () => {
   assert.throws(() => parse("t", "--twofa-timeout", "0"), /argument --twofa-timeout: must be at least 1/);
   assert.throws(() => parse("t", "--twofa-timeout", "soon"), /argument --twofa-timeout: invalid int value: 'soon'/);
   assert.throws(() => parse("t", "--twofa-timeout"), /argument --twofa-timeout: expected one argument/);
+  assert.equal(parse("t", "--twofa-timeout", "2147483").twofaTimeout, 2147483);
+  assert.throws(() => parse("t", "--twofa-timeout", "2147484"), /argument --twofa-timeout: must be at most 2147483/);
+  assert.throws(() => parse("t", "--twofa-timeout", "99999999999999"), /argument --twofa-timeout: must be at most 2147483/);
 });

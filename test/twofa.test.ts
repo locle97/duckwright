@@ -139,3 +139,30 @@ test("secret_problem", () => {
   assert.equal(secretProblem({ [SECRET_ENV]: SECRET }), null);
   assert.equal(secretProblem({ [SECRET_ENV]: "!!" }), "DUCKWRIGHT_TOTP_SECRET is not a valid TOTP secret");
 });
+
+/** A person who types the code after 30 ms, unless the wait is aborted first. */
+const answersLater = (): Human => human({
+  code: (_kind, signal) => new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(new AbortedError()), { once: true });
+    setTimeout(() => resolve("493817"), 30);
+  }),
+});
+
+test("a_huge_timeout_does_not_expire_a_wait_at_once", async () => {
+  for (const timeoutSec of [1e12, Number.MAX_SAFE_INTEGER, Infinity]) {
+    const tf = make({ human: answersLater(), timeoutSec });
+    assert.equal(await tf.code("sms"), "493817");
+  }
+});
+
+test("a_non_finite_or_non_positive_timeout_means_the_default", async () => {
+  for (const timeoutSec of [Number.NaN, 0, -5]) {
+    const events = new RunEvents();
+    const seen: RunEvent[] = [];
+    events.subscribe((e) => seen.push(e));
+    const tf = make({ human: answersLater(), timeoutSec, events });
+    assert.equal(await tf.code("sms"), "493817");
+    const wait = seen.find((e) => e.type === "twofa:wait");
+    assert.ok(wait && wait.type === "twofa:wait" && wait.deadline === 59_000 + 300_000);
+  }
+});
