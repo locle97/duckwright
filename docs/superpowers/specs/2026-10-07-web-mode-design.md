@@ -40,7 +40,10 @@ src/web/            Node side, compiled by tsc into dist/web/
   server.ts         node:http: static files, API, SSE
   api.ts            route table: request -> ManagerLike call (takes a ManagerLike, unit-testable)
   auth.ts           token, cookie, Host and Origin checks
+  runlog.ts         remembers each run's events for browsers that open mid-run
 src/runviews.ts     RunEvent -> RunView/StepView reducer, extracted from src/tui/state.ts (no ink, no react)
+                    The client also imports the pure mention functions of src/tui/compose.ts at runtime
+                    (@ parsing and completion), in addition to src/runviews.ts.
 web/                Browser side: React + Vite, own tsconfig (DOM + JSX)
   src/              components, store, SSE client, CSS
   vite.config.ts    outputs to dist/web-ui/
@@ -89,7 +92,7 @@ All routes require the token cookie. Request bodies are JSON, capped at 1 MiB. A
 | Route | Calls |
 | --- | --- |
 | `GET /api/state` | one snapshot: `list()`, `plans()`, `globals()`, `activeCount()`, `maxParallel`, startup notices |
-| `GET /api/events` | SSE: every `ManagerEvent` as `data: <json>`; `: ping` comment every 15 s |
+| `GET /api/events` | SSE: first a `{"type":"state", ...snapshot}` message, then every `ManagerEvent` as `data: <json>`; `: ping` comment every 15 s |
 | `POST /api/tasks` | `add({ mentions, typed })`; on failure returns the per-mention errors for the add box |
 | `POST /api/tasks/:id/start`, `pause`, `resume`, `step`, `stop` | the same-named `ManagerLike` methods |
 | `DELETE /api/tasks/:id` | `remove(id)` |
@@ -103,6 +106,10 @@ All routes require the token cookie. Request bodies are JSON, capped at 1 MiB. A
 | `GET /api/source`, `PUT /api/source` | `readSource(target)`, `saveSource(target, text)` |
 | `GET /api/candidates?q=` | `walk()` and `rank()` from `src/tui/candidates.ts` |
 | `POST /api/quit` | `stopAll()`, then resolve `done` |
+
+The first message of `/api/events` is `{"type":"state", ...snapshot}`; the snapshot also lists every run's
+events since the server started, so a browser opened mid-run rebuilds the timeline. Then comes one message per
+`ManagerEvent`. `GET /api/state` returns the same snapshot.
 
 The manager's `RunManager`-only methods used by the CLI (`startQueued`, `notify`, `summary`) are not
 exposed over HTTP.
@@ -133,7 +140,7 @@ The UI can start browsers and read and write task files, so the server is a loca
   `test/tui/state.test.ts` is the safety net for the move and must pass unchanged in behaviour.
 - The web store is a `useReducer` with `tasks`, `plans`, `globals`, `runViews[taskId]`, `toasts` and UI
   state (selection, filter, open dialog, sidebar width).
-- On load and after every SSE reconnect the client refetches `/api/state` and rebuilds the store. Past
+- On every (re)connect the first stream message replaces the store's server state. Past
   tasks arrive with `past.events` inside the snapshot and are replayed through the reducer at once.
 - Network entries come on `step:end` records, so no extra endpoint is needed for them.
 
@@ -171,7 +178,7 @@ never conveyed by colour alone (tags carry text), controls are real buttons with
 - A failed action returns `{ ok: false, error }` and the UI shows it as a toast; the add box shows
   per-mention errors inline, as the TUI does.
 - `401`: a "token expired, relaunch duckwright --web" screen.
-- Server unreachable: a disconnected banner; the SSE client retries and refetches state on reconnect.
+- Server unreachable: a disconnected banner; the SSE client retries, and the first message after reconnecting replaces the state.
 - A throwing SSE writer or closed socket drops that subscriber only; it never reaches the manager.
 - Unknown routes `404`, wrong method `405`, malformed JSON or oversize body `400` and `413`.
 
