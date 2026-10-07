@@ -7,12 +7,15 @@ import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
 import { attachPlain, printOutcome } from "./report/plain.ts";
+import { createTtyHuman } from "./report/ttyHuman.ts";
 import { RunManager } from "./runs/manager.ts";
 import type { ManagerLike } from "./runs/manager.ts";
 import { loadPastRuns } from "./runs/past.ts";
 import type { PastRun } from "./runs/past.ts";
 import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
 import type { AgentLike, PromptPaths } from "./runs/run.ts";
+import { secretProblem } from "./twofa.ts";
+import type { Human } from "./twofa.ts";
 import { fixed4 } from "./text.ts";
 import { which } from "./which.ts";
 import type { ThemeName } from "./tui/theme.ts";
@@ -44,6 +47,10 @@ export interface CliDeps {
   isTTY(): boolean;
   loadTui(): Promise<TuiModule>;
   loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
+  /** Where the TOTP secret is read from. */
+  env: Record<string, string | undefined>;
+  /** The person to ask for a 2FA code in print mode, named by `label`. Only used when `isTTY()` is true. */
+  human(label: string): Human | null;
 }
 
 const DEFAULT_DEPS: CliDeps = {
@@ -56,6 +63,8 @@ const DEFAULT_DEPS: CliDeps = {
   isTTY: () => !!process.stdin.isTTY && !!process.stdout.isTTY,
   loadTui: () => import("./tui/index.ts"),
   loadPastRuns: (limit) => loadPastRuns({ runsDir: "runs", limit }),
+  env: process.env,
+  human: (label) => createTtyHuman({ label }),
 };
 
 function isFile(p: string): boolean {
@@ -112,11 +121,16 @@ function exportMain(deps: CliDeps, argv: string[]): number {
  * and what it cost, including what was spent before a crash or Ctrl-C.
  */
 async function runOne(
-  deps: CliDeps, args: RunArgs, taskFile: string | null,
+  deps: CliDeps, args: RunArgs, taskFile: string | null, label: string,
 ): Promise<[code: number, history: string, cost: number]> {
   const handle = startRun(
     { task: args.task!, taskFile, args },
-    { ...deps, onWarning: (m) => deps.stderr(`warning: ${m}`) },
+    {
+      ...deps,
+      humanFor: () => (deps.isTTY() ? deps.human(label) : null),
+      env: deps.env,
+      onWarning: (m) => deps.stderr(`warning: ${m}`),
+    },
   );
   attachPlain(handle.events, deps.stdout);
   const o = await handle.done;
@@ -143,7 +157,7 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
       continue;
     }
     deps.stdout(`[${i + 1}/${runs.length}] ${p}`);
-    const [code, history, cost] = await runOne(deps, args, p);
+    const [code, history, cost] = await runOne(deps, args, p, `[${i + 1}/${runs.length}] ${p}`);
     total += cost;
     interrupted = code === 130;
     rows.push([code === 0 ? "pass" : interrupted ? "stop" : "fail", p, `$${fixed4(cost)}`, history]);
@@ -177,7 +191,7 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
     defaultSkill: deps.prompts.defaultSkill,
     maxParallel: args.maxParallel ?? 3,
     startRun: (s) => startRun(s, {
-      prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent,
+      prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent, env: deps.env,
       onWarning: (m) => manager.notify("error", m),
     }),
     preflight: (a) => preflightArgs(deps, a),
@@ -228,6 +242,11 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     deps.stdout(`duckwright ${version()}`);
     return 0;
   }
+  const badSecret = secretProblem(deps.env);
+  if (badSecret !== null) {
+    deps.stderr(badSecret);
+    return 2;
+  }
   const { args } = parsed;
   if (args.tui) return tuiMain(deps, argv, args);
   if (args.maxParallel !== null) throw usage("--max-parallel needs --tui");
@@ -241,7 +260,7 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
       deps.stderr(err);
       return 2;
     }
-    return (await runOne(deps, args, null))[0];
+    return (await runOne(deps, args, null, "duckwright"))[0];
   }
 
   // Load every file before anything runs, so one bad file stops the whole batch.
@@ -274,7 +293,7 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     deps.stderr(err);
     return 2;
   }
-  return (await runOne(deps, fileArgs, p))[0];
+  return (await runOne(deps, fileArgs, p, p))[0];
 }
 
 function usage(message: string): UsageError {
