@@ -56,7 +56,9 @@ test("add a task, watch a run, open a step, answer a 2FA prompt, quit", { skip, 
   await page.locator("#add-text").fill("Check the cart total");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.waitForSelector("text=Check the cart total");
-  assert.ok(manager.log.some((l) => l === "add:|Check the cart total"));
+  // The text can match the dialog's own textarea before the request reaches the manager, so wait for the call.
+  for (let i = 0; i < 50 && !manager.log.includes("add:|Check the cart total"); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(manager.log.includes("add:|Check the cart total"));
 
   // Start the first task, then play a run through the manager's events.
   await page.getByText("Open the shop and add a hat").first().click();
