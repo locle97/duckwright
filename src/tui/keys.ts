@@ -79,6 +79,7 @@ function quitCommands(s: ViewState, activeRuns: number): Command[] {
 
 /** Bindings that mean the same in the list and the detail view. */
 const SHARED: Binding[] = [
+  { match: char("i"), when: () => true, run: compose("task"), hint: { key: "i", label: "add" }, footer: true },
   { match: char("a"), when: () => true, run: compose("task"), hint: { key: "a", label: "add" }, footer: false },
   { match: char("P"), when: () => true, run: compose("plan"), hint: { key: "P", label: "plan" }, footer: true },
   { match: char("p"), when: (c) => c.t?.state === "running", run: manager("pause"), hint: { key: "p", label: "pause" }, footer: true },
@@ -139,7 +140,8 @@ const LIST_ONLY: Binding[] = [
   { match: char(" "), when: (c) => hasTask(c) && !isLive(c.t), run: manager("start"), hint: { key: "space", label: "run" }, footer: true },
   { match: named("return"), when: hasRow, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "⏎", label: "details" }, footer: true },
   { match: char("e"), when: editable, run: editCommand, hint: { key: "e", label: "edit" }, footer: true },
-  { match: named("tab"), when: () => true, run: compose("task"), hint: { key: "tab", label: "add" }, footer: true },
+  { match: named("tab"), when: (c) => c.s.tab === "tasks", run: () => [ui({ type: "tab" })], hint: { key: "tab", label: "history" }, footer: true },
+  { match: named("tab"), when: (c) => c.s.tab === "history", run: () => [ui({ type: "tab" })], hint: { key: "tab", label: "tasks" }, footer: true },
   { match: named("right"), when: (c) => hasTask(c) && c.t?.runId != null, run: () => [ui({ type: "focus", target: "detail" })], hint: { key: "→", label: "details" }, footer: false },
   { match: char("h", "l"), when: (c) => c.s.globals !== null, run: () => [ui({ type: "focus", target: "options" })], hint: { key: "h/l", label: "options" }, footer: false },
   { match: anyOf(named("up"), char("k")), when: hasRow, run: move(-1), hint: { key: "↑↓ j/k", label: "move" }, footer: false },

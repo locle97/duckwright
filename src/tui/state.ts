@@ -72,6 +72,12 @@ export type Confirm =
   | { kind: "quit"; count: number } | { kind: "remove"; taskId: number } | { kind: "removePlan"; planId: PlanId }
   | { kind: "discard" };
 
+/** The sidebar's two tabs: the tasks of this session (and plans), and past runs not run again. */
+export type Tab = "tasks" | "history";
+
+/** What each tab keeps of its own while the other one is shown. */
+export interface TabMemory { selected: TaskId | null; selectedPlan: PlanId | null; filter: string }
+
 export interface ViewState {
   now: number;
   openedAt: number;
@@ -85,6 +91,10 @@ export interface ViewState {
   selected: number;
   /** Set when a plan's header row is selected rather than a task. */
   selectedPlan: PlanId | null;
+  /** The sidebar tab shown. */
+  tab: Tab;
+  /** The selection and filter of the tab not shown. */
+  otherTab: TabMemory;
   focus: "list" | "detail" | "options";
   /** The highlighted row of the options pane while it has the focus. */
   optionsSelected: number;
@@ -111,7 +121,7 @@ export interface ViewState {
 
 export type UiAction =
   | { type: "tick"; now: number } | { type: "manager"; event: ManagerEvent }
-  | { type: "select"; delta: number } | { type: "selectEdge"; edge: "first" | "last" }
+  | { type: "select"; delta: number } | { type: "tab" } | { type: "selectEdge"; edge: "first" | "last" }
   | { type: "focus"; target: "list" | "detail" | "options" | "compose" } | { type: "escape" }
   | { type: "optionsMove"; delta: number }
   | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
@@ -161,12 +171,15 @@ export function initialState(
   now: number, tasks: TaskSnapshot[] = [], notices: string[] = [], globals: Globals | null = null, plans: PlanSnapshot[] = [],
 ): ViewState {
   let s: ViewState = {
-    now, openedAt: now, tasks, plans, collapsed: [], runs: {}, selected: 0, selectedPlan: null, focus: "list", optionsSelected: 0,
+    now, openedAt: now, tasks, plans, collapsed: [], runs: {}, selected: 0, selectedPlan: null,
+    tab: "tasks", otherTab: { selected: null, selectedPlan: null, filter: "" }, focus: "list", optionsSelected: 0,
     mode: "list", filter: "", filterDraft: null, compose: EMPTY_COMPOSE, composeFor: "task", edit: null, completion: null, addErrors: [],
     form: null, globals, confirm: null, toasts: [], ctrlC: 0,
   };
   for (const t of tasks) s = replayPast(s, t);
   for (const n of notices) s = addToast(s, "info", n);
+  // Opened with nothing but past runs: show them rather than an empty Tasks tab.
+  if (visibleRows(s).length === 0 && tasks.some(isHistory)) s = { ...s, tab: "history" };
   return selectRow(s, visibleRows(s)[0]);
 }
 
@@ -180,8 +193,29 @@ export function activeQuery(s: ViewState): string {
   return s.filterDraft ?? s.filter;
 }
 
+/** A past run that has not been run again in this session: it lives on the History tab. */
+export function isHistory(t: TaskSnapshot): boolean {
+  return t.past !== undefined && t.runCount === 0;
+}
+
+/** The tab a task is listed under. */
+export function tabOf(t: TaskSnapshot): Tab {
+  return isHistory(t) ? "history" : "tasks";
+}
+
+/** Shows the other tab: the shown one's selection and filter are kept for when it comes back. */
+function switchTab(s: ViewState, tab: Tab): ViewState {
+  if (tab === s.tab) return s;
+  // By id: indexes into `tasks` shift as tasks come and go.
+  const keep: TabMemory = { selected: s.tasks[s.selected]?.id ?? null, selectedPlan: s.selectedPlan, filter: s.filter };
+  const { selected: id, selectedPlan, filter } = s.otherTab;
+  const next = { ...s, tab, otherTab: keep, selectedPlan, filter, filterDraft: null, selected: s.tasks.findIndex((t) => t.id === id) };
+  // A tab not shown before (or whose task went away) starts on its first row.
+  return next.selected === -1 && selectedPlan === null ? selectRow(next, visibleRows(next)[0]) : snap({ ...next, selected: Math.max(0, next.selected) });
+}
+
 /**
- * The sidebar rows in display order: tasks and plans newest first; under each plan its tasks in the
+ * The sidebar rows of the shown tab in display order: tasks and plans newest first; under each plan its tasks in the
  * plan's order, unless it is collapsed. With a filter, a plan shows when its name or one of its tasks matches.
  */
 export function visibleRows(s: ViewState): Row[] {
@@ -192,10 +226,11 @@ export function visibleRows(s: ViewState): Row[] {
   type Entry = { createdAt: number; id: number; rows: Row[] };
   const entries: Entry[] = [];
   s.tasks.forEach((t, i) => {
+    if (tabOf(t) !== s.tab) return;
     if (t.planId !== undefined && planIds.has(t.planId)) return;
     if (shown.has(i)) entries.push({ createdAt: t.createdAt, id: t.id, rows: [{ kind: "task", index: i, planId: null }] });
   });
-  for (const plan of s.plans) {
+  for (const plan of s.tab === "tasks" ? s.plans : []) {
     const tasks = plan.taskIds.flatMap((id) => {
       const i = indexOf.get(id);
       return i !== undefined && shown.has(i) ? [i] : [];
@@ -445,10 +480,24 @@ function reduceRunEvent(r: RunView, e: RunEvent): RunView {
 
 function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
   switch (e.type) {
-    case "task:added":
-      return { ...s, tasks: [...s.tasks, e.task] };
-    case "task:updated":
-      return { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
+    case "task:added": {
+      const next = { ...s, tasks: [...s.tasks, e.task] };
+      // An add from the add box shows the tab it lands on; a plan's tasks arrive while it plans, in the background.
+      return e.task.planId === undefined ? switchTab(next, tabOf(e.task)) : next;
+    }
+    case "task:updated": {
+      const next = { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
+      const before = s.tasks.find((t) => t.id === e.task.id);
+      if (before === undefined || tabOf(before) === tabOf(e.task)) return next;
+      // A past run run again moves to the Tasks tab; when it was selected, the view goes with it.
+      const sel = s.selectedPlan === null && s.tasks[s.selected]?.id === e.task.id;
+      if (!sel) return keepSelection(s, next);
+      const left = keepSelection(s, next);
+      const index = next.tasks.findIndex((t) => t.id === e.task.id);
+      const shown = switchTab(left, tabOf(e.task));
+      const hidden = !visibleTasks({ ...shown, selected: index, selectedPlan: null }).includes(index);
+      return { ...shown, selected: index, selectedPlan: null, ...(hidden ? { filter: "" } : {}) };
+    }
     case "task:removed": {
       const selId = s.selectedPlan === null ? s.tasks[s.selected]?.id : undefined;
       const tasks = s.tasks.filter((t) => t.id !== e.taskId);
@@ -458,7 +507,7 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
     }
     case "plan:added": {
       // A new plan is the top row; while the selection sits on the top row (or nothing yet), it moves to the plan.
-      const atTop = selectedRowIndex(s) <= 0;
+      const atTop = s.tab === "tasks" && selectedRowIndex(s) <= 0;
       const next = { ...s, plans: [...s.plans, e.plan] };
       return atTop ? { ...next, selectedPlan: e.plan.id } : next;
     }
@@ -518,6 +567,8 @@ function apply(s: ViewState, a: UiAction): ViewState {
       const pos = selectedRowIndex(s, rows);
       return selectRow(s, rows[clamp((pos === -1 ? 0 : pos) + a.delta, 0, rows.length - 1)]);
     }
+    case "tab":
+      return switchTab(s, s.tab === "tasks" ? "history" : "tasks");
     case "selectEdge": {
       const rows = visibleRows(s);
       if (rows.length === 0) return s;
@@ -525,6 +576,7 @@ function apply(s: ViewState, a: UiAction): ViewState {
     }
     case "selectPlan": {
       if (!s.plans.some((p) => p.id === a.id)) return s;
+      s = switchTab(s, "tasks");
       const shown = visibleRows(s).some((r) => r.kind === "plan" && r.plan.id === a.id);
       return { ...s, selectedPlan: a.id, ...(shown ? {} : { filter: "", filterDraft: null }) };
     }
@@ -576,6 +628,7 @@ function apply(s: ViewState, a: UiAction): ViewState {
     case "selectTask": {
       const i = s.tasks.findIndex((t) => t.id === a.id);
       if (i === -1) return s;
+      s = switchTab(s, tabOf(s.tasks[i]!));
       const hidden = !visibleTasks(s).includes(i);
       const planId = s.tasks[i]!.planId;
       const collapsed = planId === undefined ? s.collapsed : s.collapsed.filter((x) => x !== planId);

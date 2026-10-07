@@ -132,7 +132,7 @@ export function Detail({ s, width, height, focused }: DetailProps): ReactElement
   if (p !== null) {
     body = h(PlanDetail, { s, p });
   } else if (t === null) {
-    body = row(h(Text, { color: theme.role.muted }, "No tasks yet. Press a to add one, or P to plan a test plan file."));
+    body = row(h(Text, { color: theme.role.muted }, "No tasks yet. Press i to add one, or P to plan a test plan file."));
   } else if (run === null) {
     body = h(IdleTask, { s, t });
   } else {

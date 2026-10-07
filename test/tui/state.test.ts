@@ -648,3 +648,75 @@ test("state_step_end_carries_network", () => {
   assert.deepEqual(bad.networkErrors, ["ok"]);
   assert.deepEqual(steps(withNet({ network: [NET, { id: 3 }, null] })).network, [NET]);
 });
+
+const hist = (id: number, createdAt = 0): TaskSnapshot => ({ ...pastTask(id, `rp${id}`, [start(0), runEnd(PAST_OUTCOME)]), createdAt });
+
+test("state_tabs_split_tasks_and_history", () => {
+  let s = initialState(0, [hist(1, 1), hist(2, 2), at(3, 3)]);
+  assert.equal(s.tab, "tasks");
+  assert.deepEqual(ids(s), [3]);
+  s = reduce(s, { type: "tab" });
+  assert.equal(s.tab, "history");
+  assert.deepEqual(ids(s), [2, 1]);
+  assert.equal(selectedTask(s)?.id, 2, "the selection moves into the shown tab");
+  s = reduce(s, { type: "tab" });
+  assert.deepEqual(ids(s), [3]);
+});
+
+test("state_tabs_keep_selection_and_filter", () => {
+  let s = initialState(0, [hist(1, 1), hist(2, 2), at(3, 3), at(4, 4)]);
+  s = play(s, { type: "select", delta: 1 }, { type: "openFilter" }, { type: "filterEdit", query: "3" }, { type: "filterKeep" });
+  assert.equal(selectedTask(s)?.id, 3);
+  s = play(s, { type: "tab" });
+  assert.equal(s.filter, "", "History has its own filter");
+  assert.deepEqual(ids(s), [2, 1]);
+  s = play(s, { type: "select", delta: 1 }, { type: "tab" });
+  assert.equal(s.filter, "3");
+  assert.equal(selectedTask(s)?.id, 3);
+  s = reduce(s, { type: "tab" });
+  assert.equal(selectedTask(s)?.id, 1, "History's selection is kept too");
+});
+
+test("state_tabs_kept_selection_survives_removal", () => {
+  let s = initialState(0, [at(1, 1), hist(2, 2), at(3, 3)]);
+  s = play(s, { type: "select", delta: 1 }, { type: "tab" });
+  assert.equal(selectedTask(s)?.id, 2);
+  s = play(s, mgr({ type: "task:removed", taskId: 3 }), { type: "tab" });
+  assert.equal(selectedTask(s)?.id, 1, "kept by id, not by index");
+});
+
+test("state_opens_on_history_when_only_past_runs", () => {
+  const s = initialState(0, [hist(1)]);
+  assert.equal(s.tab, "history");
+  assert.equal(selectedTask(s)?.id, 1);
+  assert.equal(initialState(0).tab, "tasks");
+});
+
+test("state_rerun_past_task_moves_to_tasks_tab", () => {
+  let s = initialState(0, [hist(1, 1), hist(2, 2), at(3, 3)]);
+  s = reduce(s, { type: "tab" });
+  assert.equal(selectedTask(s)?.id, 2);
+  s = reduce(s, mgr({ type: "task:updated", task: { ...s.tasks[1]!, state: "running", runId: "r2", runCount: 1 } }));
+  assert.equal(s.tab, "tasks");
+  assert.equal(selectedTask(s)?.id, 2, "the selection follows the task");
+  assert.deepEqual(ids(s), [3, 2]);
+  s = reduce(s, { type: "tab" });
+  assert.deepEqual(ids(s), [1]);
+  assert.equal(selectedTask(s)?.id, 1);
+});
+
+test("state_adding_a_task_shows_the_tasks_tab", () => {
+  let s = reduce(initialState(0, [hist(1)]), mgr({ type: "task:added", task: at(2, 5) }));
+  assert.equal(s.tab, "tasks");
+  assert.deepEqual(ids(s), [2]);
+  s = reduce(s, { type: "selectTask", id: 1 });
+  assert.equal(s.tab, "history", "selecting a past task shows its tab");
+  assert.equal(selectedTask(s)?.id, 1);
+});
+
+test("state_plan_tasks_arriving_keep_the_history_tab", () => {
+  const s = reduce(reduce(initialState(0, [hist(1)]), { type: "tab" }), { type: "tab" });
+  assert.equal(s.tab, "history");
+  const next = reduce(s, mgr({ type: "task:added", task: { ...at(2, 5), planId: 7 } }));
+  assert.equal(next.tab, "history");
+});

@@ -158,7 +158,7 @@ A task or `-f` on the command line is added to the task list and started as soon
 
 **Global options.** The lower pane of the left column shows the global options (model, max steps, headed, export, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
 
-**Past runs.** Runs saved in `runs/` appear in the sidebar with a muted name, newest `--past N` of them (default 20). They are read-only: select one to see its timeline, and press `space` to run it again with the current flags.
+**Past runs.** Runs saved in `runs/` are listed on the sidebar's History tab, newest `--past N` of them (default 20); press `tab` to switch between Tasks and History. Each tab keeps its own selection and filter. Past runs are read-only: select one to see its timeline, and press `space` to run it again with the current flags, which moves it to the Tasks tab.
 
 **Network calls.** With network capture on (the default), expand a step (`⏎`, or `e` for all steps) to see the calls it made: method, URL, status and time, with failures in red. A step lists up to 8 calls, then `…and N more`. The full request and response files stay under `runs/<id>/network/`.
 
@@ -166,11 +166,12 @@ A task or `-f` on the command line is added to the task list and started as soon
 
 **Themes.** `--theme auto` picks dark or light from `COLORFGBG`; `COLORTERM=truecolor` enables the full-colour palette. With `NO_COLOR` set, no colours are used and the focused pane gets a bold border instead.
 
-Six keys to learn first:
+Keys to learn first:
 
 | Key | Does |
 | --- | --- |
-| `a` | Add a task |
+| `i` | Add a task (`a` works too) |
+| `tab` | Switch between the Tasks and History tabs |
 | `P` | [Plan](#plan-mode) a test plan file |
 | `space` | Start the selected task (on a plan's row: run the plan) |
 | `⏎` | Show the selected task's details |
