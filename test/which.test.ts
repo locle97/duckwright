@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { quoteForCmd, which } from "../src/which.ts";
+import { escapeCommandForCmd, quoteForCmd, which } from "../src/which.ts";
 import { tmpDir } from "./helpers.ts";
 
 test("which_finds_a_windows_command_through_pathext", { skip: process.platform !== "win32" }, () => {
@@ -23,4 +23,9 @@ test("which_finds_a_posix_executable", () => {
 test("quote_for_cmd_escapes_metacharacters", () => {
   assert.equal(quoteForCmd("a b"), '^^^"a^^^ b^^^"');
   assert.ok(!/[^^]&/.test(quoteForCmd('x&y"z')));
+});
+
+test("escape_command_for_cmd_escapes_once_without_quoting", () => {
+  assert.equal(escapeCommandForCmd("C:\\npm\\playwright-cli.cmd"), "C:\\npm\\playwright-cli.cmd");
+  assert.equal(escapeCommandForCmd("C:\\Program Files\\x.cmd"), "C:\\Program^ Files\\x.cmd");
 });
