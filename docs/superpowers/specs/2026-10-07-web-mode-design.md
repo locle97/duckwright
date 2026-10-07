@@ -3,7 +3,7 @@
 ## Goal
 
 `duckwright --web` starts a local web server and serves a browser UI with the same functions as the
-interactive TUI, in a neo-brutalist style. The TUI and print mode keep working as they do today.
+interactive TUI, in a modern shadcn-style UI. The TUI and print mode keep working as they do today.
 
 Success criteria:
 
