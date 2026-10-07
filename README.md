@@ -45,8 +45,9 @@ History: runs/20261003-101500-brave-otter/history.json
 - **API assertions**: with network capture on, the agent can also check the calls its last step made with `expect-request`: method, path or URL, and status, optionally a field of the JSON response. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
 - **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run one after another.
-- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p` and in the TUI. Codes and the secret never reach `history.json`, the prompts or an exported test.
-- **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink. TypeScript and the test tools are development dependencies.
+- **Web mode**: `duckwright --web` serves the same workspace as the TUI in a browser, in a shadcn-style UI: task list, plans, past runs, a live timeline of every step with its network calls, pause/step/stop, options, editing, and 2FA prompts. It listens on `127.0.0.1` only, behind a random per-launch token.
+- **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p`, in the TUI and in the web UI. Codes and the secret never reach `history.json`, the prompts or an exported test.
+- **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink; the web UI is built with React and Vite, which are development dependencies. TypeScript and the test tools are development dependencies.
 
 ## Getting started
 
@@ -105,7 +106,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 ## Usage
 
 ```bash
-duckwright [--max-parallel N] [--past N] [--theme NAME] [options]
+duckwright [--max-parallel N] [--past N] [--theme NAME] [--web [--port PORT]] [options]
 duckwright ["<task>" | -f FILE|FOLDER ...] [options]
 duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
@@ -115,7 +116,7 @@ duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
 ```
 
-`duckwright` on its own opens the [interactive TUI](#interactive-tui). Given a task or `-f`, it opens the TUI and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
+`duckwright` on its own opens the [interactive TUI](#interactive-tui). With `--web` it serves the [web UI](#web-mode) instead. Given a task or `-f`, it opens the TUI (or the web UI with `--web`) and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
 
 Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
 
@@ -134,9 +135,11 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
 | `--twofa-timeout` | `300` | Seconds (at most `2147483`) to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
-| `--max-parallel` | `3` | TUI: how many runs may be active at once; tasks given on the command line past the limit start as earlier runs finish. An error with `-p` |
-| `--past` | `20` | TUI: how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none. An error with `-p` |
-| `--theme` | `auto` | TUI: the colour theme: `auto`, `dark`, or `light`. An error with `-p` |
+| `--max-parallel` | `3` | TUI and web: how many runs may be active at once; tasks given on the command line past the limit start as earlier runs finish. An error with `-p` |
+| `--past` | `20` | TUI and web: how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none. An error with `-p` |
+| `--theme` | `auto` | TUI and web: the colour theme: `auto`, `dark`, or `light`. An error with `-p` |
+| `--web` | off | Serve the [web UI](#web-mode) instead of opening the TUI. Cannot be used with `-p` |
+| `--port` | free port | Web UI: the port to listen on. An error without `--web` |
 | `--snapshot-hybrid` | on | Paste page snapshots of up to 5,000 characters into the prompt; for larger ones, let Claude grep the saved file. Decided again every step (see [Reading the page](#reading-the-page)) |
 | `--snapshot-full` | off | Always paste the page snapshot into the prompt, truncated at 40k characters. Claude gets no tools |
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
@@ -188,6 +191,23 @@ In the add box, `@` mentions task files: `@tasks/login.md` adds that file, and `
 ```
 
 A completion list opens as you type after `@`. `tab` completes (going into a folder), and `⏎` accepts. Write a path with spaces as `@"my tasks/a.md"`, and `\@` for a literal `@`. If any mention fails (a missing file, a folder with no task files, bad front matter), nothing from that line is added and the errors show under the box.
+
+### Web mode
+
+`duckwright --web` starts a local server and opens the workspace in your browser:
+
+```bash
+duckwright --web                       # a free port; the URL is printed
+duckwright --web --port 4173 -f tasks/ # run a folder of tasks, watch them in the browser
+```
+
+It does what the TUI does: queue typed tasks and `@` task files, plan a test plan file, start several runs at once (up to `--max-parallel`), pause, step and stop them, edit task files, set global and per-task options, answer 2FA prompts, and browse past runs. The sidebar has the TUI's two tabs, Tasks and History (past runs, newest `--past N`); click a tab or press `t` to switch (the TUI uses `tab`, which the browser keeps for moving focus). Each tab keeps its own selection and filter, and running a past run again moves it to Tasks. `i` adds a task (`a` works too). Press `?` for the keyboard shortcuts, which are like the TUI's with a few differences: `x` removes a task or plan (the TUI uses `d`), `p` pauses or resumes (the TUI has `p` and `r`), `E` and `C` expand and collapse all steps (the TUI uses `e` and `c`; in the web UI `e` edits), and the TUI-only `g`, `r`, `h`/`l`, `J`/`K` and `F` have no key.
+
+Like the TUI, `--web` needs `claude` and `playwright-cli` on your `PATH`; without them it exits with `2` before the server starts. A browser opened mid-run shows every run's steps since the server started.
+
+The server is a local tool that can start browsers and read and write your task files, so it is locked down: it listens on `127.0.0.1` only (there is no option to change that), every request needs the random token from the printed URL (kept in a cookie after the first visit), a request with another `Host` is refused, and so is a request that changes something (POST, PUT or DELETE) with another `Origin`, and request bodies are capped at 1 MiB. Closing the tab does not stop the runs; `q`, the Quit button or Ctrl-C in the terminal stops them all, prints the batch summary and exits.
+
+The web UI is built with Vite when the package is built (`npm run build`); a clone must be built before `--web` works.
 
 ### Plan mode
 
@@ -508,6 +528,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [x] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [x] **Batch runs**: `duckwright -f tasks/` (or several files) runs task files one after another and prints a summary.
 - [x] **TUI by default**: running `duckwright` with no arguments opens the [TUI](#interactive-tui) directly, and the `--tui` flag goes away. The current one-shot CLI mode becomes `--print` / `-p`, as in Claude Code: `duckwright -p "<task>"` (or `-p -f tasks/login.md`) runs the task, prints the report, and exits, which is the mode to use in scripts and CI. The TUI-only options (`--max-parallel`, `--past`, `--theme`) then apply without a flag, and `--print` with no terminal is the supported non-interactive path.
+- [x] **Web mode**: `duckwright --web` serves the TUI's workspace in a browser (React + Vite, shadcn-style), loopback only, with a per-launch token.
 - [x] **Plan mode**: `duckwright plan <plan-file>` (or `--plan`) takes a plan written by the user, such as a QA test plan with environment setup, test data, and numbered scenarios like [this one](docs/superpowers/test-plans/2026-10-06-network-capture-redacted-history-test-plan.md). A planner agent (Claude) first breaks the plan into separate tasks and writes them as task files under `tasks/`, one per scenario, carrying over each scenario's preconditions, steps, and expected results and keeping shared setup out of the individual tasks. The tasks are then added to the TUI task list, where they can be reviewed, reordered, edited, or removed before running, and run one after another like a batch.
 - [ ] **Parallel batches**: `-j N` runs up to N task files at once, giving each its own `--session` name automatically so they never share a browser.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
@@ -524,10 +545,11 @@ cd duckwright
 npm install
 npm test                                                   # typecheck and unit tests
 DUCKWRIGHT_E2E=1 node --test test/e2e.test.ts              # live e2e: real claude + headless browser
+npm run build && DUCKWRIGHT_UI_SMOKE=1 node --test test/web/ui.smoke.test.ts   # browser smoke test of the web UI
 node src/bin.ts "<task>"                                   # run from source, no build needed
 ```
 
-Node runs the TypeScript sources directly, so tests and `node src/bin.ts` need no build step; `npm run build` writes `dist/` for the installed command.
+Node runs the TypeScript sources directly, so tests and `node src/bin.ts` need no build step; `npm run build` writes `dist/` for the installed command. The web client lives in `web/` (React + Vite); `npm run build` builds it into `dist/web-ui/`, and `DUCKWRIGHT_UI_SMOKE=1 node --test test/web/ui.smoke.test.ts` runs the browser smoke test after a build.
 
 > [!TIP]
 > The e2e test fills in and submits [`test/fixtures/form.html`](https://github.com/locle97/duckwright/blob/main/test/fixtures/form.html) using a real model, so each run costs a small amount.

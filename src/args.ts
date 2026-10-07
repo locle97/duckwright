@@ -25,6 +25,10 @@ export interface RunArgs {
   maxParallel: number | null;
   /** A plan file to plan, or a planned folder to open. */
   plan: string | null;
+  /** Serve the web UI instead of opening the TUI. */
+  web: boolean;
+  /** The web UI's port; null picks a free one. */
+  port: number | null;
   past?: number;
   theme?: ThemeName;
 }
@@ -57,6 +61,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE
   + "                  [--twofa-timeout SEC]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
   + "                  [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
+  + "                  [--web] [--port PORT]\n"
   + "                  [task]";
 
 export const RUN_HELP = `${RUN_USAGE}
@@ -110,11 +115,15 @@ options:
                         into the prompt
   --snapshot-grep       never paste the page snapshot; Claude always greps the
                         saved file
-  --max-parallel N      TUI: most runs at once (default 3)
-  --past N              TUI: past runs to show (default 20, 0 = none)
-  --theme NAME          TUI: auto, dark or light (default auto)
+  --max-parallel N      TUI and web UI: most runs at once (default 3)
+  --past N              TUI and web UI: past runs to show (default 20, 0 = none)
+  --theme NAME          TUI and web UI: auto, dark or light (default auto)
+  --web                 open the web UI in a browser instead of the TUI: start a
+                        local server on 127.0.0.1 (see --port) and print its
+                        URL. Cannot be used with -p
+  --port PORT           web UI: the port to listen on (default: a free port)
 
-With no -p, duckwright opens the interactive TUI and starts any task or task
+With no -p, duckwright opens the interactive TUI (or the web UI with --web) and starts any task or task
 files given. Run a task file and exit: duckwright -p -f tasks/login.md. To
 turn an earlier run into a test: duckwright export runs/<id>. Plan a test
 plan: duckwright plan docs/qa-plan.md
@@ -192,12 +201,12 @@ const RUN_SPEC: OptionSpec = {
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
     "--snapshot-grep": "--snapshot-grep", "-p": "-p/--print", "--print": "-p/--print", "--max-parallel": "--max-parallel",
-    "--past": "--past", "--theme": "--theme", "--plan": "--plan",
+    "--past": "--past", "--theme": "--theme", "--plan": "--plan", "--web": "--web", "--port": "--port",
   },
   shortWithValue: ["-f"],
 };
 
-const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme", "--plan", "--twofa-timeout"];
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme", "--plan", "--twofa-timeout", "--port"];
 
 // Python's int(): optional sign, digits with single underscores between them, spaces around.
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
@@ -210,7 +219,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid", network: true,
-    print: false, maxParallel: null, plan: null, twofaTimeout: 300,
+    print: false, maxParallel: null, web: false, port: null, plan: null, twofaTimeout: 300,
     ...settings,
   };
   const extras: string[] = [];
@@ -271,6 +280,11 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
         if (n < 1) fail("argument --twofa-timeout: must be at least 1");
         if (n > MAX_TWOFA_TIMEOUT_SEC) fail(`argument --twofa-timeout: must be at most ${MAX_TWOFA_TIMEOUT_SEC}`);
         args.twofaTimeout = n;
+      } else if (name === "--port") {
+        if (!PY_INT.test(v!)) fail(`argument --port: invalid int value: '${v}'`);
+        const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
+        if (n < 1 || n > 65535) fail("argument --port: must be between 1 and 65535");
+        args.port = n;
       } else if (name === "--plan") args.plan = v!;
       else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
@@ -286,6 +300,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     else if (name === "--network" || name === "--no-network") args.network = name === "--network";
     else if (name === "--allow-file-access") args.allowFileAccess = true;
     else if (name === "-p" || name === "--print") args.print = true;
+    else if (name === "--web") args.web = true;
     else {
       if (snapshotFlag !== null && snapshotFlag !== name) fail(`argument ${name}: not allowed with argument ${snapshotFlag}`);
       snapshotFlag = name;
