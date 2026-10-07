@@ -190,8 +190,9 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
     past: past.runs,
     defaultSkill: deps.prompts.defaultSkill,
     maxParallel: args.maxParallel ?? 3,
-    startRun: (s) => startRun(s, {
+    startRun: (s, human) => startRun(s, {
       prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent, env: deps.env,
+      humanFor: () => human,
       onWarning: (m) => manager.notify("error", m),
     }),
     preflight: (a) => preflightArgs(deps, a),
