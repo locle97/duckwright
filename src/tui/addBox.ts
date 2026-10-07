@@ -15,6 +15,8 @@ import type { Theme } from "./theme.ts";
 export const MAX_LINES = 6;
 const MAX_ERRORS = 3;
 const PLACEHOLDER = "Describe a task, or @ a task file or folder…";
+/** While the box waits, it also says how to plan a file, which opens this box with P. */
+const IDLE_HINT = "  (P to plan a test plan)";
 const PLAN_PLACEHOLDER = "@ a plan file to break into tasks, or a planned folder…";
 
 /** The error rows shown: up to MAX_ERRORS, then `…and N more`. */
@@ -72,7 +74,7 @@ export interface AddBoxProps {
 }
 
 export function AddBox({ compose, focused, width, exists, errors, theme = DEFAULT_THEME, forPlan = false }: AddBoxProps): ReactElement {
-  const placeholder = forPlan ? PLAN_PLACEHOLDER : PLACEHOLDER;
+  const placeholder = forPlan ? PLAN_PLACEHOLDER : focused ? PLACEHOLDER : PLACEHOLDER + IDLE_HINT;
   const { lines: all, row, col } = lines(compose);
   const first = Math.min(Math.max(0, row - MAX_LINES + 1), Math.max(0, all.length - MAX_LINES));
   const marked = spans(compose.text, exists);

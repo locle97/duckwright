@@ -79,7 +79,8 @@ test("app_empty_workspace", async () => {
   const f = t.frame();
   assert.match(f, /🦆 duckwright/);
   assert.match(f, /Describe a task, or @ a task file or folder…/);
-  assert.match(f, /tab add/);
+  assert.match(f, /tab add · P plan/);
+  assert.match(f, /\(P to plan a test plan\)/, "the idle box says how to plan a file");
 });
 
 test("app_add_tasks_in_a_row", async () => {

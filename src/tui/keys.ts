@@ -80,7 +80,7 @@ function quitCommands(s: ViewState, activeRuns: number): Command[] {
 /** Bindings that mean the same in the list and the detail view. */
 const SHARED: Binding[] = [
   { match: char("a"), when: () => true, run: compose("task"), hint: { key: "a", label: "add" }, footer: false },
-  { match: char("P"), when: () => true, run: compose("plan"), hint: { key: "P", label: "plan a file" }, footer: false },
+  { match: char("P"), when: () => true, run: compose("plan"), hint: { key: "P", label: "plan" }, footer: true },
   { match: char("p"), when: (c) => c.t?.state === "running", run: manager("pause"), hint: { key: "p", label: "pause" }, footer: true },
   { match: char("r"), when: (c) => c.t?.state === "paused", run: manager("resume"), hint: { key: "r", label: "resume" }, footer: true },
   { match: char("n", "."), when: (c) => c.t?.state === "paused", run: manager("step"), hint: { key: "n", label: "step" }, footer: true },
