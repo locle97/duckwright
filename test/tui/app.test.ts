@@ -746,3 +746,74 @@ test("app_captured_calls_are_capped_sanitised_and_tolerate_old_events", async ()
   assert.doesNotMatch(f, /api\/9 /);
   assert.match(f, /net error +requests: boom \(\+1 more\)/);
 });
+
+test("twofa_dialog_masks_input_and_answers_the_manager", async () => {
+  const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m);
+  await settle();
+  m.update(1, { twofa: { kind: "sms" } });
+  await settle();
+  assert.match(t.frame(), /SMS code/);
+  await t.type("1", "2", "3", "4", "5", "6");
+  assert.ok(t.frame().includes("••••••"));
+  assert.ok(!t.frame().includes("123456"), "the code is never drawn");
+  await t.type("\r");
+  assert.deepEqual(m.twofaAnswers, [{ id: 1, value: "123456" }]);
+  assert.deepEqual(m.log.filter((l) => l.startsWith("answerTwoFactor")), ["answerTwoFactor:1"]);
+  assert.ok(!m.log.join("\n").includes("123456"), "the code is not in the manager call log");
+});
+
+test("twofa_dialog_does_not_leak_keys_to_the_workspace", async () => {
+  const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m);
+  await settle();
+  m.update(1, { twofa: { kind: "email" } });
+  await settle();
+  await t.type("a", "q");
+  assert.equal(m.log.filter((l) => l.startsWith("start") || l.startsWith("stop")).length, 0);
+  // The add box always shows its placeholder, so prove it did not open another way: the keys went into the
+  // masked code (two bullets) and the footer still shows the dialog's hints, not the add box's.
+  assert.ok(t.frame().includes("••▌"), "the keys were typed into the dialog");
+  assert.match(t.frame(), /submit · esc cancel/);
+  assert.deepEqual(t.quits, []);
+});
+
+test("twofa_passkey_dialog_approves_with_y", async () => {
+  const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m);
+  await settle();
+  m.update(1, { twofa: { kind: "passkey" } });
+  await settle();
+  assert.match(t.frame(), /Approve the passkey prompt/);
+  await t.type("y");
+  assert.deepEqual(m.twofaAnswers, [{ id: 1, value: "" }]);
+});
+
+test("second_request_queues_behind_the_first", async () => {
+  const m = new FakeManager([
+    snapshot(1, "first", { state: "running", runId: "r1", runCount: 1 }),
+    snapshot(2, "second", { state: "running", runId: "r2", runCount: 1 }),
+  ]);
+  const t = mount(m);
+  await settle();
+  m.update(1, { twofa: { kind: "sms" } });
+  m.update(2, { twofa: { kind: "email" } });
+  await settle();
+  assert.match(t.frame(), /SMS code/);
+  await t.type("9", "9", "9", "9", "\r");
+  assert.deepEqual(m.twofaAnswers, [{ id: 1, value: "9999" }]);
+  m.update(1, { twofa: null });
+  await settle();
+  assert.match(t.frame(), /email code/i);
+  assert.ok(!t.frame().includes("9999"));
+  await t.type("5", "5", "5", "5", "\r");
+  assert.deepEqual(m.twofaAnswers[1], { id: 2, value: "5555" });
+});
+
+test("a_waiting_task_is_marked_in_the_sidebar", async () => {
+  const m = new FakeManager([snapshot(1, "log in", { state: "running", runId: "r1", runCount: 1, twofa: { kind: "sms" } })]);
+  const t = mount(m, { columns: 100, rows: 24 });
+  await settle();
+  const row = t.frame().split("\n").find((l) => l.includes('"log in"'))!;
+  assert.match(row, /\?/);
+});

@@ -26,7 +26,9 @@ import type { Command } from "./keys.ts";
 import { OptionsPane, optionsHeight } from "./optionsPane.ts";
 import { sanitize } from "./sanitize.ts";
 import { Sidebar } from "./sidebar.ts";
-import { editingGlobals, initialState, reduce } from "./state.ts";
+import { editingGlobals, initialState, pendingTwofa, reduce, twofaWaitKey } from "./state.ts";
+import { twofaKey } from "./twofaInput.ts";
+import { TwofaDialog } from "./twofaDialog.ts";
 import type { UiAction, ViewState } from "./state.ts";
 import { DEFAULT_THEME } from "./theme.ts";
 import type { Theme } from "./theme.ts";
@@ -95,6 +97,9 @@ function Workspace(p: AppProps): ReactElement {
   const [thrown, setThrown] = useState<Error | null>(null);
   if (thrown !== null) throw thrown;
   const toastsSeen = useRef(0);
+  // What the user has typed into the 2FA dialog. Kept here, not in the view state or the manager,
+  // so a code or secret is never held anywhere but on its way to the run.
+  const twofaText = useRef({ key: "", text: "" });
   const quitting = useRef(false);
   const terminal = useWindowSize();
   const { columns, rows } = p.size ?? terminal;
@@ -169,6 +174,18 @@ function Workspace(p: AppProps): ReactElement {
       case "saveGlobals":
         manager.setGlobals(c.overrides);
         return;
+      case "twofaKey": {
+        const typed = twofaText.current.key === c.waitKey ? twofaText.current.text : "";
+        const step = twofaKey(c.wait, typed, c.key);
+        if ("answer" in step) {
+          twofaText.current = { key: "", text: "" };
+          manager.answerTwoFactor(c.id, step.answer);
+        } else {
+          twofaText.current = { key: c.waitKey, text: step.buffer };
+        }
+        rerender();
+        return;
+      }
       case "quit":
         quit(false);
         return;
@@ -221,13 +238,16 @@ function Workspace(p: AppProps): ReactElement {
     ];
   }
   const area = { width: columns, height: paneHeight };
-  const overlay = s.mode === "help" ? h(Help, { key: "help", s, ...area })
+  const waiting = pendingTwofa(s);
+  const typed = waiting !== null && twofaText.current.key === twofaWaitKey(waiting) ? twofaText.current.text : "";
+  const overlay = s.mode === "confirm" && s.confirm !== null ? h(Confirm, { key: "confirm", s, ...area })
+    : waiting !== null && s.mode !== "quitting" ? h(TwofaDialog, { key: "twofa", task: waiting, typed, ...area })
+    : s.mode === "help" ? h(Help, { key: "help", s, ...area })
     : s.mode === "form" && s.form !== null && s.form.taskId !== null ? h(FormView, { key: "form", form: s.form, title: "Settings", ...area })
     : s.mode === "form" && s.form !== null && oh === 0 ? h(FormView, { key: "form", form: s.form, title: "Global options", ...area })
     : s.mode === "options" && s.globals !== null && oh === 0 ? h(FormView, {
       key: "form", form: openForm(null, s.globals.base, s.globals.overrides, s.optionsSelected), title: "Global options", note: "⏎ edit", ...area,
     })
-    : s.mode === "confirm" && s.confirm !== null ? h(Confirm, { key: "confirm", s, ...area })
     : null;
 
   return h(Box, { flexDirection: "column", width: columns, height: rows },

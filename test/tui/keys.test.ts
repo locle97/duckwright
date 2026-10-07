@@ -8,7 +8,7 @@ import { openForm, formKey } from "../../src/tui/form.ts";
 import { helpBindings, hintPrefix, hints, keymap, tooSmallKeymap } from "../../src/tui/keys.ts";
 import type { Command } from "../../src/tui/keys.ts";
 import { key } from "../../src/tui/keypress.ts";
-import { editingGlobals, initialState, reduce } from "../../src/tui/state.ts";
+import { editingGlobals, initialState, pendingTwofa, reduce, twofaWaitKey } from "../../src/tui/state.ts";
 import type { UiAction, ViewState } from "../../src/tui/state.ts";
 
 function task(id: number, state: TaskState = "idle"): TaskSnapshot {
@@ -496,4 +496,56 @@ test("keys_global_options", () => {
   assert.deepEqual(press(mk("idle"), "O"), [], "no globals yet: nothing to edit");
   assert.ok(helpBindings(mk("idle")).some((h) => h.key === "O" && h.label === "global options"));
   assert.ok(!hints(initialState(0, [task(1)], [], globals)).some((h) => h.key === "O"), "help only, not the footer");
+});
+
+const waiting = (kind: "secret" | "sms" | "email" | "passkey" = "sms"): ViewState =>
+  initialState(0, [{ ...task(1, "running"), twofa: { kind } }]);
+
+test("pending_twofa_takes_every_key_as_a_twofa_command", () => {
+  const s = waiting();
+  const t = s.tasks[0];
+  const cmds = press(s, "a");
+  assert.equal(cmds.length, 1);
+  assert.deepEqual(cmds[0], { kind: "twofaKey", id: 1, wait: "sms", waitKey: twofaWaitKey(t), key: key("a") });
+  for (const spec of ["j", "q", "tab", "?", "/", "escape", "return", "1"]) {
+    assert.equal(press(s, spec)[0].kind, "twofaKey", spec);
+  }
+});
+
+test("a_twofa_command_carries_the_key_but_no_ui_action_that_could_hold_it", () => {
+  const cmds = press(waiting(), "7");
+  assert.ok(cmds.every((c) => c.kind === "twofaKey"), "no ui action carries the typed key");
+});
+
+test("ctrl_c_still_asks_to_quit_while_a_twofa_dialog_is_open", () => {
+  const cmds = press(waiting(), "ctrl+c", 1);
+  assert.ok(cmds.some((c) => c.kind === "ui" && c.action.type === "confirm"));
+  assert.ok(!cmds.some((c) => c.kind === "twofaKey"));
+});
+
+test("the_quit_question_takes_y_n_over_the_twofa_dialog", () => {
+  let s = waiting();
+  s = play(s, press(s, "ctrl+c", 1));
+  assert.equal(s.mode, "confirm");
+  assert.deepEqual(press(s, "y", 1), [{ kind: "stopAllAndQuit" }]);
+});
+
+test("no_twofa_means_normal_keys", () => {
+  const s = mk("running");
+  assert.equal(pendingTwofa(s), null);
+  assert.notEqual(press(s, "a")[0].kind, "twofaKey");
+});
+
+test("pending_twofa_picks_the_first_waiting_task", () => {
+  const s = initialState(0, [
+    { ...task(1, "running"), twofa: null },
+    { ...task(2, "running"), twofa: { kind: "email" } },
+    { ...task(3, "running"), twofa: { kind: "sms" } },
+  ]);
+  assert.equal(pendingTwofa(s)?.id, 2);
+});
+
+test("twofa_footer_hints", () => {
+  assert.deepEqual(hints(waiting("sms")), [{ key: "⏎", label: "submit" }, { key: "esc", label: "cancel" }]);
+  assert.deepEqual(hints(waiting("passkey")), [{ key: "y/⏎", label: "approved" }, { key: "n/esc", label: "cancel" }]);
 });
