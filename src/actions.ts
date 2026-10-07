@@ -6,12 +6,14 @@ import type { RequestContext } from "./expectRequest.ts";
 import { checkRequestCallArgs, runRequest } from "./request.ts";
 import type { RequestCallContext } from "./request.ts";
 import { PlaywrightCLI } from "./pw.ts";
+import { TwoFactorError, checkTwofaArgs } from "./twofa.ts";
+import type { TwoFactor } from "./twofa.ts";
 import { sliceCodePoints } from "./text.ts";
 
 export const ALLOWED: ReadonlySet<string> = new Set(ALLOWED_COMMANDS);
 export const ALLOWED_LIST = ALLOWED_COMMANDS.join(", ");
 export const PAGE_CHANGING: ReadonlySet<string> = new Set([
-  "goto", "click", "press", "tab-new", "tab-select", "tab-close", "go-back",
+  "goto", "click", "press", "tab-new", "tab-select", "tab-close", "go-back", "twofa",
 ]);
 
 // Harmless flags per command (from `playwright-cli <cmd> --help`). Any other flag,
@@ -48,6 +50,7 @@ function rejection(a: Action): string | null {
   if (a.cmd === "expect") return checkArgs(a.args);
   if (a.cmd === "expect-request") return checkRequestArgs(a.args);
   if (a.cmd === "request") return checkRequestCallArgs(a.args);
+  if (a.cmd === "twofa") return checkTwofaArgs(a.args);
   const bad = badFlag(a.cmd, a.args);
   return bad !== null ? `error: flag '${bad}' not allowed` : null;
 }
@@ -67,15 +70,37 @@ export interface ExecuteHooks {
   result?(index: number, result: string, code: string | null): void;
 }
 
+/** Run one `twofa` action: [result, recorded code]. Neither ever contains the code itself. */
+async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[]): Promise<[string, string | null]> {
+  if (tf === null) return ["error: 2FA is not available in this run", null];
+  const kind = args[0];
+  try {
+    if (kind === "passkey") {
+      await tf.approve();
+      return ["ok", null];
+    }
+    const code = kind === "totp" ? await tf.totp() : await tf.code(kind as "sms" | "email");
+    const res = await pw.run("fill", [args[1], code, "--submit"]);
+    if (res.code !== 0) return [tf.scrubber.scrub(`error: ${res.stderr.trim() || res.stdout.trim()}`), null];
+    const ran = extractCode(res.stdout);
+    return ["ok", ran === null ? null : tf.scrubber.scrub(ran)];
+  } catch (e) {
+    // AbortedError and anything unexpected propagate: the run stops.
+    if (e instanceof TwoFactorError) return [`error: ${e.message}`, null];
+    throw e;
+  }
+}
+
 /**
  * Run allowed actions. If `codes` is given, it is extended with one entry per
  * action: the Playwright code playwright-cli ran for it, or null if none ran.
  * `requests` is what expect-request checks against; null or absent means capture is off.
  * `call` is the request context for running request actions.
+ * `twofa` supplies 2FA codes for `twofa` actions.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
-  requests?: RequestContext | null, call?: RequestCallContext | null,
+  requests?: RequestContext | null, call?: RequestCallContext | null, twofa?: TwoFactor | null,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
@@ -125,6 +150,14 @@ export async function execute(
       results.push(result.startsWith("ok") ? result : clip(result));
       if (code !== null) ran.set(i, code);
       if (origin !== null && code !== null) origins.set(i, origin);
+      return;
+    }
+    if (a.cmd === "twofa") {
+      const [result, code] = await runTwofa(pw, twofa ?? null, a.args);
+      results.push(clip(result));
+      if (code !== null) ran.set(i, code);
+      // The form was submitted, so the page may have changed.
+      if (result === "ok" && a.args[0] !== "passkey") skip = "skipped: page may have changed";
       return;
     }
     const res = await pw.run(a.cmd, a.args);

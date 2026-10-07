@@ -8,6 +8,8 @@ import type { RequestCallContext } from "../src/request.ts";
 import type { NetworkEntry } from "../src/network.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
+import { createTwoFactor } from "../src/twofa.ts";
+import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
 
 const A = (cmd: string, ...args: string[]): Action => ({ cmd, args });
@@ -461,4 +463,88 @@ test("request_with_about_blank_origin_is_refused_without_sending", async () => {
   const { results } = await execute(pw, [A("request", "GET", "/a")], undefined, undefined, null, { seen: [seenEntry("GET", "/a")], origin: null });
   assert.deepEqual(results, ["error: request: no current page origin"]);
   assert.deepEqual(calls, []);
+});
+
+const SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+const TWOFA_OUT = "### Ran Playwright code\n```js\nawait page.getByLabel('Code').fill('287082');\n```\n";
+const tf = (human: Human | null = null, secret: string | null = SECRET) =>
+  createTwoFactor({ secret, human, timeoutSec: 5, signal: new AbortController().signal, now: () => 59_000 });
+const sayHuman = (code: string): Human => ({ secret: async () => SECRET, code: async () => code, approve: async () => {} });
+
+test("twofa_totp_fills_and_submits_and_never_exposes_the_code", async () => {
+  const [pw, calls] = makePw(0, "", TWOFA_OUT);
+  const codes: (string | null)[] = [];
+  const { results } = await execute(pw, [A("twofa", "totp", "e5")], codes, undefined, null, null, tf());
+  assert.deepEqual(calls, [["fill", "e5", "287082", "--submit"]]);
+  assert.deepEqual(results, ["ok"]);
+  assert.deepEqual(codes, ["await page.getByLabel('Code').fill('[2FA CODE]');"]);
+});
+
+test("twofa_sms_uses_the_human_code", async () => {
+  const [pw, calls] = makePw(0, "", TWOFA_OUT.replace("287082", "493817"));
+  const codes: (string | null)[] = [];
+  const { results } = await execute(pw, [A("twofa", "sms", "e5")], codes, undefined, null, null, tf(sayHuman("493817")));
+  assert.deepEqual(calls, [["fill", "e5", "493817", "--submit"]]);
+  assert.deepEqual(results, ["ok"]);
+  assert.deepEqual(codes, ["await page.getByLabel('Code').fill('[2FA CODE]');"]);
+});
+
+test("twofa_passkey_waits_for_approval_and_runs_no_browser_command", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("twofa", "passkey")], undefined, undefined, null, null, tf(sayHuman("x")));
+  assert.deepEqual(results, ["ok"]);
+  assert.deepEqual(calls, []);
+});
+
+test("twofa_is_page_changing_so_later_actions_are_skipped", async () => {
+  const [pw, calls] = makePw(0, "", TWOFA_OUT);
+  const { results } = await execute(pw, [A("twofa", "totp", "e5"), A("click", "e9")], undefined, undefined, null, null, tf());
+  assert.deepEqual(results, ["ok", "skipped: page may have changed"]);
+  assert.equal(calls.length, 1);
+});
+
+test("twofa_fill_failure_is_an_error_without_the_code", async () => {
+  const [pw] = makePw(1, "no element 287082", "");
+  const codes: (string | null)[] = [];
+  const { results } = await execute(pw, [A("twofa", "totp", "e5")], codes, undefined, null, null, tf());
+  assert.deepEqual(results, ["error: no element [2FA CODE]"]);
+  assert.deepEqual(codes, [null]);
+});
+
+test("twofa_without_a_human_reports_it", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("twofa", "sms", "e5")], undefined, undefined, null, null, tf(null, null));
+  assert.deepEqual(results, ["error: no way to ask for a code (stdin is not a terminal)"]);
+  assert.deepEqual(calls, []);
+});
+
+test("twofa_without_a_provider_is_an_error", async () => {
+  const [pw] = makePw();
+  const { results } = await execute(pw, [A("twofa", "totp", "e5")]);
+  assert.deepEqual(results, ["error: 2FA is not available in this run"]);
+});
+
+test("twofa_bad_args_are_rejected_before_anything_runs", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("twofa"), A("twofa", "totp"), A("twofa", "passkey", "e1")], undefined, undefined, null, null, tf());
+  assert.deepEqual(results, [
+    "error: twofa needs a kind: totp, sms, email, passkey",
+    "error: twofa totp needs the element ref of the code field",
+    "error: twofa passkey takes no other argument",
+  ]);
+  assert.deepEqual(calls, []);
+});
+
+test("twofa_bad_args_after_a_page_change_still_report_the_rejection", async () => {
+  const [pw] = makePw();
+  const { results } = await execute(pw, [A("goto", "x"), A("twofa", "fax", "e1")], undefined, undefined, null, null, tf());
+  assert.deepEqual(results, ["ok", "error: twofa needs a kind: totp, sms, email, passkey"]);
+});
+
+test("twofa_total_is_capped_at_five", async () => {
+  const [pw] = makePw(0, "", TWOFA_OUT);
+  const t = tf();
+  for (let i = 0; i < 5; i++) await execute(pw, [A("twofa", "totp", "e5")], undefined, undefined, null, null, t);
+  const { results } = await execute(pw, [A("twofa", "totp", "e5")], undefined, undefined, null, null, t);
+  assert.deepEqual(results, ["error: too many 2FA attempts in this run"]);
 });

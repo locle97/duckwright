@@ -249,7 +249,7 @@ test("version_flag", async () => {
 
 test("system_prompt_documents_expect", () => {
   const text = fs.readFileSync(PROMPTS.system, "utf8");
-  assert.ok(text.includes("screenshot, expect, expect-request, request, done"));
+  assert.ok(text.includes("screenshot, expect, expect-request, request, twofa, done"));
   assert.ok(text.includes('{"cmd": "request", "args": ["POST", "/api/todos", "{\\"title\\":\\"x\\"}", "201"]}'));
   assert.ok(text.includes("Safe to batch before it: fill, type, select, check, uncheck, hover, expect, request."));
   assert.ok(text.includes('{"cmd": "expect-request", "args": ["POST", "/api/login", "201"]}'));
