@@ -6,7 +6,7 @@ import type { DecideFn } from "./brain.ts";
 import { RunControl } from "./control.ts";
 import { RunEvents } from "./events.ts";
 import { captureStep, clearRequests, currentOrigin, networkDir } from "./network.ts";
-import { observe, pasteSnapshot } from "./observe.ts";
+import { observe, pageDir, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { AbortedError } from "./proc.ts";
 import { buildPrompt } from "./prompt.ts";
@@ -131,6 +131,8 @@ export class Agent {
       this.events.emit({ type: "step:start", step });
       this.events.emit({ type: "phase", step, phase: "observing" });
       const obs = await observe(this.pw, this.workdir);
+      // In grep mode Claude reads page/snapshot.yml itself, so the file must be clean before the brain runs.
+      if (this.twofa) scrubTree(pageDir(this.workdir), this.twofa.scrubber);
       const nudge = isRepeating(history) ? REPEAT_NUDGE : null;
       const paste = pasteSnapshot(this.snapshotMode, obs);
       const prompt = this.scrub(buildPrompt(this.task, step, this.maxSteps, history, memory, obs, { nudge, paste }));
@@ -167,6 +169,7 @@ export class Agent {
       }
       failures = 0;
       this.costUsd += cost;
+      if (this.twofa) decision = this.twofa.scrubber.deep(decision);
       memory = decision.memory;
       const codes: (string | null)[] = [];
       this.events.emit({ type: "decision", step, decision, cost });

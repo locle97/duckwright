@@ -35,7 +35,11 @@ class EchoPW extends PlaywrightCLI {
   override async open(): Promise<ProcResult> { return { code: 0, stdout: "", stderr: "" }; }
   override async stateLoad(): Promise<void> {}
   override async close(): Promise<void> {}
-  override async snapshot(): Promise<string> { return `- textbox "Code" [ref=e5]\n- text: ${this.last}`; }
+  override async snapshot(file: string): Promise<string> {
+    const text = `- textbox "Code" [ref=e5]\n- textbox "Code": "${this.last}"`;
+    fs.writeFileSync(file, text);
+    return text;
+  }
 }
 
 class ScriptBrain {
@@ -56,14 +60,14 @@ function filesUnder(dir: string): string[] {
   });
 }
 
-test("no_secret_or_code_reaches_any_file_prompt_or_output", async () => {
+for (const snapshot of ["full", "grep"] as const) test(`no_secret_or_code_reaches_any_file_prompt_or_output_${snapshot}`, async () => {
   const tmp = tmpDir();
   const pw = new EchoPW();
   const brain = new ScriptBrain();
   const human: Human = { secret: async () => SECRET, code: async () => SMS, approve: async () => {} };
   const args: RunArgs = {
     task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
-    state: null, allowFileAccess: false, export: true, snapshot: "full", tui: false, maxParallel: null, network: true,
+    state: null, allowFileAccess: false, export: true, snapshot, tui: false, maxParallel: null, network: true,
     twofaTimeout: 300,
   };
   const printed: string[] = [];
@@ -81,6 +85,7 @@ test("no_secret_or_code_reaches_any_file_prompt_or_output", async () => {
   assert.match(totp, /^\d{6}$/);
   assert.equal(sms, SMS);
 
+  assert.ok(filesUnder(handle.workdir).some((f) => f.endsWith(path.join("page", "snapshot.yml"))), "no snapshot file, so the scan would be vacuous");
   const networkFiles = filesUnder(path.join(handle.workdir, "network"));
   assert.ok(networkFiles.length > 0, "network capture wrote no files, so the scan would be vacuous");
 

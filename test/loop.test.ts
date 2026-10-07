@@ -597,6 +597,42 @@ test("twofa_codes_are_scrubbed_from_network_entries_and_files", async () => {
   assert.ok(file.includes("[2FA CODE]"));
 });
 
+test("twofa_codes_are_scrubbed_from_the_snapshot_file_and_the_decision", async () => {
+  class SnapPW extends FakePW {
+    last = "";
+    override async run(cmd: string, args: string[]): Promise<ProcResult> {
+      if (cmd === "fill") this.last = args[1];
+      return super.run(cmd, args);
+    }
+    override async snapshot(p: string): Promise<string> {
+      const text = `- textbox "Code": "${this.last}"`;
+      fs.writeFileSync(p, text);
+      return text;
+    }
+  }
+  const workdir = tmpDir();
+  const leaky = dec([["done", ["success", "ok"]]], `the code was ${TF_CODE}`);
+  const brain = new FakeBrain([dec([["twofa", ["totp", "e1"]]]), leaky]);
+  const events = new RunEvents();
+  const seen: RunEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  const files: string[] = [];
+  const base = brain.decide.bind(brain);
+  brain.decide = async (prompt: string, grep = true) => {
+    files.push(fs.readFileSync(path.join(workdir, "page", "snapshot.yml"), "utf8"));
+    return base(prompt, grep);
+  };
+  const r = await agent(new SnapPW({ runStdout: ECHO }), brain, { workdir, twofa: twofa(), events }).run();
+  assert.equal(files[1], '- textbox "Code": "[2FA CODE]"');
+  assert.ok(brain.prompts[1].includes('"[2FA CODE]"'));
+  assert.ok(!brain.prompts[1].includes(TF_CODE));
+  assert.ok(!fs.readFileSync(path.join(workdir, "page", "snapshot.yml"), "utf8").includes(TF_CODE));
+  assert.equal(r.history[1].decision.memory, "the code was [2FA CODE]");
+  const decisions = seen.filter((e) => e.type === "decision");
+  assert.ok(!JSON.stringify(decisions).includes(TF_CODE));
+  assert.ok(JSON.stringify(decisions).includes("[2FA CODE]"));
+});
+
 test("without_twofa_nothing_is_scrubbed", async () => {
   const brain = new FakeBrain([dec([["done", ["success", TF_CODE]]])]);
   const r = await agent(new FakePW(), brain).run();
