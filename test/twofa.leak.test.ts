@@ -67,7 +67,7 @@ for (const snapshot of ["full", "grep"] as const) test(`no_secret_or_code_reache
   const human: Human = { secret: async () => SECRET, code: async () => SMS, approve: async () => {} };
   const args: RunArgs = {
     task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
-    state: null, allowFileAccess: false, export: true, snapshot, tui: false, maxParallel: null, network: true,
+    state: null, allowFileAccess: false, export: true, snapshot, print: false, maxParallel: null, network: true,
     twofaTimeout: 300,
   };
   const printed: string[] = [];

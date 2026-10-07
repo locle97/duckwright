@@ -135,6 +135,8 @@ export class RunManager implements ManagerLike {
   /** Set by stopAll: no run starts after quitting began. */
   #closing = false;
   #listeners: Array<(e: ManagerEvent) => void> = [];
+  /** Tasks waiting for a free run slot, started in order as runs finish. */
+  #queued: TaskId[] = [];
 
   constructor(o: ManagerOptions) {
     this.#o = o;
@@ -297,6 +299,7 @@ export class RunManager implements ManagerLike {
     void handle.done.then((outcome) => {
       run.outcome = outcome;
       run.active = false;
+      this.#startQueued();
       // A run that failed before run:start has no run view to show why: put it on the task.
       if (!started && outcome.error !== null) {
         task.error = outcome.error;
@@ -311,6 +314,21 @@ export class RunManager implements ManagerLike {
     });
     this.#updated(task);
     return { ok: true, runId: handle.id };
+  }
+
+  /**
+   * Start these tasks in order: as many as the parallel limit allows now, the rest as earlier
+   * runs finish. A task that is removed, already running or fails to start is skipped.
+   */
+  startQueued(ids: TaskId[]): void {
+    this.#queued.push(...ids);
+    this.#startQueued();
+  }
+
+  #startQueued(): void {
+    while (this.#queued.length > 0 && !this.#closing && this.activeCount() < this.#o.maxParallel) {
+      this.start(this.#queued.shift()!);
+    }
   }
 
   pause(id: TaskId): void {

@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
-    tui: false, maxParallel: null, network: true, twofaTimeout: 300,
+    print: false, maxParallel: null, network: true, twofaTimeout: 300,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
-    tui: false, maxParallel: null, network: true, twofaTimeout: 300,
+    print: false, maxParallel: null, network: true, twofaTimeout: 300,
   });
 });
 
@@ -160,52 +160,57 @@ test("max-steps accepts Python int underscores", () => {
   assert.throws(() => parse("--max-steps", "1__0", "x"), usage("argument --max-steps: invalid int value: '1__0'"));
 });
 
-test("tui flag and max-parallel", () => {
-  assert.equal(parse("--tui").tui, true);
-  assert.equal(parse("--tui").maxParallel, null);
-  assert.equal(parse("--tui", "--max-parallel", "2").maxParallel, 2);
+test("print flag and max-parallel", () => {
+  assert.equal(parse("t").print, false);
+  assert.equal(parse("-p", "t").print, true);
+  assert.equal(parse("--print", "t").print, true);
+  assert.equal(parse().maxParallel, null);
+  assert.equal(parse("--max-parallel", "2").maxParallel, 2);
   assert.equal(parse("--max-parallel=4").maxParallel, 4);
+  assert.throws(() => parse("--tui"), usage("unrecognized arguments: --tui"));
+  assert.throws(() => parse("-p=x", "t"), usage("argument -p/--print: ignored explicit argument 'x'"));
 });
 
 test("max-parallel rejects bad values", () => {
-  assert.throws(() => parse("--tui", "--max-parallel", "0"), usage("argument --max-parallel: must be at least 1"));
-  assert.throws(() => parse("--tui", "--max-parallel", "x"), usage("argument --max-parallel: invalid int value: 'x'"));
-  assert.throws(() => parse("--tui", "--max-parallel"), usage("argument --max-parallel: expected one argument"));
+  assert.throws(() => parse("--max-parallel", "0"), usage("argument --max-parallel: must be at least 1"));
+  assert.throws(() => parse("--max-parallel", "x"), usage("argument --max-parallel: invalid int value: 'x'"));
+  assert.throws(() => parse("--max-parallel"), usage("argument --max-parallel: expected one argument"));
 });
 
-test("help lists the tui flags", () => {
+test("help lists the print and tui flags", () => {
   const text = (parseRunArgs(["--help"], "/s") as { text: string }).text;
-  assert.ok(text.includes("[--tui] [--max-parallel N]"));
-  assert.ok(text.includes("open the interactive workspace"));
-  assert.ok(text.includes("with --tui: most runs at once (default 3)"));
+  assert.ok(text.includes("[-p] [-f FILE [FILE ...]]"));
+  assert.ok(text.includes("-p, --print           run the task"));
+  assert.ok(text.includes("TUI: most runs at once (default 3)"));
+  assert.ok(!text.includes("--tui"));
 });
 
 test("past_flag_values", () => {
-  assert.equal(parse("--tui", "--past", "0").past, 0);
-  assert.equal(parse("--tui", "--past", "5").past, 5);
-  assert.equal(parse("--tui", "--past=7").past, 7);
-  const bare = parse("--tui");
+  assert.equal(parse("--past", "0").past, 0);
+  assert.equal(parse("--past", "5").past, 5);
+  assert.equal(parse("--past=7").past, 7);
+  const bare = parse();
   assert.equal("past" in bare, false);
   assert.equal("theme" in bare, false);
-  assert.throws(() => parse("--tui", "--past", "-1"), usage("argument --past: must be at least 0"));
-  assert.throws(() => parse("--tui", "--past", "x"), usage("argument --past: invalid int value: 'x'"));
-  assert.throws(() => parse("--tui", "--past"), usage("argument --past: expected one argument"));
+  assert.throws(() => parse("--past", "-1"), usage("argument --past: must be at least 0"));
+  assert.throws(() => parse("--past", "x"), usage("argument --past: invalid int value: 'x'"));
+  assert.throws(() => parse("--past"), usage("argument --past: expected one argument"));
 });
 
 test("theme_flag_values", () => {
-  for (const t of ["auto", "dark", "light"]) assert.equal(parse("--tui", "--theme", t).theme, t);
-  assert.equal(parse("--tui", "--theme=light").theme, "light");
+  for (const t of ["auto", "dark", "light"]) assert.equal(parse("--theme", t).theme, t);
+  assert.equal(parse("--theme=light").theme, "light");
   assert.throws(
-    () => parse("--tui", "--theme", "blue"),
+    () => parse("--theme", "blue"),
     usage("argument --theme: invalid choice: 'blue' (choose from 'auto', 'dark', 'light')"),
   );
 });
 
 test("help_lists_past_and_theme", () => {
   const text = (parseRunArgs(["--help"], "/s") as { text: string }).text;
-  assert.ok(text.includes("[--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]"));
-  assert.ok(text.includes("with --tui: past runs to show (default 20, 0 = none)"));
-  assert.ok(text.includes("with --tui: auto, dark or light (default auto)"));
+  assert.ok(text.includes("[--max-parallel N] [--past N] [--theme {auto,dark,light}]"));
+  assert.ok(text.includes("TUI: past runs to show (default 20, 0 = none)"));
+  assert.ok(text.includes("TUI: auto, dark or light (default auto)"));
 });
 
 test("network_default_on", () => {

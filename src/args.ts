@@ -21,7 +21,7 @@ export interface RunArgs {
   network: boolean;
   twofaTimeout: number;
   snapshot: SnapshotMode;
-  tui: boolean;
+  print: boolean;
   maxParallel: number | null;
   past?: number;
   theme?: ThemeName;
@@ -47,14 +47,14 @@ export class UsageError extends Error {
 
 export type Parsed<T> = { kind: "args"; args: T } | { kind: "help"; text: string } | { kind: "version" };
 
-export const RUN_USAGE = "usage: duckwright [-h] [--version] [-f FILE [FILE ...]]\n"
+export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE ...]]\n"
   + "                  [--max-steps MAX_STEPS] [--model MODEL]\n"
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
   + "                  [--state FILE] [--allow-file-access]\n"
   + "                  [--export | --no-export] [--network | --no-network]\n"
   + "                  [--twofa-timeout SEC]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
-  + "                  [--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
+  + "                  [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
   + "                  [task]";
 
 export const RUN_HELP = `${RUN_USAGE}
@@ -67,6 +67,9 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --version             show program's version number and exit
+  -p, --print           run the task (or task files), print the report and
+                        exit, without the TUI: the mode for scripts and CI.
+                        Also used when there is no terminal
   -f FILE [FILE ...], --file FILE [FILE ...]
                         read the task, and optional settings, from a .txt or
                         .md file; several files, or a folder of them, run one
@@ -98,13 +101,13 @@ options:
                         into the prompt
   --snapshot-grep       never paste the page snapshot; Claude always greps the
                         saved file
-  --tui                 open the interactive workspace
-  --max-parallel N      with --tui: most runs at once (default 3)
-  --past N              with --tui: past runs to show (default 20, 0 = none)
-  --theme NAME          with --tui: auto, dark or light (default auto)
+  --max-parallel N      TUI: most runs at once (default 3)
+  --past N              TUI: past runs to show (default 20, 0 = none)
+  --theme NAME          TUI: auto, dark or light (default auto)
 
-Run a task file: duckwright -f tasks/login.md. To turn an earlier run into a
-test: duckwright export runs/<id>
+With no -p, duckwright opens the interactive TUI and starts any task or task
+files given. Run a task file and exit: duckwright -p -f tasks/login.md. To
+turn an earlier run into a test: duckwright export runs/<id>
 `;
 
 export const EXPORT_USAGE = "usage: duckwright export [-h] [--api] [-o FILE] run";
@@ -178,7 +181,7 @@ const RUN_SPEC: OptionSpec = {
     "--twofa-timeout": "--twofa-timeout", "--network": "--network/--no-network", "--no-network": "--network/--no-network",
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
-    "--snapshot-grep": "--snapshot-grep", "--tui": "--tui", "--max-parallel": "--max-parallel",
+    "--snapshot-grep": "--snapshot-grep", "-p": "-p/--print", "--print": "-p/--print", "--max-parallel": "--max-parallel",
     "--past": "--past", "--theme": "--theme",
   },
   shortWithValue: ["-f"],
@@ -197,7 +200,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid", network: true,
-    tui: false, maxParallel: null, twofaTimeout: 300,
+    print: false, maxParallel: null, twofaTimeout: 300,
     ...settings,
   };
   const extras: string[] = [];
@@ -271,7 +274,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     else if (name === "--export" || name === "--no-export") args.export = name === "--export";
     else if (name === "--network" || name === "--no-network") args.network = name === "--network";
     else if (name === "--allow-file-access") args.allowFileAccess = true;
-    else if (name === "--tui") args.tui = true;
+    else if (name === "-p" || name === "--print") args.print = true;
     else {
       if (snapshotFlag !== null && snapshotFlag !== name) fail(`argument ${name}: not allowed with argument ${snapshotFlag}`);
       snapshotFlag = name;
