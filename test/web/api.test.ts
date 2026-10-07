@@ -192,3 +192,44 @@ test("a throwing manager becomes a generic 500", async () => {
   const r = await call(ctx, "POST", "/api/tasks/1/pause");
   assert.deepEqual([r.status, r.body], [500, { ok: false, error: "internal error" }]);
 });
+
+test("POST /api/tasks/:id/replay launches the spec replay and ignores the body", async () => {
+  const { m, ctx } = setup();
+  const r = await call(ctx, "POST", "/api/tasks/1/replay");
+  assert.deepEqual([r.status, r.body], [200, ok]);
+  assert.ok(m.log.includes("replaySpec:1"));
+  const r2 = await call(ctx, "POST", "/api/tasks/1/replay", { path: "/etc" });
+  assert.deepEqual([r2.status, r2.body], [200, ok]);
+  assert.equal(m.log.filter((l) => l === "replaySpec:1").length, 2);
+});
+
+test("POST /api/tasks/:id/replay is 404 for an unknown task", async () => {
+  const { m, ctx } = setup();
+  const r = await call(ctx, "POST", "/api/tasks/99/replay");
+  assert.deepEqual([r.status, r.body], [404, { ok: false, error: "no such task" }]);
+  assert.ok(!m.log.includes("replaySpec:99"));
+});
+
+test("POST /api/tasks/:id/replay maps a failed result to 409", async () => {
+  const { m, ctx } = setup();
+  m.replayResult = { ok: false, error: "x" };
+  let r = await call(ctx, "POST", "/api/tasks/1/replay");
+  assert.deepEqual([r.status, r.body], [409, { ok: false, error: "x" }]);
+  const live = '"one" is still running; replay its spec when it finishes';
+  m.replayResult = { ok: false, error: live };
+  r = await call(ctx, "POST", "/api/tasks/1/replay");
+  assert.deepEqual([r.status, r.body], [409, { ok: false, error: live }]);
+});
+
+test("GET /api/tasks/:id/replay is 405", async () => {
+  const { ctx } = setup();
+  const r = await call(ctx, "GET", "/api/tasks/1/replay");
+  assert.deepEqual([r.status, r.body], [405, { ok: false, error: "method not allowed" }]);
+});
+
+test("a throwing replaySpec becomes a generic 500", async () => {
+  const { m, ctx } = setup();
+  m.replaySpec = () => { throw new Error("secret detail"); };
+  const r = await call(ctx, "POST", "/api/tasks/1/replay");
+  assert.deepEqual([r.status, r.body], [500, { ok: false, error: "internal error" }]);
+});

@@ -177,6 +177,14 @@ const ROUTES: Route[] = [
     },
   },
   {
+    method: "POST", re: /^\/api\/tasks\/(\d+)\/replay$/,
+    run: async (ctx, m) => {
+      const id = taskExists(ctx, m);
+      if (id === null) return bad(404, "no such task");
+      return fromResult(await ctx.manager.replaySpec(id));
+    },
+  },
+  {
     method: "POST", re: /^\/api\/plans$/,
     run: (ctx, _m, req) => {
       const s = isObject(req.body) ? req.body.source : undefined;
