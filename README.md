@@ -515,6 +515,33 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
 - [x] **npm release**: `npm install -g duckwright`, published from GitHub releases by `release.yml`.
 
+**Web mode**
+
+`duckwright --web` (or `duckwright web`) serves the same workspace as the [TUI](#interactive-tui) in a browser: same task list, plans, global options, live timeline, pause/step/stop, 2FA prompts, past runs and editor, with the same flags and the same `runs/` and `tasks/` folders. The TUI stays the default. The web UI is a second front end on the UI-free `ManagerLike` in `src/runs/manager.ts`, not a second engine, so a feature added to the manager reaches both.
+
+*Look and feel*: Neo-brutalism in **rubber-duck yellow and black**. Thick black borders (3-5px), hard offset shadows with no blur, square corners, a mono body font with a heavy uppercase heading font, and a "lift" on hover that drops back on press. Colours are design tokens, so one stylesheet carries every state:
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--duck` | `#FFD400` | page accents, primary buttons, focused pane, running |
+| `--duck-soft` | `#FFF3A3` | selected rows, hover fills |
+| `--ink` | `#0A0A0A` | text, borders, shadows, the dark panel |
+| `--paper` | `#FFFDF2` | cards and panels |
+| `--ok` / `--bad` | black on `#7CFF6B` / white on `#FF3B30` | passed / failed only |
+
+State is never carried by colour alone (each task state keeps its glyph and label, as in the TUI), text meets WCAG AA contrast, and `prefers-reduced-motion` turns off the lift and the spinner. A dark mode inverts to a black page with yellow borders and shadows.
+
+- [ ] **W0: Server and event stream**: a `src/web/` entry started by `--web` that wraps the same `Manager` the TUI uses. Built on Node's `http` (no new runtime dependency): a JSON command API (add, start, pause, resume, step, stop, plan, remove, move, set options, answer 2FA, read and save a source) mirroring `ManagerLike`, and one Server-Sent Events stream that sends the current `list()`, `plans()` and `globals()` and then every `ManagerEvent`. Binds to `127.0.0.1` only, prints the URL, and `--port` picks the port. The session is guarded by a random token in the URL, because the page can start browser runs that spend money and use saved logins. `ctrl+c` stops the runs and prints the same quit summary as the TUI. Tests drive it with the existing fake manager, as the TUI tests do.
+- [ ] **W1: Design system and shell**: the tokens above, `Button`, `Card`, `Badge`, `Input`, `Dialog`, `Toast` and `Toggle` components, a two-column layout (task sidebar and global options on the left, detail on the right) that collapses to one column on a phone, visible focus rings, and the keyboard map. Plain TypeScript with no bundler to start: static files served from `dist/web/`, with a small view layer such as Preact only if the plain version gets unwieldy. A `/design` page lists every component and state, so the look is reviewed in one place.
+- [ ] **W2: Task list and run control**: the sidebar with state glyphs, filter (`/`), past runs shown muted and read-only, the add box with `@` mentions and path completion, start, pause, resume, step, stop and remove with the TUI's confirm dialogs, `--max-parallel`, and a running-cost and elapsed-time header. Buttons carry the same keys as the TUI (`a`, `space`, `p`, `s`, `⏎`, `?`) so both front ends are learned once.
+- [ ] **W3: Live timeline and step detail**: each step's goal, evaluation, memory, actions and results, phase and spinner, cost and duration, with follow mode and expand or collapse of one step or all. The expanded step shows its captured network calls (method, URL, status, time, failures in red) and links to the files under `runs/<id>/network/`. Adds what a browser does better than a terminal: the screenshot of each step, inline, and a copy button on the answer and the generated spec. Past runs replay through the same view.
+- [ ] **W4: Plans, options and editor**: plan rows with their tasks in run order, plan from a path, run all, run failed, stop, reorder (drag as well as `J`/`K`), fold, the shared setup, notes and skipped scenarios; the global options pane with per-task `o` overrides; and a text editor for a task file or a plan's shared setup with the same save checks as the TUI (a file that no longer loads is refused, with the reason under the text).
+- [ ] **W5: 2FA and human-in-the-loop**: the TOTP, SMS, email and passkey prompts as a modal with the deadline countdown, so a code typed in the browser reaches the waiting run and is never written to `history.json`, the event stream or the server log. Secrets are redacted at the API layer by the same rules as `redact.ts`, and a test asserts the stream never carries them (as `twofa.leak.test.ts` does for the TUI).
+- [ ] **W6: Remote and multi-viewer**: several browser tabs on one session (each gets the same stream and a read-only badge unless it holds the control lock), `--host` to serve beyond localhost only with an explicit flag and a required token, and a Docker example so a shared QA box can run the workspace for a team.
+- [ ] **W7: Polish and release**: responsive and accessibility pass (keyboard-only, screen-reader labels, contrast and reduced-motion checks), light and dark, a browser smoke test with Playwright against a fake manager, packaging so `npm install -g duckwright` ships the built web assets, and a README section and screenshots.
+
+*Not planned for web mode*: accounts, a hosted service, and a database. It is the same local tool with a different screen.
+
 ## Development
 
 ```bash
