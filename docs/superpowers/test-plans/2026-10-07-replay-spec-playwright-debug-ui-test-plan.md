@@ -66,20 +66,20 @@ Other data:
 
 | Criterion | Contracts | Scenarios |
 | --- | --- | --- |
-| SC1: TUI key launches `playwright test <spec> --debug`; footer/help list it | C1, C2, C4 | TS-1, TS-2, TS-3, TS-4, TS-15, TS-16, TS-20 |
-| SC2: Web "Replay spec" button via authenticated route | C1, C2, C3, C5 | TS-5, TS-6, TS-17, TS-18, TS-19 |
+| SC1: TUI key launches `playwright test <spec> --debug`; footer/help list it | C1, C2, C4 | TS-1, TS-2, TS-3, TS-4, TS-15, TS-16, TS-20, TS-25 |
+| SC2: Web "Replay spec" button via authenticated route | C1, C2, C3, C5 | TS-5, TS-6, TS-17, TS-18, TS-19, TS-24 |
 | SC3: No spec / unknown id gives a clear error; nothing spawned | C1, C3, C4, C5 | TS-7, TS-8, TS-9, TS-10, TS-11, TS-14 |
 | SC4: Second trigger while open spawns nothing | C1, C3, C4, C5 | TS-13 |
-| SC5: Spawn failure reported, no crash | C1, C3, C4, C5 | TS-12, TS-4 |
+| SC5: Spawn failure reported, no crash | C1, C3, C4, C5 | TS-12, TS-4 (partly: the `cannot start Playwright: <error message>` row cannot be reached from outside; see Out of scope) |
 | SC6: Dependency and README; `npm test` passes | C6, C7 | TS-21, TS-22, TS-23 |
 
 | Contract | Scenarios |
 | --- | --- |
-| C1 `replaySpec` (through the TUI and the API) | TS-1, TS-4, TS-5, TS-7, TS-8, TS-9, TS-10, TS-11, TS-12, TS-13, TS-14, TS-20 |
+| C1 `replaySpec` (through the TUI and the API) | TS-1, TS-4, TS-5, TS-7, TS-8, TS-9, TS-10, TS-11, TS-12, TS-13, TS-14, TS-20, TS-25 (all rows except the spawn `error` / synchronous throw row; see Out of scope) |
 | C2 `hasSpec` | TS-2, TS-3, TS-6 |
-| C3 `POST /api/tasks/:id/replay` | TS-5, TS-10, TS-11, TS-12, TS-13, TS-17, TS-18, TS-19 |
-| C4 TUI `R` key | TS-1, TS-2, TS-3, TS-4, TS-7, TS-8, TS-9, TS-13, TS-15, TS-16, TS-20 |
-| C5 Web **Replay spec** button | TS-6, TS-7, TS-8, TS-9, TS-13 |
+| C3 `POST /api/tasks/:id/replay` | TS-5, TS-10, TS-11, TS-12, TS-13, TS-17, TS-18, TS-19 (all rows except `500 internal error`; see Out of scope) |
+| C4 TUI `R` key | TS-1, TS-2, TS-3, TS-4, TS-7, TS-8, TS-9, TS-13, TS-15, TS-16, TS-20, TS-25 |
+| C5 Web **Replay spec** button | TS-6, TS-7, TS-8, TS-9, TS-13, TS-24 |
 | C6 Dependency | TS-21, TS-22 |
 | C7 README | TS-23 |
 
@@ -99,7 +99,7 @@ Other data:
 
 **Expected:**
 - After step 3 the TUI shows the info toast `opening 20261007-090000-replay-pass/duckwright.spec.ts in the Playwright Inspector`.
-- A Playwright Inspector window opens showing the SPEC-PASS source, paused before the first line; a Chromium window opens next to it.
+- A Playwright Inspector window opens showing the SPEC-PASS source, paused at the start of the test (the Inspector highlights the first Playwright action, `page.setContent`); a Chromium window opens next to it.
 - `pgrep -f "duckwright.spec.ts --debug" | wc -l` prints `1` while the Inspector is open.
 - The browser shows the heading `Hello, Linh!` once `page.setContent` has run.
 - After step 4 the TUI shows the info toast `Playwright Inspector closed for 20261007-090000-replay-pass`.
@@ -271,14 +271,14 @@ Other data:
 
 **Contract:** C1, C3, C4 · **Criteria:** SC5 · **Type:** UI / API · **Priority:** P1
 
-**Preconditions:** Clean state with RUN-PASS. Rename `<repo>/node_modules/@playwright/test` to `<repo>/node_modules/@playwright/test.qa-off`.
+**Preconditions:** Clean state with RUN-PASS. Rename `<repo>/node_modules/@playwright/test` to `<repo>/node_modules/@playwright/test.qa-off`. Confirm that no other copy can be found. Every folder above `<repo>` (its parent, grandparent and so on up to `/`, including `~`) has no `node_modules/@playwright/test`: for example `ls -d ~/node_modules/@playwright/test "$(dirname <repo>)"/node_modules/@playwright/test` reports "No such file" for each. Also check that `NODE_PATH` is empty (`echo "$NODE_PATH"`) and that `~/.node_modules` and `~/.node_libraries` have no `@playwright/test`. If any copy exists, move it aside for this scenario and put it back in step 5.
 
 **Steps:**
 1. Start the TUI, press `tab`, select RUN-PASS, press `R`.
 2. Press `?`, then `esc`, to check the TUI still responds. Quit.
 3. Start the web UI, select RUN-PASS, click **Replay spec**.
 4. Run the curl command from TS-5, step 1 with its id.
-5. Quit, then rename the folder back to `@playwright/test`.
+5. Quit, then rename the folder back to `@playwright/test` (and put back any copy moved aside in the preconditions).
 
 **Expected:**
 - Step 1: error toast `cannot replay: @playwright/test is not installed with Duckwright; reinstall duckwright`. No Inspector opens; `pgrep` count `0`.
@@ -459,6 +459,41 @@ Other data:
 - The process is described: Playwright Inspector, one per run, output discarded, needs a display, and needs Playwright's browser (`npx playwright install chromium` if the close toast shows a non-zero exit).
 - The "Minimal dependencies" bullet and the dependencies badge name `@playwright/test` as a runtime dependency for spec replay.
 
+### TS-24: A click with an expired token shows the session-expired screen and spawns nothing
+
+**Contract:** C5 · **Criteria:** SC2 · **Type:** UI · **Priority:** P2
+
+**Preconditions:** Clean state with RUN-PASS. Web UI started on port 4173 in Chrome or Chromium, the tab open on the printed URL, and DevTools open on **Application** > **Cookies** > `http://127.0.0.1:4173`.
+
+**Steps:**
+1. Select `Replay QA pass fixture` on the History tab. Confirm the **Replay spec** button is shown.
+2. In DevTools, delete the cookie `dw_token_4173`. Do not reload the page.
+3. Click **Replay spec**.
+4. Run `pgrep -f "duckwright.spec.ts --debug" | wc -l`.
+
+**Expected:**
+- Step 3: the page is replaced by the screen titled `Session expired` with the text `This page's token no longer works. Run duckwright --web again and open the new URL.` No Inspector or Chromium window opens, and no replay toast appears.
+- Step 4: `0`.
+
+### TS-25: An Inspector killed by a signal reports "closed", and `R` works again
+
+**Contract:** C1, C4 · **Criteria:** SC1 · **Type:** UI · **Priority:** P3
+
+**Preconditions:** Clean state with RUN-PASS. TUI started. Not on Windows (uses `pkill`).
+
+**Steps:**
+1. Press `tab`, select RUN-PASS, press `R`. Wait for the Inspector to open and leave it paused.
+2. In another shell, run `pkill -KILL -f "duckwright.spec.ts --debug"`.
+3. Run `pgrep -f "duckwright.spec.ts --debug" | wc -l`. Close any Chromium or Inspector window left behind.
+4. Press `R` again.
+5. Close the Inspector (click **Resume** until the browser closes).
+
+**Expected:**
+- Step 2: the TUI shows the info toast `Playwright Inspector closed for 20261007-090000-replay-pass` (not a `Playwright exited with code …` toast). Duckwright keeps running.
+- Step 3: `0`.
+- Step 4: info toast `opening 20261007-090000-replay-pass/duckwright.spec.ts in the Playwright Inspector` (not the `already open` error), and a new Inspector opens.
+- Step 5: info toast `Playwright Inspector closed for 20261007-090000-replay-pass`.
+
 ## Regression
 
 ### TS-R1: The existing TUI keys still work on a past run
@@ -528,4 +563,6 @@ Other data:
 - A web keyboard shortcut for replay.
 - Detecting a missing display or a missing Playwright browser before spawning.
 - Showing "replay open" state in the UIs.
+- C1's row "spawn `error` event or synchronous throw → `cannot start Playwright: <error message>` (lock released)". It cannot be reached from outside: `replaySpec` first checks that the spec file exists, and an existing spec file means its run folder (the spawn's working directory) exists, so the examples in the spec (cwd vanished, EACCES on the Playwright CLI) cannot be set up between that check and the spawn. The unit tests in `replay.test.ts` and `manager.test.ts` cover it (an `error` event before `spawn` and a synchronous throw both give this message and release the lock). SC5 is therefore covered by QA only for the "not installed" failure (TS-12) and the non-zero exit (TS-4).
+- C3's row "manager throws → `500 { "ok": false, "error": "internal error" }`". This is existing route behavior that the spec does not change, and QA cannot make the manager throw from outside.
 - Whether `@playwright/test` resolves from a folder under a `package.json` with `"type": "module"`: the spec says the outcome is not guaranteed (Error handling, last-but-two row), so there is no expected result to check.
