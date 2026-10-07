@@ -19,7 +19,7 @@
 
 1. **A late child `error` must not crash Duckwright.** After `spawn`, an `error` event with no listener would throw from the EventEmitter. `SpecReplays.launch` keeps a persistent `on("error")` listener. Pinned by Task 2, test `a late error after spawn is swallowed`.
 2. **Lock release on every path.** The lock is released on `exit`, on an `error` before `spawn`, and on a synchronous throw. It is never released on the second (refused) trigger. Pinned by Task 2 lock tests.
-3. **The run folder choice.** The latest session run beats the past folder after a re-run. A latest run with `workdir: ""` must not be reported as "has not run yet" (see Ruling R1). Pinned by Task 3, tests `replaySpec uses the latest session run after a re-run` and `replaySpec on a run without a folder`.
+3. **The run folder choice.** The latest session run beats the past folder after a re-run, and it counts only once it is no longer active (`active === false`). A latest run with `workdir: ""` has no folder: `#specOf` returns `null`, so `hasSpec` is false and `replaySpec` returns the spec's `<name> has not run yet`. Because `active` turns false only when `done` settles (after `run:end`), the manager re-emits the task snapshot at that moment so `hasSpec` becomes true. Pinned by Task 3, tests `replaySpec uses the latest session run after a re-run`, `replaySpec on a run without a folder` and `hasSpec is false while live and true after a passed run`.
 4. **The exit-code toast names the resolved absolute folder.** The text says `path.dirname(specPath)`, not `runs/<id>`. Pinned by Task 3 with a past run in a tmp folder outside `runs/`.
 5. **`R` fires with `hasSpec: false`, and the footer hides it.** These are two `SHARED` bindings, and help lists `R` exactly once. Pinned by Task 5 keys tests.
 
@@ -38,7 +38,7 @@
 
 **Checks:** `node --test test/packaging.test.ts`, `npm run typecheck`
 
-- [ ] **Step 1: Write the failing test.** In `test/packaging.test.ts` (line 45), change the expected keys to `["@playwright/test", "ink", "react"]`. Also assert `pkg.dependencies["@playwright/test"] === "^1.63.0"`.
+- [ ] **Step 1: Write the failing test.** In `test/packaging.test.ts`, rename the test `package_runtime_deps_are_ink_and_react` (line 44) to `package_runtime_deps_are_ink_react_and_playwright_test`, so the name fits the new dependency set. In it (line 45), change the expected keys to `["@playwright/test", "ink", "react"]`. Also assert `pkg.dependencies["@playwright/test"] === "^1.63.0"`.
 - [ ] **Step 2: Run it.** `Run: node --test test/packaging.test.ts` / `Expected: FAIL (keys are ["ink","react"])`
 - [ ] **Step 3: Implement.** In the worktree, run `npm install --save @playwright/test@^1.63.0`, then make sure `package.json` reads exactly `"@playwright/test": "^1.63.0"` under `dependencies` (fix it by hand if npm wrote a different range). Do not add it to devDependencies.
 - [ ] **Step 4: Run it.** `Run: node --test test/packaging.test.ts && npm run typecheck` / `Expected: PASS`
@@ -120,7 +120,6 @@
   - Exported message builders in `src/runs/manager.ts`:
     - `stillRunning(name)` = `` `${name} is still running; replay its spec when it finishes` ``
     - `notRunYet(name)` = `` `${name} has not run yet` ``
-    - `noRunFolder(name)` = `` `${name}'s latest run has no run folder, so it has no spec` `` (Ruling R1)
     - `noSpec(runId)` = `` `no spec for run ${runId}: only a passed run writes duckwright.spec.ts` ``
     - `openingToast(runId)` = `` `opening ${runId}/duckwright.spec.ts in the Playwright Inspector` ``
     - `closedToast(runId, code, specDir)`: for code `0`/`null`, `` `Playwright Inspector closed for ${runId}` ``. Otherwise `` `Playwright exited with code ${code} for ${runId}; run "npx playwright test duckwright.spec.ts --debug" in ${specDir} to see why` ``.
@@ -129,6 +128,7 @@
 **Checks:** `node --test test/runs/manager.test.ts`, `npm test`
 
 - [ ] **Step 1: Write the failing tests** in `test/runs/manager.test.ts`.
+  - **`<runId>` in expectations:** everywhere below, `<runId>` is `path.basename(workdir)` of the tmp folder the run uses (the past folder, or the fake handle's `workdir`). It is never `handle.id` (`run-N` in the fake).
   - **Test setup:** give `setup` an optional second argument `{ workdir?: (n: number) => string }`. The default stays `"/tmp/x"`, so existing tests are unchanged. Build an injected `new SpecReplays({ spawn: fakeSpawn, cli: () => ({ cli: "/pw/cli.js", nodeModules: "/pw" }) })`. `fakeSpawn` returns `EventEmitter` children (with `unref`) and records calls. Write spec files with `fs.writeFileSync(path.join(dir, "duckwright.spec.ts"), "")` in `tmpDir()` folders.
   - `hasSpec reflects the past folder's spec file`: a past run with `workdir` = a tmp dir containing the spec gives `hasSpec: true`. Without the file it gives `false`. A typed task that never ran gives `false`.
   - `hasSpec is false while live and true after a passed run`: start a task whose fake `workdir` is a tmp dir with the spec. While it is `running`, `hasSpec` is false. After `finish(outcome("pass"))` and `tick()`, `hasSpec` is true.
@@ -137,7 +137,7 @@
     - A running task gives `stillRunning(name)`, e.g. `"\"t\" is still running; replay its spec when it finishes"`.
     - A never-run typed task gives `'"t" has not run yet'`.
     - A past folder without the file gives `no spec for run <id>: only a passed run writes duckwright.spec.ts`.
-  - `replaySpec on a run without a folder`: the latest session run has `workdir: ""` and `id: ""` (an override of `startRun`). Finish it with a fail outcome. The result is `noRunFolder(name)`, not `notRunYet`, even when the task also has a past folder with a spec. `hasSpec` is false.
+  - `replaySpec on a run without a folder`: the latest session run has `workdir: ""` and `id: ""` (an override of `startRun`). Finish it with a fail outcome and `tick()`. The result is `notRunYet(name)` (`'"t" has not run yet'`), even when the task also has a past folder with a spec, and the fake spawn was not called. `hasSpec` is false.
   - `replaySpec already open`: a second call before the fake child exits gives `the spec of run <runId> is already open in the Playwright Inspector`, and spawn was called once.
   - `replaySpec spawn failure`: the fake child emits `error(new Error("boom"))` before `spawn`, giving `cannot start Playwright: boom`. No toast.
   - `replaySpec not installed`: with `cli: () => null`, the result is `NOT_INSTALLED`.
@@ -146,10 +146,11 @@
   - `replaySpec resolves a relative workdir against cwd`: a past run with `workdir: path.relative(process.cwd(), tmp)` gives spawn `cwd === tmp`.
 - [ ] **Step 2: Run it.** `Run: node --test test/runs/manager.test.ts` / `Expected: FAIL (replaySpec is not a function / hasSpec undefined)`
 - [ ] **Step 3: Implement** in `src/runs/manager.ts`:
-  - **`#specOf(task)`:** returns `{ runId, path } | { noFolder: true } | null`. If `task.runs` has a latest record, use its `handle.workdir`; when that is `""`, return `{ noFolder: true }`. With no session runs, use `task.past?.workdir`. With neither, return `null`. When there is a folder, return `runId = path.basename(workdir)` and `path = path.resolve(workdir, SPEC_NAME)`.
-  - **Liveness:** "live" means the task's state is `running`, `paused` or `stopping`, the same rule as the UIs. Use the latest session run even while its `active` flag is still settling (Ruling R2).
-  - **`#snapshot`:** sets `hasSpec = !live && spec has a path && fs.existsSync(path)`.
-  - **`replaySpec`:** follows the spec's order: no such task, live, `null` (not run yet), `noFolder`, file missing, launch. `onExit(code)` calls `this.notify("info", closedToast(runId, code, path.dirname(specPath)))`. On an ok launch, `this.notify("info", openingToast(runId))`.
+  - **`#specOf(task)`:** returns `{ runId: string; path: string } | null`, as in the spec. If `task.runs` has a latest record, it is the only candidate: use its `handle.workdir` once the record is no longer active (`active === false`). While it is still active, or when its `workdir` is `""`, return `null` (no fallback to the past folder). With no session runs, use `task.past?.workdir`. With neither, return `null`. When there is a folder, return `runId = path.basename(workdir)` and `path = path.resolve(workdir, SPEC_NAME)`.
+  - **Liveness:** "live" means the task's state is `running`, `paused` or `stopping`, the same rule as the UIs.
+  - **`#snapshot`:** sets `hasSpec = !live && spec !== null && fs.existsSync(spec.path)`, inside a try/catch that gives `false` on a filesystem error.
+  - **Re-emit when a run settles:** `active` turns false in the `handle.done.then(...)` callback, after the `run:end` snapshot was already sent. In that callback, right after `run.active = false`, keep setting `task.error` under its existing condition but call `this.#updated(task)` unconditionally (once), so the snapshot carries the final `hasSpec`. If an existing test asserts the exact number of `task:updated` events after a run ends, update its expectation and name it in the commit.
+  - **`replaySpec`:** follows the spec's order: no such task, live (`stillRunning`), `#specOf` is `null` (`notRunYet`), file missing (`noSpec`), launch. `onExit(code)` calls `this.notify("info", closedToast(runId, code, path.dirname(specPath)))`. On an ok launch, `this.notify("info", openingToast(runId))`.
   - Add `replaySpec` to `ManagerLike`, and `replays` to `ManagerOptions`.
   - Update `FakeManager` as described under Interfaces. Add `hasSpec: false` to the `task()` fixtures in `test/tui/keys.test.ts` and `test/tui/state.test.ts`, and to any other literal the typecheck flags.
 - [ ] **Step 4: Run it.** `Run: node --test test/runs/manager.test.ts && npm test` / `Expected: PASS`
@@ -223,7 +224,7 @@
 
 **Files:**
 - Modify: `web/src/actions.ts`, `web/src/MainPane.tsx`
-- Test: `test/web/actions.test.ts`
+- Test: `test/web/actions.test.ts`, `test/web/ui.smoke.test.ts` (opt-in browser test, see Step 1)
 
 **Contracts:** C5
 
@@ -231,7 +232,7 @@
 - Consumes: `POST /api/tasks/:id/replay`, `TaskSnapshot.hasSpec`.
 - Produces, in `web/src/actions.ts`:
   - `export const replaySpec = (d: Dispatch, id: TaskId) => shown(d, api.post(`/api/tasks/${id}/replay`));`
-  - `export function replayTitle(task: TaskSnapshot): string | null`: returns `null` for a live task, `"Open duckwright.spec.ts in the Playwright Inspector"` when `task.hasSpec`, and `"No spec yet: only a passed run writes duckwright.spec.ts"` otherwise (Ruling R3).
+  - `export function replayTitle(task: TaskSnapshot): string | null`: returns `null` for a live task, `"Open duckwright.spec.ts in the Playwright Inspector"` when `task.hasSpec`, and `"No spec yet: only a passed run writes duckwright.spec.ts"` otherwise. A pure function, so the button's visibility rule and titles are unit-tested without a browser.
 
 **Checks:** `node --test test/web/actions.test.ts`, `npm run typecheck`
 
@@ -240,10 +241,16 @@
   - `replaySpec shows a 409 as an error toast`: a 409 `{ ok: false, error: '"t" has not run yet' }` reply dispatches exactly `[{ type: "toast", level: "error", message: '"t" has not run yet' }]`.
   - `replaySpec 401 expires the session`: the actions are `["expired", "toast"]`.
   - `replayTitle`: it returns the two exact titles for `passed` with `hasSpec: true`/`false` and for `idle` with `hasSpec: false`. It returns `null` for `running`, `paused` and `stopping`. Build tasks with `snapshot()` from `test/tui/fake-manager.ts`.
+  - **Smoke test (opt-in, not a task check):** `test/web/ui.smoke.test.ts` is matched by `npm test` but skips itself unless `DUCKWRIGHT_UI_SMOKE=1` is set and `dist/web-ui` is built, so it never runs a browser inside `npm test`. Extend its existing test:
+    - After the first task is selected and before **Start** is clicked (task `idle`, `hasSpec: false`), expect `page.getByRole("button", { name: "Replay spec" })` to be visible with the title `No spec yet: only a passed run writes duckwright.spec.ts`.
+    - After `manager.update(1, { state: "running", ... })`, expect that button to be hidden.
+    - After `manager.update(1, { state: "passed" })`, also update `hasSpec: true`. Expect the button's title to be `Open duckwright.spec.ts in the Playwright Inspector`. Click it and poll `manager.log` (as the test already does for `add:`) until it includes `replaySpec:1`.
+    - Then set `manager.replayResult = { ok: false, error: "no spec for run r1: only a passed run writes duckwright.spec.ts" }`, click again, and wait for that text on the page (the 409 error toast). Do this before the **Quit** step.
+  - Because that smoke test is skipped in `npm test`, button placement and click wiring are covered in this run by `npm run typecheck`, code review and the QA test plan. Running the smoke test is listed under Manual e2e.
 - [ ] **Step 2: Run it.** `Run: node --test test/web/actions.test.ts` / `Expected: FAIL (replaySpec / replayTitle not exported)`
 - [ ] **Step 3: Implement** both exports. In `MainPane.tsx` `TaskView`, right after the **Options** button, add `{replayTitle(task) !== null ? <Button title={replayTitle(task)!} onClick={() => void replaySpec(dispatch, id)}>Replay spec</Button> : null}`. Never set `disabled`.
 - [ ] **Step 4: Run it.** `Run: node --test test/web/actions.test.ts && npm run typecheck` / `Expected: PASS`
-- [ ] **Step 5: Commit.** `git add web/src/actions.ts web/src/MainPane.tsx test/web/actions.test.ts && git commit -m "feat: add the Replay spec button to the web UI"`
+- [ ] **Step 5: Commit.** `git add web/src/actions.ts web/src/MainPane.tsx test/web/actions.test.ts test/web/ui.smoke.test.ts && git commit -m "feat: add the Replay spec button to the web UI"`
 
 ---
 
@@ -275,4 +282,5 @@
 
 - [ ] On a desktop machine with a display, do a passed run and press `R` in the TUI. Confirm that the Inspector opens with `duckwright.spec.ts` and can step through it.
 - [ ] Repeat with **Replay spec** in `duckwright --web`.
+- [ ] Run the browser smoke test, which covers the **Replay spec** button's placement, titles, hiding and click wiring: `npm run build && DUCKWRIGHT_UI_SMOKE=1 node --test test/web/ui.smoke.test.ts`.
 - [ ] Repeat from a folder whose `package.json` has `"type": "module"`, to check that `@playwright/test` resolves there.
