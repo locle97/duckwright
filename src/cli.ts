@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
@@ -6,10 +7,11 @@ import { ExportError, exportRun } from "./export.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
+import { PlanError, isPlanFolder, runPlanner, writePlan } from "./plan.ts";
 import { attachPlain, printOutcome } from "./report/plain.ts";
 import { createTtyHuman } from "./report/ttyHuman.ts";
 import { RunManager } from "./runs/manager.ts";
-import type { ManagerLike } from "./runs/manager.ts";
+import type { ManagerLike, Planner } from "./runs/manager.ts";
 import { loadPastRuns } from "./runs/past.ts";
 import type { PastRun } from "./runs/past.ts";
 import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
@@ -47,6 +49,8 @@ export interface CliDeps {
   isTTY(): boolean;
   loadTui(): Promise<TuiModule>;
   loadPastRuns(limit: number): { runs: PastRun[]; skipped: number };
+  /** Plan mode's planner; by default `claude -p` with the planner prompt. */
+  planner?: Planner;
   /** Where the TOTP secret is read from. */
   env: Record<string, string | undefined>;
   /** The person to ask for a 2FA code in print mode, named by `label`. Only used when `isTTY()` is true. */
@@ -73,6 +77,59 @@ function isFile(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+function plannerOf(deps: CliDeps): Planner {
+  return deps.planner ?? ((o) => runPlanner({ ...o, promptFile: deps.prompts.planner }));
+}
+
+/** Why a --plan argument cannot be planned or opened, or null. */
+function planProblem(deps: CliDeps, plan: string): string | null {
+  let dir: boolean;
+  try {
+    dir = fs.statSync(plan).isDirectory();
+  } catch {
+    return `${plan}: not found`;
+  }
+  if (dir) return isPlanFolder(plan) ? null : `${plan}: not a planned folder (no plan.json)`;
+  if (deps.planner === undefined && !isFile(deps.prompts.planner)) return `planner prompt not found: ${deps.prompts.planner} (is the installation complete?)`;
+  return null;
+}
+
+/** -p with --plan: plan the file, write the tasks, say where they are; nothing runs. */
+async function planMain(deps: CliDeps, args: RunArgs): Promise<number> {
+  const plan = args.plan!;
+  const problem = planProblem(deps, plan);
+  if (problem) {
+    deps.stderr(problem);
+    return 2;
+  }
+  if (isPlanFolder(plan)) {
+    deps.stderr(`${plan}: already planned; run it with duckwright -p -f ${plan}, or open it in the TUI with duckwright plan ${plan}`);
+    return 2;
+  }
+  if (!deps.which("claude")) {
+    deps.stderr("claude CLI not found on PATH (install Claude Code)");
+    return 2;
+  }
+  deps.stdout(`Planning ${plan}…`);
+  let r: Awaited<ReturnType<Planner>>;
+  try {
+    r = await plannerOf(deps)({ planFile: plan, model: args.model, signal: deps.signal });
+  } catch (e) {
+    if (deps.signal.aborted) return 130;
+    deps.stderr(`plan error: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+  const loaded = writePlan(r.doc, plan);
+  deps.stdout(`Plan: ${loaded.tasks.length} task${loaded.tasks.length === 1 ? "" : "s"} in ${loaded.folder}${path.sep}  Cost: $${fixed4(r.cost)}`);
+  if (loaded.setupPath !== null) deps.stdout(`Shared setup: ${loaded.setupPath}`);
+  for (const t of loaded.tasks) deps.stdout(`  ${t.path}`);
+  for (const n of r.doc.notes) deps.stdout(`Before you run: ${n}`);
+  for (const x of r.doc.skipped) deps.stdout(`Skipped ${x.id} ${x.title}: ${x.reason}`);
+  deps.stdout(`Review them in the TUI with: duckwright plan ${loaded.folder}`);
+  deps.stdout(`Or run them all with: duckwright -p -f ${loaded.folder}${path.sep}`);
+  return 0;
 }
 
 function preflight(deps: CliDeps, skill: string, state: string | null): string | null {
@@ -173,7 +230,7 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
 }
 
 async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
-  const err = preflightArgs(deps, args);
+  const err = preflightArgs(deps, args) ?? (args.plan !== null ? planProblem(deps, args.plan) : null);
   if (err) {
     deps.stderr(err);
     return 2;
@@ -191,6 +248,7 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
       onWarning: (m) => manager.notify("error", m),
     }),
     preflight: (a) => preflightArgs(deps, a),
+    planner: plannerOf(deps),
   });
   // Load every file before the TUI opens, so a bad one is reported on the plain terminal.
   const given = args.task !== null || args.file !== null ? manager.add({ mentions: args.file ?? [], typed: args.task }) : null;
@@ -204,6 +262,10 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
   const handle = tui.startTui({ manager, theme: args.theme ?? "auto", notices });
   // Started once the TUI is up, so it sees every run from its first event.
   if (given?.ok) manager.startQueued(given.added);
+  if (args.plan !== null) {
+    const planned = manager.plan(args.plan);
+    if (!planned.ok) manager.notify("error", planned.error);
+  }
   // An outside SIGINT aborts the signal (and with it every run): close the TUI too, and exit 130.
   const onAbort = (): void => handle.quit();
   deps.signal.addEventListener("abort", onAbort, { once: true });
@@ -237,6 +299,11 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
 
 async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
   if (argv[0] === "export") return exportMain(deps, argv.slice(1));
+  // `duckwright plan PLAN ...` is `duckwright --plan PLAN ...`.
+  if (argv[0] === "plan") {
+    if (argv.length < 2 || argv[1]!.startsWith("-")) throw usage("plan: give a plan file or a planned folder");
+    argv = ["--plan", ...argv.slice(1)];
+  }
   const parsed = parseRunArgs(argv, deps.prompts.defaultSkill);
   if (parsed.kind === "help") {
     deps.stdout(parsed.text.trimEnd());
@@ -258,6 +325,10 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     if (args.maxParallel !== null) throw usage("--max-parallel applies to the TUI, not with -p");
     if (args.past !== undefined) throw usage("--past applies to the TUI, not with -p");
     if (args.theme !== undefined) throw usage("--theme applies to the TUI, not with -p");
+  }
+  if (args.plan !== null) {
+    if (args.task !== null || args.file !== null) throw usage("--plan only writes task files with -p: give no task or --file");
+    return planMain(deps, args);
   }
   if (args.task !== null && args.file !== null) throw usage("give a task or --file, not both");
   if (args.task === null && args.file === null) {

@@ -21,10 +21,10 @@ before(() => {
 test("package_bundles_build_and_prompts", () => {
   for (const p of [
     "dist/bin.js", "dist/cli.js", "prompts/system.md", "prompts/playwright-cli.md",
-    "prompts/snapshot-full.md", "prompts/snapshot-grep.md", "prompts/snapshot-hybrid.md",
+    "prompts/snapshot-full.md", "prompts/snapshot-grep.md", "prompts/snapshot-hybrid.md", "prompts/planner.md",
     "package.json", "README.md", "LICENSE",
   ]) assert.ok(files.includes(p), p);
-  assert.ok(!files.some((p) => /^(src|test|scripts|docs|examples|benchmark_tasks)\//.test(p)));
+  assert.ok(!files.some((p) => /^(src|test|scripts|docs|examples|benchmark_tasks|benchmark_plans)\//.test(p)));
 });
 
 test("package_name_and_command", () => {

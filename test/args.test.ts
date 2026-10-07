@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
-    print: false, maxParallel: null, network: true, twofaTimeout: 300,
+    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
-    print: false, maxParallel: null, network: true, twofaTimeout: 300,
+    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300,
   });
 });
 
@@ -256,6 +256,15 @@ test("export_api_flag", () => {
 test("export_help_mentions_api", () => {
   const p = parseExportArgs(["-h"]);
   assert.match(p.kind === "help" ? p.text : "", /--api/);
+});
+
+test("plan_option", () => {
+  const p = parseRunArgs(["--plan", "docs/qa.md", "--model", "opus"], "s.md");
+  assert.ok(p.kind === "args");
+  assert.equal(p.args.plan, "docs/qa.md");
+  assert.equal(p.args.model, "opus");
+  assert.throws(() => parseRunArgs(["--plan"], "s.md"), /argument --plan: expected one argument/);
+  assert.ok(RUN_USAGE.includes("[--plan PLAN]"));
 });
 
 test("twofa_timeout_default_and_flag", () => {

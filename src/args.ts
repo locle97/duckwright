@@ -23,6 +23,8 @@ export interface RunArgs {
   snapshot: SnapshotMode;
   print: boolean;
   maxParallel: number | null;
+  /** A plan file to plan, or a planned folder to open. */
+  plan: string | null;
   past?: number;
   theme?: ThemeName;
 }
@@ -47,7 +49,7 @@ export class UsageError extends Error {
 
 export type Parsed<T> = { kind: "args"; args: T } | { kind: "help"; text: string } | { kind: "version" };
 
-export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE ...]]\n"
+export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE ...]] [--plan PLAN]\n"
   + "                  [--max-steps MAX_STEPS] [--model MODEL]\n"
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
   + "                  [--state FILE] [--allow-file-access]\n"
@@ -74,6 +76,13 @@ options:
                         read the task, and optional settings, from a .txt or
                         .md file; several files, or a folder of them, run one
                         after another
+  --plan PLAN           plan mode: Claude breaks the test plan PLAN into one
+                        task file per scenario under tasks/<plan>/, with the
+                        shared setup in its own file, and the TUI lists them
+                        to review, reorder, edit and run in order. PLAN can
+                        also be a planned folder, to open it again. With -p,
+                        only write the task files. Same as: duckwright plan
+                        PLAN
   --max-steps MAX_STEPS
   --model MODEL
   --headed, --no-headed
@@ -107,7 +116,8 @@ options:
 
 With no -p, duckwright opens the interactive TUI and starts any task or task
 files given. Run a task file and exit: duckwright -p -f tasks/login.md. To
-turn an earlier run into a test: duckwright export runs/<id>
+turn an earlier run into a test: duckwright export runs/<id>. Plan a test
+plan: duckwright plan docs/qa-plan.md
 `;
 
 export const EXPORT_USAGE = "usage: duckwright export [-h] [--api] [-o FILE] run";
@@ -182,12 +192,12 @@ const RUN_SPEC: OptionSpec = {
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
     "--snapshot-grep": "--snapshot-grep", "-p": "-p/--print", "--print": "-p/--print", "--max-parallel": "--max-parallel",
-    "--past": "--past", "--theme": "--theme",
+    "--past": "--past", "--theme": "--theme", "--plan": "--plan",
   },
   shortWithValue: ["-f"],
 };
 
-const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme", "--twofa-timeout"];
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme", "--plan", "--twofa-timeout"];
 
 // Python's int(): optional sign, digits with single underscores between them, spaces around.
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
@@ -200,7 +210,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid", network: true,
-    print: false, maxParallel: null, twofaTimeout: 300,
+    print: false, maxParallel: null, plan: null, twofaTimeout: 300,
     ...settings,
   };
   const extras: string[] = [];
@@ -261,7 +271,8 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
         if (n < 1) fail("argument --twofa-timeout: must be at least 1");
         if (n > MAX_TWOFA_TIMEOUT_SEC) fail(`argument --twofa-timeout: must be at most ${MAX_TWOFA_TIMEOUT_SEC}`);
         args.twofaTimeout = n;
-      } else if (name === "--model") args.model = v!;
+      } else if (name === "--plan") args.plan = v!;
+      else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
       else if (name === "--session") args.session = v!;
       else args.state = v!;

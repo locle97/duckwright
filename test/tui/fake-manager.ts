@@ -3,7 +3,8 @@ import type { Decision } from "../../src/brain.ts";
 import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import { taskName } from "../../src/runs/manager.ts";
 import type {
-  AddResult, Globals, ManagerEvent, ManagerLike, Overrides, StartResult, Submission, TaskId, TaskSnapshot,
+  AddResult, EditTarget, Globals, ManagerEvent, ManagerLike, Overrides, PlanId, PlanResult, PlanSnapshot, Result, StartResult,
+  Submission, TaskId, TaskSnapshot,
 } from "../../src/runs/manager.ts";
 
 export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> = {}): TaskSnapshot {
@@ -15,8 +16,22 @@ export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> =
   };
 }
 
+export function planSnapshot(id: PlanId, taskIds: TaskId[], over: Partial<PlanSnapshot> = {}): PlanSnapshot {
+  return {
+    id, name: "qa-plan.md", source: "qa-plan.md", folder: "tasks/qa-plan", state: "ready", error: null, cost: 0.12,
+    startedAt: 0, endedAt: 1000, createdAt: 0, setup: "Log in as qa.", setupPath: "tasks/qa-plan/shared/setup.md",
+    notes: [], skipped: [], taskIds, queued: [], ...over,
+  };
+}
+
 export class FakeManager implements ManagerLike {
   tasks: TaskSnapshot[];
+  plansValue: PlanSnapshot[] = [];
+  /** What plan() returns. */
+  planResult: PlanResult = { ok: true, id: 1 };
+  /** What readSource() and saveSource() return. */
+  sourceText = "the source";
+  saveResult: Result = { ok: true };
   /** Every call, in order, as "method" or "method:arg". */
   log: string[] = [];
   overrides: Array<{ id: TaskId; o: Overrides }> = [];
@@ -129,6 +144,52 @@ export class FakeManager implements ManagerLike {
   stopAll(): Promise<void> {
     this.log.push("stopAll");
     return this.stopAllResult;
+  }
+
+  plans(): PlanSnapshot[] {
+    return [...this.plansValue];
+  }
+
+  plan(source: string): PlanResult {
+    this.log.push(`plan:${source}`);
+    return this.planResult;
+  }
+
+  retryPlan(id: PlanId): Result {
+    this.log.push(`retryPlan:${id}`);
+    return { ok: true };
+  }
+
+  cancelPlan(id: PlanId): void {
+    this.log.push(`cancelPlan:${id}`);
+  }
+
+  runPlan(id: PlanId, which: "all" | "failed"): Result {
+    this.log.push(`runPlan:${id}:${which}`);
+    return { ok: true };
+  }
+
+  stopPlan(id: PlanId): void {
+    this.log.push(`stopPlan:${id}`);
+  }
+
+  removePlan(id: PlanId): boolean {
+    this.log.push(`removePlan:${id}`);
+    return true;
+  }
+
+  movePlanTask(id: TaskId, delta: number): void {
+    this.log.push(`movePlanTask:${id}:${delta}`);
+  }
+
+  readSource(target: EditTarget): { ok: true; text: string } | { ok: false; error: string } {
+    this.log.push(`readSource:${target.kind === "task" ? target.id : `setup${target.planId}`}`);
+    return { ok: true, text: this.sourceText };
+  }
+
+  saveSource(target: EditTarget, text: string): Result {
+    this.log.push(`saveSource:${target.kind === "task" ? target.id : `setup${target.planId}`}:${text}`);
+    return this.saveResult;
   }
 
   /** Replace a task's snapshot and emit `task:updated`. */

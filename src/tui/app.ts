@@ -12,7 +12,7 @@ import { AddBox, addBoxHeight } from "./addBox.ts";
 import { nodeReadDir, walk } from "./candidates.ts";
 import type { ReadDir } from "./candidates.ts";
 import { Completion } from "./completion.ts";
-import { submit } from "./compose.ts";
+import { EMPTY_COMPOSE, insertText, submit } from "./compose.ts";
 import { Confirm, question } from "./confirm.ts";
 import { Detail } from "./detail.ts";
 import { Footer, quittingText } from "./footer.ts";
@@ -30,6 +30,7 @@ import { editingGlobals, initialState, pendingTwofa, reduce, twofaWaitKey } from
 import { twofaKey } from "./twofaInput.ts";
 import { TwofaDialog } from "./twofaDialog.ts";
 import type { UiAction, ViewState } from "./state.ts";
+import { Editor } from "./editor.ts";
 import { DEFAULT_THEME } from "./theme.ts";
 import type { Theme } from "./theme.ts";
 import { ThemeContext } from "./themeContext.ts";
@@ -86,7 +87,7 @@ function Workspace(p: AppProps): ReactElement {
   // The view state lives in a ref that `dispatch` updates at once, so a key that arrives before
   // React re-renders (held keys, split pastes) is mapped against the state the previous key left.
   const state = useRef<ViewState | null>(null);
-  if (state.current === null) state.current = initialState(Date.now(), manager.list(), p.notices ?? [], manager.globals());
+  if (state.current === null) state.current = initialState(Date.now(), manager.list(), p.notices ?? [], manager.globals(), manager.plans());
   const s = state.current;
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const dispatch = (a: UiAction): void => {
@@ -166,6 +167,54 @@ function Workspace(p: AppProps): ReactElement {
         }
         dispatch({ type: "compose", next: submit((state.current ?? s).compose).state });
         for (const d of r.duplicates) dispatch({ type: "toast", level: "info", message: `already added: ${d}` });
+        return;
+      }
+      case "planSubmission": {
+        const r = manager.plan(c.path);
+        if (!r.ok) {
+          dispatch({ type: "addFailed", errors: [r.error], cursor: (state.current ?? s).compose.cursor });
+          return;
+        }
+        dispatch({ type: "compose", next: submit((state.current ?? s).compose).state });
+        dispatch({ type: "composeFor", value: "task" });
+        dispatch({ type: "escape" });
+        dispatch({ type: "selectPlan", id: r.id });
+        return;
+      }
+      case "plan": {
+        const r = c.call === "runAll" ? manager.runPlan(c.id, "all")
+          : c.call === "runFailed" ? manager.runPlan(c.id, "failed")
+          : c.call === "retry" ? manager.retryPlan(c.id)
+          : null;
+        if (c.call === "stop") manager.stopPlan(c.id);
+        if (c.call === "cancel") manager.cancelPlan(c.id);
+        if (c.call === "remove" && !manager.removePlan(c.id)) dispatch({ type: "toast", level: "error", message: "the plan is busy" });
+        if (r !== null && !r.ok) dispatch({ type: "toast", level: "error", message: r.error });
+        return;
+      }
+      case "move":
+        manager.movePlanTask(c.id, c.delta);
+        return;
+      case "openEdit": {
+        const r = manager.readSource(c.target);
+        if (!r.ok) {
+          dispatch({ type: "toast", level: "error", message: r.error });
+          return;
+        }
+        const compose = { ...insertText(EMPTY_COMPOSE, r.text), cursor: 0 };
+        dispatch({ type: "edit", value: { target: c.target, title: c.title, original: r.text, compose, error: null } });
+        return;
+      }
+      case "saveEdit": {
+        const e = (state.current ?? s).edit;
+        if (e === null) return;
+        const r = manager.saveSource(e.target, e.compose.text);
+        if (!r.ok) {
+          dispatch({ type: "editFailed", error: r.error });
+          return;
+        }
+        dispatch({ type: "edit", value: null });
+        dispatch({ type: "toast", level: "info", message: "saved" });
         return;
       }
       case "saveOverrides":
@@ -251,15 +300,17 @@ function Workspace(p: AppProps): ReactElement {
       key: "form", form: openForm(null, s.globals.base, s.globals.overrides, s.optionsSelected), title: "Global options", note: "⏎ edit", ...area,
     })
     : null;
+  // The editor stays drawn under its discard question.
+  const editor = s.edit !== null && (s.mode === "edit" || s.mode === "confirm") ? h(Editor, { key: "editor", edit: s.edit, ...area }) : null;
 
   return h(Box, { flexDirection: "column", width: columns, height: rows },
     h(Header, { s, width: columns }),
     h(Box, { flexDirection: "row", width: columns, height: paneHeight, flexShrink: 0 },
-      ...panes, overlay,
+      ...panes, editor, overlay,
       s.mode === "compose" ? h(Completion, { key: "completion", s, width: columns, paneHeight }) : null,
       h(Toasts, { key: "toasts", toasts: s.toasts, width: columns })),
     h(AddBox, {
-      compose: s.compose, focused: s.mode === "compose", width: columns,
+      compose: s.compose, focused: s.mode === "compose", width: columns, forPlan: s.composeFor === "plan",
       exists: files.current.exists, errors: s.addErrors, theme: p.theme,
     }),
     h(Footer, { s, width: columns }));

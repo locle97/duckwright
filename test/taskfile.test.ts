@@ -325,6 +325,28 @@ test("network_key_bad_value", () => {
   assert.equal(err(p), `${p}:2: network must be true or false, got "maybe"`);
 });
 
+test("setup_file_goes_before_the_task", () => {
+  const dir = tmpDir();
+  w(dir, "  Log in as qa@example.com\n", "shared/setup.md");
+  const tf = loadTaskFile(w(dir, "---\nsetup: shared/setup.md\nmodel: opus\n---\nOpen settings"));
+  assert.equal(tf.task, "Setup (do this first, then the task below):\nLog in as qa@example.com\n\nTask:\nOpen settings");
+  assert.deepEqual(tf.settings, { model: "opus" });
+  assert.equal(tf.setup, path.join(dir, "shared", "setup.md"));
+});
+
+test("no_setup_is_null", () => {
+  assert.equal(loadTaskFile(w(tmpDir(), "Go")).setup, null);
+});
+
+test("missing_or_empty_setup_file_is_an_error", () => {
+  const dir = tmpDir();
+  const p = w(dir, "---\nsetup: nope.md\n---\nGo");
+  assert.equal(err(p), `${p}: setup ${path.join(dir, "nope.md")}: file not found`);
+  w(dir, " \n", "empty.md");
+  const q = w(dir, "---\nsetup: empty.md\n---\nGo", "q.md");
+  assert.equal(err(q), `${q}: setup ${path.join(dir, "empty.md")} is empty`);
+});
+
 test("front_matter_twofa_timeout", () => {
   const tmp = tmpDir();
   const file = w(tmp, "---\ntwofa-timeout: 45\n---\nlog in\n");

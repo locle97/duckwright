@@ -2,18 +2,17 @@
 // components render. No ink/react here; labels are raw (sanitising happens at render time).
 import type { ControlState, Phase, RunEvent, RunOutcome } from "../events.ts";
 import type { NetworkEntry } from "../network.ts";
-import type { Globals, ManagerEvent, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
+import type { EditTarget, Globals, ManagerEvent, PlanId, PlanSnapshot, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
 import { rank } from "./candidates.ts";
 import type { Candidate, CandidateIndex } from "./candidates.ts";
 import { EMPTY_COMPOSE, mentionAt } from "./compose.ts";
 import type { ComposeState } from "./compose.ts";
-import { visibleIndexes } from "./filter.ts";
-import { newestFirst } from "./order.ts";
+import { matches, visibleIndexes } from "./filter.ts";
 import { FIELD_COUNT } from "./form.ts";
 import type { FormState } from "./form.ts";
 
 /** `quitting`: a confirmed quit is stopping the runs; the panes stay and only Ctrl-C acts. */
-export type Mode = "list" | "detail" | "options" | "compose" | "form" | "help" | "confirm" | "filter" | "quitting";
+export type Mode = "list" | "detail" | "options" | "compose" | "form" | "help" | "confirm" | "filter" | "edit" | "quitting";
 
 export interface StepView {
   step: number;
@@ -54,14 +53,38 @@ export interface RunView {
 
 export interface Toast { id: number; level: "info" | "error"; message: string; until: number }
 
+/** The editor over the panes: a task file (or typed task) or a plan's shared setup, as text. */
+export interface EditState {
+  target: EditTarget;
+  /** What is being edited, for the editor's title. Raw. */
+  title: string;
+  /** The text as opened, to tell whether there is anything to save or lose. */
+  original: string;
+  compose: ComposeState;
+  /** Why the last save was refused. */
+  error: string | null;
+}
+
+/** One sidebar row: a plan's header, or a task (under its plan when `planId` is set). */
+export type Row = { kind: "plan"; plan: PlanSnapshot } | { kind: "task"; index: number; planId: PlanId | null };
+
+export type Confirm =
+  | { kind: "quit"; count: number } | { kind: "remove"; taskId: number } | { kind: "removePlan"; planId: PlanId }
+  | { kind: "discard" };
+
 export interface ViewState {
   now: number;
   openedAt: number;
   tasks: TaskSnapshot[];
+  plans: PlanSnapshot[];
+  /** Plans whose task rows are hidden. */
+  collapsed: PlanId[];
   /** Keyed by run id. */
   runs: Record<string, RunView>;
   /** Index into `tasks`. */
   selected: number;
+  /** Set when a plan's header row is selected rather than a task. */
+  selectedPlan: PlanId | null;
   focus: "list" | "detail" | "options";
   /** The highlighted row of the options pane while it has the focus. */
   optionsSelected: number;
@@ -71,6 +94,9 @@ export interface ViewState {
   /** The query being edited (non-null only in filter mode). */
   filterDraft: string | null;
   compose: ComposeState;
+  /** What the add box submits: a task, or a plan file to plan. */
+  composeFor: "task" | "plan";
+  edit: EditState | null;
   /** The @ completion list, while open: the folder walk it ranks, and the highlighted row. */
   completion: { index: CandidateIndex; highlight: number } | null;
   /** Why the last add-box submission was refused; cleared when the text changes. */
@@ -78,7 +104,7 @@ export interface ViewState {
   form: FormState | null;
   /** The global options; null until the manager reports them. */
   globals: Globals | null;
-  confirm: { kind: "quit"; count: number } | { kind: "remove"; taskId: number } | null;
+  confirm: Confirm | null;
   toasts: Toast[];
   ctrlC: number;
 }
@@ -94,7 +120,9 @@ export type UiAction =
   | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" } | { type: "quitting" }
   | { type: "completion"; value: ViewState["completion"] } | { type: "completionMove"; delta: number }
   | { type: "addFailed"; errors: string[]; cursor: number } | { type: "selectTask"; id: TaskId }
-  | { type: "openFilter" } | { type: "filterEdit"; query: string } | { type: "filterKeep" } | { type: "filterClear" };
+  | { type: "openFilter" } | { type: "filterEdit"; query: string } | { type: "filterKeep" } | { type: "filterClear" }
+  | { type: "selectPlan"; id: PlanId } | { type: "collapse"; id: PlanId } | { type: "composeFor"; value: "task" | "plan" }
+  | { type: "edit"; value: EditState | null } | { type: "editText"; next: ComposeState } | { type: "editFailed"; error: string };
 
 const TOAST_MS = 4000;
 
@@ -130,15 +158,16 @@ function replayPast(s: ViewState, task: TaskSnapshot): ViewState {
 }
 
 export function initialState(
-  now: number, tasks: TaskSnapshot[] = [], notices: string[] = [], globals: Globals | null = null,
+  now: number, tasks: TaskSnapshot[] = [], notices: string[] = [], globals: Globals | null = null, plans: PlanSnapshot[] = [],
 ): ViewState {
   let s: ViewState = {
-    now, openedAt: now, tasks, runs: {}, selected: 0, focus: "list", optionsSelected: 0, mode: "list", filter: "", filterDraft: null,
-    compose: EMPTY_COMPOSE, completion: null, addErrors: [], form: null, globals, confirm: null, toasts: [], ctrlC: 0,
+    now, openedAt: now, tasks, plans, collapsed: [], runs: {}, selected: 0, selectedPlan: null, focus: "list", optionsSelected: 0,
+    mode: "list", filter: "", filterDraft: null, compose: EMPTY_COMPOSE, composeFor: "task", edit: null, completion: null, addErrors: [],
+    form: null, globals, confirm: null, toasts: [], ctrlC: 0,
   };
   for (const t of tasks) s = replayPast(s, t);
   for (const n of notices) s = addToast(s, "info", n);
-  return { ...s, selected: visibleTasks(s)[0] ?? 0 };
+  return selectRow(s, visibleRows(s)[0]);
 }
 
 /** Whether the open form edits the global options (rather than one task's). */
@@ -151,20 +180,115 @@ export function activeQuery(s: ViewState): string {
   return s.filterDraft ?? s.filter;
 }
 
-/** Indexes into `tasks` that pass the active filter, in display order (newest first). */
-export function visibleTasks(s: ViewState): number[] {
-  const shown = new Set(visibleIndexes(s.tasks, activeQuery(s)));
-  return newestFirst(s.tasks).filter((i) => shown.has(i));
+/**
+ * The sidebar rows in display order: tasks and plans newest first; under each plan its tasks in the
+ * plan's order, unless it is collapsed. With a filter, a plan shows when its name or one of its tasks matches.
+ */
+export function visibleRows(s: ViewState): Row[] {
+  const query = activeQuery(s);
+  const shown = new Set(visibleIndexes(s.tasks, query));
+  const planIds = new Set(s.plans.map((p) => p.id));
+  const indexOf = new Map(s.tasks.map((t, i) => [t.id, i]));
+  type Entry = { createdAt: number; id: number; rows: Row[] };
+  const entries: Entry[] = [];
+  s.tasks.forEach((t, i) => {
+    if (t.planId !== undefined && planIds.has(t.planId)) return;
+    if (shown.has(i)) entries.push({ createdAt: t.createdAt, id: t.id, rows: [{ kind: "task", index: i, planId: null }] });
+  });
+  for (const plan of s.plans) {
+    const tasks = plan.taskIds.flatMap((id) => {
+      const i = indexOf.get(id);
+      return i !== undefined && shown.has(i) ? [i] : [];
+    });
+    if (query !== "" && tasks.length === 0 && !matches({ name: plan.name, text: plan.source }, query)) continue;
+    const open = !s.collapsed.includes(plan.id);
+    entries.push({
+      createdAt: plan.createdAt, id: plan.id,
+      rows: [{ kind: "plan", plan }, ...(open ? tasks.map((index): Row => ({ kind: "task", index, planId: plan.id })) : [])],
+    });
+  }
+  entries.sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+  return entries.flatMap((e) => e.rows);
 }
 
-/** A hidden selection moves to the first visible task; unchanged when none is visible. */
+/** Indexes into `tasks` that the sidebar shows, in display order. */
+export function visibleTasks(s: ViewState): number[] {
+  return visibleRows(s).flatMap((r) => (r.kind === "task" ? [r.index] : []));
+}
+
+const sameRow = (a: Row, b: Row): boolean =>
+  a.kind === "plan" ? b.kind === "plan" && a.plan.id === b.plan.id : b.kind === "task" && a.index === b.index;
+
+/** Where the selection is in `rows`, or -1 when its row is not shown. */
+export function selectedRowIndex(s: ViewState, rows: Row[] = visibleRows(s)): number {
+  return rows.findIndex((r) => (s.selectedPlan !== null
+    ? r.kind === "plan" && r.plan.id === s.selectedPlan
+    : r.kind === "task" && r.index === s.selected));
+}
+
+function selectRow(s: ViewState, r: Row | undefined): ViewState {
+  if (r === undefined) return { ...s, selectedPlan: null, selected: 0 };
+  return r.kind === "plan" ? { ...s, selectedPlan: r.plan.id } : { ...s, selectedPlan: null, selected: r.index };
+}
+
+/** A hidden selection moves to the first visible row; unchanged when none is visible. */
 function snap(s: ViewState): ViewState {
-  const vis = visibleTasks(s);
-  return vis.length === 0 || vis.includes(s.selected) ? s : { ...s, selected: vis[0]! };
+  const rows = visibleRows(s);
+  return rows.length === 0 || selectedRowIndex(s, rows) !== -1 ? s : selectRow(s, rows[0]);
+}
+
+/**
+ * After rows went away (a task or plan removed), keep the selection on its row if it is still
+ * shown, else move to the next row that was below it, else the nearest one above.
+ */
+function keepSelection(before: ViewState, after: ViewState): ViewState {
+  const old = visibleRows(before);
+  const pos = selectedRowIndex(before, old);
+  const rows = visibleRows(after);
+  const key = (r: Row): string => (r.kind === "plan" ? `p${r.plan.id}` : `t${before.tasks[r.index]?.id}`);
+  const keyAfter = (r: Row): string => (r.kind === "plan" ? `p${r.plan.id}` : `t${after.tasks[r.index]?.id}`);
+  const order = pos === -1 ? old : [old[pos]!, ...old.slice(pos + 1), ...old.slice(0, pos).reverse()];
+  for (const r of order) {
+    const found = rows.find((x) => keyAfter(x) === key(r));
+    if (found) return selectRow(after, found);
+  }
+  return selectRow(after, rows[0]);
 }
 
 export function selectedTask(s: ViewState): TaskSnapshot | null {
+  if (s.selectedPlan !== null) return null;
   return visibleTasks(s).includes(s.selected) ? (s.tasks[s.selected] ?? null) : null;
+}
+
+/** The plan whose header row is selected, when it is shown. */
+export function selectedPlan(s: ViewState): PlanSnapshot | null {
+  if (s.selectedPlan === null) return null;
+  return visibleRows(s).some((r) => r.kind === "plan" && r.plan.id === s.selectedPlan)
+    ? (s.plans.find((p) => p.id === s.selectedPlan) ?? null)
+    : null;
+}
+
+/** The plan a task belongs to. */
+export function planOf(s: ViewState, t: TaskSnapshot | null): PlanSnapshot | null {
+  return t?.planId === undefined ? null : (s.plans.find((p) => p.id === t.planId) ?? null);
+}
+
+/** How a plan's tasks stand: counts by state, whether a plan run is going, and what its runs cost. */
+export function planTally(s: ViewState, p: PlanSnapshot): { total: number; passed: number; failed: number; live: number; running: boolean; cost: number } {
+  let passed = 0;
+  let failed = 0;
+  let live = 0;
+  let cost = 0;
+  for (const id of p.taskIds) {
+    const t = s.tasks.find((x) => x.id === id);
+    if (!t) continue;
+    if (t.state === "passed") passed++;
+    else if (t.state === "failed" || t.state === "stopped") failed++;
+    else if (t.state === "running" || t.state === "paused" || t.state === "stopping") live++;
+    const run = t.runId !== null ? s.runs[t.runId] : undefined;
+    if (run && !run.past) cost += run.cost;
+  }
+  return { total: p.taskIds.length, passed, failed, live, running: p.queued.length > 0 || live > 0, cost };
 }
 
 /** The completion rows for the mention under the cursor, best first; empty while the list is closed. */
@@ -201,6 +325,7 @@ export function headerCounts(s: ViewState): { counts: Partial<Record<TaskState, 
   }
   let cost = 0;
   for (const r of Object.values(s.runs)) if (!r.past) cost += r.cost;
+  for (const p of s.plans) cost += p.cost;
   return { counts, cost, elapsedMs: s.now - s.openedAt };
 }
 
@@ -325,23 +450,22 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
     case "task:updated":
       return { ...s, tasks: s.tasks.map((t) => (t.id === e.task.id ? e.task : t)) };
     case "task:removed": {
-      const vis = visibleTasks(s);
-      const selId = s.tasks[s.selected]?.id;
+      const selId = s.selectedPlan === null ? s.tasks[s.selected]?.id : undefined;
       const tasks = s.tasks.filter((t) => t.id !== e.taskId);
-      const indexOf = (id: number | undefined): number => tasks.findIndex((t) => t.id === id);
-      let selected = 0;
-      if (selId !== undefined && selId !== e.taskId && indexOf(selId) !== -1) {
-        selected = indexOf(selId);
-      } else {
-        const pos = vis.indexOf(s.selected);
-        const order = pos === -1 ? [] : [...vis.slice(pos + 1), ...vis.slice(0, pos).reverse()];
-        for (const i of order) {
-          const j = indexOf(s.tasks[i]?.id);
-          if (j !== -1) { selected = j; break; }
-        }
-      }
-      return snap({ ...s, tasks, selected });
+      // Indexes shift: point the selection at the same task in the new list before keeping it.
+      const after = { ...s, tasks, selected: Math.max(0, tasks.findIndex((t) => t.id === selId)) };
+      return keepSelection(s, after);
     }
+    case "plan:added": {
+      // A new plan is the top row; while the selection sits on the top row (or nothing yet), it moves to the plan.
+      const atTop = selectedRowIndex(s) <= 0;
+      const next = { ...s, plans: [...s.plans, e.plan] };
+      return atTop ? { ...next, selectedPlan: e.plan.id } : next;
+    }
+    case "plan:updated":
+      return snap({ ...s, plans: s.plans.map((p) => (p.id === e.plan.id ? e.plan : p)) });
+    case "plan:removed":
+      return keepSelection(s, { ...s, plans: s.plans.filter((p) => p.id !== e.planId), collapsed: s.collapsed.filter((x) => x !== e.planId) });
     case "toast":
       return addToast(s, e.level, e.message);
     case "globals:updated":
@@ -389,16 +513,36 @@ function apply(s: ViewState, a: UiAction): ViewState {
     case "manager":
       return reduceManager(s, a.event);
     case "select": {
-      const vis = visibleTasks(s);
-      if (vis.length === 0) return s;
-      const pos = vis.indexOf(s.selected);
-      return { ...s, selected: vis[clamp((pos === -1 ? 0 : pos) + a.delta, 0, vis.length - 1)]! };
+      const rows = visibleRows(s);
+      if (rows.length === 0) return s;
+      const pos = selectedRowIndex(s, rows);
+      return selectRow(s, rows[clamp((pos === -1 ? 0 : pos) + a.delta, 0, rows.length - 1)]);
     }
     case "selectEdge": {
-      const vis = visibleTasks(s);
-      if (vis.length === 0) return s;
-      return { ...s, selected: a.edge === "first" ? vis[0]! : vis[vis.length - 1]! };
+      const rows = visibleRows(s);
+      if (rows.length === 0) return s;
+      return selectRow(s, a.edge === "first" ? rows[0] : rows[rows.length - 1]);
     }
+    case "selectPlan": {
+      if (!s.plans.some((p) => p.id === a.id)) return s;
+      const shown = visibleRows(s).some((r) => r.kind === "plan" && r.plan.id === a.id);
+      return { ...s, selectedPlan: a.id, ...(shown ? {} : { filter: "", filterDraft: null }) };
+    }
+    case "collapse": {
+      const collapsed = s.collapsed.includes(a.id) ? s.collapsed.filter((x) => x !== a.id) : [...s.collapsed, a.id];
+      const next = { ...s, collapsed };
+      // A selected task of a collapsing plan gives the selection to the plan's header.
+      const t = selectedTask(s);
+      return t?.planId === a.id && collapsed.includes(a.id) ? { ...next, selectedPlan: a.id } : next;
+    }
+    case "composeFor":
+      return { ...s, composeFor: a.value, addErrors: a.value === s.composeFor ? s.addErrors : [] };
+    case "edit":
+      return a.value ? { ...s, edit: a.value, mode: "edit" } : { ...s, edit: null, mode: baseMode(s), confirm: null };
+    case "editText":
+      return s.edit ? { ...s, edit: { ...s.edit, compose: a.next, error: null } } : s;
+    case "editFailed":
+      return s.edit ? { ...s, edit: { ...s.edit, error: a.error }, mode: "edit", confirm: null } : s;
     case "openFilter":
       return { ...s, focus: "list", mode: "filter", filterDraft: s.filter };
     case "filterEdit":
@@ -408,12 +552,15 @@ function apply(s: ViewState, a: UiAction): ViewState {
     case "filterClear":
       return snap({ ...s, filter: "", filterDraft: null, mode: "list" });
     case "focus":
-      return a.target === "compose" ? { ...s, mode: "compose" } : { ...s, focus: a.target, mode: a.target };
+      if (a.target === "compose") return { ...s, mode: "compose", composeFor: "task", addErrors: s.composeFor === "task" ? s.addErrors : [] };
+      return { ...s, focus: a.target, mode: a.target };
     case "escape":
       if (s.mode === "list" || s.mode === "detail" || s.mode === "options") return { ...s, focus: "list", mode: "list" };
       return {
         ...s, mode: baseMode(s), form: s.mode === "form" ? null : s.form, confirm: s.mode === "confirm" ? null : s.confirm,
         completion: s.mode === "compose" ? null : s.completion,
+        composeFor: s.mode === "compose" ? "task" : s.composeFor,
+        edit: s.mode === "edit" ? null : s.edit,
       };
     case "compose":
       return { ...s, compose: a.next, addErrors: a.next.text === s.compose.text ? s.addErrors : [] };
@@ -430,7 +577,9 @@ function apply(s: ViewState, a: UiAction): ViewState {
       const i = s.tasks.findIndex((t) => t.id === a.id);
       if (i === -1) return s;
       const hidden = !visibleTasks(s).includes(i);
-      return { ...s, selected: i, ...(hidden ? { filter: "", filterDraft: null } : {}) };
+      const planId = s.tasks[i]!.planId;
+      const collapsed = planId === undefined ? s.collapsed : s.collapsed.filter((x) => x !== planId);
+      return { ...s, selected: i, selectedPlan: null, collapsed, ...(hidden ? { filter: "", filterDraft: null } : {}) };
     }
     case "form": {
       if (a.next) return { ...s, form: a.next, mode: "form" };
@@ -443,7 +592,9 @@ function apply(s: ViewState, a: UiAction): ViewState {
     case "help":
       return { ...s, mode: a.open ? "help" : baseMode(s) };
     case "confirm":
-      return a.value ? { ...s, confirm: a.value, mode: "confirm" } : { ...s, confirm: null, mode: baseMode(s) };
+      if (a.value) return { ...s, confirm: a.value, mode: "confirm" };
+      // Saying no to discarding an edit goes back to the editor.
+      return { ...s, confirm: null, mode: s.confirm?.kind === "discard" && s.edit !== null ? "edit" : baseMode(s) };
     case "timeline": {
       const runId = selectedTask(s)?.runId;
       if (!runId) return s;
@@ -454,7 +605,7 @@ function apply(s: ViewState, a: UiAction): ViewState {
     case "ctrlC":
       return { ...s, ctrlC: s.ctrlC + 1 };
     case "quitting":
-      return { ...s, mode: "quitting", confirm: null, form: null };
+      return { ...s, mode: "quitting", confirm: null, form: null, edit: null };
   }
 }
 

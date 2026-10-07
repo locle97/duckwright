@@ -1,4 +1,4 @@
-// The yes/no question for quitting with active runs or removing a task.
+// The yes/no question for quitting with active runs, removing a task or plan, or dropping an edit.
 import { Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
@@ -12,6 +12,11 @@ export function question(s: ViewState): string {
   const c = s.confirm;
   if (c === null) return "";
   if (c.kind === "quit") return `stop ${c.count} run${c.count === 1 ? "" : "s"} and quit?`;
+  if (c.kind === "discard") return "discard your changes?";
+  if (c.kind === "removePlan") {
+    const p = s.plans.find((x) => x.id === c.planId);
+    return p ? `remove plan ${sanitize(p.name)} and its tasks? (files stay)` : "remove this plan?";
+  }
   const t = s.tasks.find((x) => x.id === c.taskId);
   return `remove ${t ? sanitize(t.name) : "this task"}?`;
 }
