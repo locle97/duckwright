@@ -294,6 +294,9 @@ function reduceRunEvent(r: RunView, e: RunEvent): RunView {
         network: entriesOf(e.record.network), networkErrors: stringsOf(e.record.networkErrors),
         status: v.status === "brain" ? "brain" : stepStatus(e.record.results, v.actions),
       }));
+    case "twofa:wait":
+    case "twofa:done":
+      return r;
     case "control": {
       if (e.state === "paused") {
         return { ...r, control: e.state, pausedSince: r.pausedSince ?? e.at };
