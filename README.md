@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/locle97/duckwright/blob/main/LICENSE)
 [![CI](https://github.com/locle97/duckwright/actions/workflows/ci.yml/badge.svg)](https://github.com/locle97/duckwright/actions/workflows/ci.yml)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.18-blue)
-![Dependencies](https://img.shields.io/badge/dependencies-ink%20for%20--tui-brightgreen)
+![Dependencies](https://img.shields.io/badge/dependencies-ink%20for%20the%20TUI-brightgreen)
 
 **The rubber duck that drives your browser, then writes the regression test.**
 
@@ -22,7 +22,7 @@ Every run also records the Playwright code behind each action, so a task the age
 An example run looks like this (illustrative output):
 
 ```console
-$ duckwright "Go to example.com and report the page heading"
+$ duckwright -p "Go to example.com and report the page heading"
 step 1 | Starting task | Open example.com | goto https://example.com → ok
 step 2 | Page loaded | Read the heading | done success Example Domain → done
 Result: success
@@ -44,7 +44,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
 - **API assertions**: with network capture on, the agent can also check the calls its last step made with `expect-request`: method, path or URL, and status, optionally a field of the JSON response. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
-- **Minimal dependencies**: the core loop uses only Node's standard library; `--tui` uses Ink. TypeScript and the test tools are development dependencies.
+- **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink. TypeScript and the test tools are development dependencies.
 
 ## Getting started
 
@@ -103,18 +103,22 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 ## Usage
 
 ```bash
-duckwright "<task>" [--max-steps N] [--model M] [--[no-]headed]
+duckwright [--max-parallel N] [--past N] [--theme NAME] [options]
+duckwright ["<task>" | -f FILE|FOLDER ...] [options]
+duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
                   [--allow-file-access] [--[no-]export] [--[no-]network]
-duckwright -f FILE|FOLDER [FILE|FOLDER ...] [options]
+duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright export [--api] RUN [-o FILE]
-duckwright --tui [--max-parallel N] [--past N] [--theme NAME] [options]
 ```
+
+`duckwright` on its own opens the [interactive TUI](#interactive-tui). Given a task or `-f`, it opens the TUI and starts them right away. `-p` (`--print`) skips the TUI: it runs the task, prints the report and exits, which is the mode for scripts and CI. With no terminal (stdin or stdout redirected), Duckwright always runs in print mode, as if `-p` were given, and the TUI options are ignored.
 
 Run `duckwright --version` to print the installed version. Runs are written to `runs/` in the current directory, which is created if it does not exist.
 
 | Option | Default | Description |
 | --- | --- | --- |
+| `-p`, `--print` | off | Run the task, print the report and exit, without the [TUI](#interactive-tui). Used automatically when there is no terminal |
 | `-f`, `--file` | none | Read the task, and optional settings, from a [task file](#task-files) instead of the command line. Takes one or more files or folders; several make a [batch](#batch-runs) |
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
@@ -125,10 +129,9 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
-| `--tui` | off | Open the [interactive TUI](#interactive-tui) instead of running one task. Tasks are typed or `@`-mentioned inside it, so it takes no task or `--file`, and it needs a terminal |
-| `--max-parallel` | `3` | With `--tui`, how many runs may be active at once |
-| `--past` | `20` | With `--tui`, how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none |
-| `--theme` | `auto` | With `--tui`, the colour theme: `auto`, `dark`, or `light` |
+| `--max-parallel` | `3` | TUI: how many runs may be active at once; tasks given on the command line past the limit start as earlier runs finish. An error with `-p` |
+| `--past` | `20` | TUI: how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none. An error with `-p` |
+| `--theme` | `auto` | TUI: the colour theme: `auto`, `dark`, or `light`. An error with `-p` |
 | `--snapshot-hybrid` | on | Paste page snapshots of up to 5,000 characters into the prompt; for larger ones, let Claude grep the saved file. Decided again every step (see [Reading the page](#reading-the-page)) |
 | `--snapshot-full` | off | Always paste the page snapshot into the prompt, truncated at 40k characters. Claude gets no tools |
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
@@ -144,7 +147,9 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 
 ### Interactive TUI
 
-`duckwright --tui` opens a workspace in the terminal. You queue tasks, start several at once, and watch each step's goal, actions, results, and running cost live. Pass the usual options (`--model`, `--max-steps`, ...) as defaults for every task, and `--max-parallel N` to cap concurrent runs.
+`duckwright` opens a workspace in the terminal. You queue tasks, start several at once, and watch each step's goal, actions, results, and running cost live. Pass the usual options (`--model`, `--max-steps`, ...) as defaults for every task, and `--max-parallel N` to cap concurrent runs.
+
+A task or `-f` on the command line is added to the task list and started as soon as the TUI opens, up to `--max-parallel` at once, with the rest starting in order as runs finish: `duckwright -f tasks/` runs a whole folder in the TUI. A missing or invalid file is reported before the TUI opens (exit `2`). When you quit, the TUI prints the same kind of summary as a [batch run](#batch-runs).
 
 **Global options.** The lower pane of the left column shows the global options (model, max steps, headed, export, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
 
@@ -230,19 +235,19 @@ and check the greeting says "Hello, Linh!".
 - Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
 - Relative `skill` and `state` paths are resolved from the file's folder, not the current directory.
 - `allow-file-access` can only be given on the command line, so a shared task file can never turn it on.
-- Give either a task or `-f`, not both. A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
+- With `-p`, give either a task or `-f`, not both (the TUI takes both). A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
 
 [`examples/task.md`](https://github.com/locle97/duckwright/blob/main/examples/task.md) is a commented template to copy.
 
 #### Batch runs
 
-Give `-f` several files, or a folder, to run them one after another:
+Give `-p -f` several files, or a folder, to run them one after another and print a summary, as in scripts and CI (without `-p`, on a terminal, they open in the [TUI](#interactive-tui) instead):
 
 ```bash
-duckwright -f tasks/login.md tasks/greet.md   # several files
-duckwright -f tasks/*.md                       # shell glob
-duckwright -f tasks/                           # every task file at the folder's root
-duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every task
+duckwright -p -f tasks/login.md tasks/greet.md   # several files
+duckwright -p -f tasks/*.md                       # shell glob
+duckwright -p -f tasks/                           # every task file at the folder's root
+duckwright -p -f tasks/ extra/one.md --headed     # mixed; flags apply to every task
 ```
 
 - A folder runs its `.md` and `.txt` files (any case), sorted by name. Only the top level is read: subfolders, hidden files and other files, such as an `auth.json` next to the tasks, are ignored. A file reached twice runs once.
@@ -260,7 +265,7 @@ duckwright -f tasks/ extra/one.md --headed     # mixed; flags apply to every tas
 
   Each line is `pass`, `fail`, `stop` (interrupted) or `skip` (not run), then what that task cost and its `history.json`. The first line totals the cost of the whole batch, counting money spent by tasks that failed, crashed or were interrupted.
 - When the paths come down to a single file, the run is an ordinary single run, with no summary.
-- `-f` reads every argument after it as a path, so `duckwright -f a.md "Open the site"` fails with `Open the site: file not found`. A task on the command line and `-f` cannot be combined anyway.
+- `-f` reads every argument after it as a path, so `duckwright -p -f a.md "Open the site"` fails with `Open the site: file not found`. A task on the command line and `-f` cannot be combined anyway.
 
 ### Output
 
@@ -427,7 +432,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 - [x] **TUI**: an interactive terminal UI that shows each step's goal, actions, results, and running cost live, with keys to pause, step through, or stop the run.
 - [x] **Batch runs**: `duckwright -f tasks/` (or several files) runs task files one after another and prints a summary.
-- [ ] **TUI by default**: running `duckwright` with no arguments opens the [TUI](#interactive-tui) directly, and the `--tui` flag goes away. The current one-shot CLI mode becomes `--print` / `-p`, as in Claude Code: `duckwright -p "<task>"` (or `-p -f tasks/login.md`) runs the task, prints the report, and exits, which is the mode to use in scripts and CI. The TUI-only options (`--max-parallel`, `--past`, `--theme`) then apply without a flag, and `--print` with no terminal is the supported non-interactive path.
+- [x] **TUI by default**: running `duckwright` with no arguments opens the [TUI](#interactive-tui) directly, and the `--tui` flag goes away. The current one-shot CLI mode becomes `--print` / `-p`, as in Claude Code: `duckwright -p "<task>"` (or `-p -f tasks/login.md`) runs the task, prints the report, and exits, which is the mode to use in scripts and CI. The TUI-only options (`--max-parallel`, `--past`, `--theme`) then apply without a flag, and `--print` with no terminal is the supported non-interactive path.
 - [ ] **Plan mode**: `duckwright plan <plan-file>` (or `--plan`) takes a plan written by the user, such as a QA test plan with environment setup, test data, and numbered scenarios like [this one](docs/superpowers/test-plans/2026-10-06-network-capture-redacted-history-test-plan.md). A planner agent (Claude) first breaks the plan into separate tasks and writes them as task files under `tasks/`, one per scenario, carrying over each scenario's preconditions, steps, and expected results and keeping shared setup out of the individual tasks. The tasks are then added to the TUI task list, where they can be reviewed, reordered, edited, or removed before running, and run one after another like a batch.
 - [ ] **Parallel batches**: `-j N` runs up to N task files at once, giving each its own `--session` name automatically so they never share a browser.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
@@ -457,9 +462,9 @@ Node runs the TypeScript sources directly, so tests and `node src/bin.ts` need n
 [`benchmark_tasks/`](https://github.com/locle97/duckwright/tree/main/benchmark_tasks) holds six tasks on public demo sites. They are for comparing cost and reliability between settings, for example the three ways of [reading the page](#reading-the-page):
 
 ```bash
-duckwright -f benchmark_tasks                    # --snapshot-hybrid (default)
-duckwright -f benchmark_tasks --snapshot-full    # always paste the snapshot
-duckwright -f benchmark_tasks --snapshot-grep    # always grep the snapshot
+duckwright -p -f benchmark_tasks                 # --snapshot-hybrid (default)
+duckwright -p -f benchmark_tasks --snapshot-full # always paste the snapshot
+duckwright -p -f benchmark_tasks --snapshot-grep # always grep the snapshot
 ```
 
 The `Batch:` summary line gives each run's total cost, and every task line its own cost. Each file's front-matter comments give the expected answer. The tasks range from a small to-do app to a long checkout flow and a Wikipedia article far larger than the 40k-character `--snapshot-full` limit. They read public sites, so an answer can drift if a site changes. Model costs also vary from run to run, so compare more than one run of each.

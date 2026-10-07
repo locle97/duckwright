@@ -139,6 +139,41 @@ test("manager_parallel_limit", () => {
   assert.equal(mgr.activeCount(), 2);
 });
 
+test("manager_start_queued_fills_slots_in_order", async () => {
+  const { mgr, fakes } = setup();
+  const ids = [mgr.addTyped("a"), mgr.addTyped("b"), mgr.addTyped("c"), mgr.addTyped("d")];
+  mgr.startQueued(ids);
+  assert.deepEqual(fakes.map((f) => f.spec.task), ["a", "b"]);
+  fakes[1].finish(outcome("fail"));
+  await tick();
+  assert.deepEqual(fakes.map((f) => f.spec.task), ["a", "b", "c"]);
+  mgr.remove(ids[3]);
+  fakes[0].finish(outcome("pass"));
+  await tick();
+  assert.equal(fakes.length, 3, "a removed task is skipped");
+  assert.equal(mgr.activeCount(), 1);
+});
+
+test("manager_start_queued_skips_failed_preflight", () => {
+  const { mgr, fakes } = setup({ preflight: (a) => (a.model === "bad" ? "no such model" : null) });
+  const a = mgr.addTyped("a");
+  const b = mgr.addTyped("b");
+  mgr.setOverrides(a, { model: "bad" });
+  mgr.startQueued([a, b]);
+  assert.deepEqual(fakes.map((f) => f.spec.task), ["b"]);
+  assert.equal(mgr.list()[0].error, "no such model");
+});
+
+test("manager_start_queued_stops_when_quitting", async () => {
+  const { mgr, fakes } = setup({ maxParallel: 1 });
+  mgr.startQueued([mgr.addTyped("a"), mgr.addTyped("b")]);
+  const p = mgr.stopAll();
+  fakes[0].finish(outcome("stop"));
+  await p;
+  await tick();
+  assert.equal(fakes.length, 1);
+});
+
 test("manager_second_start_refused", () => {
   const { mgr, fakes } = setup();
   const id = mgr.addTyped("a");

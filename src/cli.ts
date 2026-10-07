@@ -159,11 +159,6 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
 }
 
 async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<number> {
-  if (args.task !== null || args.file !== null) throw usage("give tasks inside the TUI, not with --tui");
-  if (!deps.isTTY()) {
-    deps.stderr("--tui needs an interactive terminal");
-    return 2;
-  }
   const err = preflightArgs(deps, args);
   if (err) {
     deps.stderr(err);
@@ -182,10 +177,18 @@ async function tuiMain(deps: CliDeps, argv: string[], args: RunArgs): Promise<nu
     }),
     preflight: (a) => preflightArgs(deps, a),
   });
+  // Load every file before the TUI opens, so a bad one is reported on the plain terminal.
+  const given = args.task !== null || args.file !== null ? manager.add({ mentions: args.file ?? [], typed: args.task }) : null;
+  if (given !== null && !given.ok) {
+    deps.stderr(given.errors.map((e) => e.message).join("\n"));
+    return 2;
+  }
   const tui = await deps.loadTui();
   const k = past.skipped;
   const notices = k > 0 ? [`skipped ${k} unreadable run folder${k === 1 ? "" : "s"} in runs/`] : [];
   const handle = tui.startTui({ manager, theme: args.theme ?? "auto", notices });
+  // Started once the TUI is up, so it sees every run from its first event.
+  if (given?.ok) manager.startQueued(given.added);
   // An outside SIGINT aborts the signal (and with it every run): close the TUI too, and exit 130.
   const onAbort = (): void => handle.quit();
   deps.signal.addEventListener("abort", onAbort, { once: true });
@@ -229,12 +232,17 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     return 0;
   }
   const { args } = parsed;
-  if (args.tui) return tuiMain(deps, argv, args);
-  if (args.maxParallel !== null) throw usage("--max-parallel needs --tui");
-  if (args.past !== undefined) throw usage("--past needs --tui");
-  if (args.theme !== undefined) throw usage("--theme needs --tui");
+  if (!args.print && deps.isTTY()) return tuiMain(deps, argv, args);
+  // With no terminal, print mode is the fallback, and the TUI-only options have nothing to apply to.
+  if (args.print) {
+    if (args.maxParallel !== null) throw usage("--max-parallel applies to the TUI, not with -p");
+    if (args.past !== undefined) throw usage("--past applies to the TUI, not with -p");
+    if (args.theme !== undefined) throw usage("--theme applies to the TUI, not with -p");
+  }
   if (args.task !== null && args.file !== null) throw usage("give a task or --file, not both");
-  if (args.task === null && args.file === null) throw usage("give a task or --file");
+  if (args.task === null && args.file === null) {
+    throw usage(args.print ? "give a task or --file" : "no terminal for the TUI: give a task or --file to run in print mode");
+  }
   if (args.file === null) {
     const err = preflightArgs(deps, args);
     if (err) {
