@@ -86,7 +86,8 @@ function isFile(p: string): boolean {
 
 export async function startServer(o: ServerOptions): Promise<RunningServer> {
   const uiRoot = path.resolve(o.uiDir);
-  const streams = new Set<http.ServerResponse>();
+  const streams = new Map<http.ServerResponse, () => void>();
+  const realRoot = fs.realpathSync(uiRoot);
   let port = 0;
 
   function events(res: http.ServerResponse): void {
@@ -94,30 +95,30 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
       "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no", ...SECURITY,
     });
     res.write("retry: 2000\n\n");
-    const write = (data: unknown): void => void res.write(`data: ${JSON.stringify(data)}\n\n`);
+    let done = false;
+    const raw = (text: string): void => {
+      if (done || res.writableEnded || res.destroyed) return cleanup();
+      try {
+        res.write(text);
+      } catch {
+        cleanup();
+      }
+    };
+    const write = (data: unknown): void => raw(`data: ${JSON.stringify(data)}\n\n`);
     // The snapshot and the subscription happen in the same tick, so no event falls between them.
     write({ type: "state", ...snapshotOf(o.ctx) });
-    const off = o.ctx.manager.subscribe((e) => {
-      try {
-        write(e);
-      } catch {
-        cleanup();
-      }
-    });
-    const ping = setInterval(() => {
-      try {
-        res.write(": ping\n\n");
-      } catch {
-        cleanup();
-      }
-    }, PING_MS);
+    const off = o.ctx.manager.subscribe((e) => write(e));
+    const ping = setInterval(() => raw(": ping\n\n"), PING_MS);
     function cleanup(): void {
+      if (done) return;
+      done = true;
       off();
       clearInterval(ping);
       streams.delete(res);
     }
-    streams.add(res);
+    streams.set(res, cleanup);
     res.on("close", cleanup);
+    res.on("error", cleanup);
   }
 
   async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
@@ -130,16 +131,27 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     }
     if (rel.includes("\0")) return sendJson(res, 400, { ok: false, error: "bad request" });
     if (rel === "/") rel = "/index.html";
+    if (rel.split("/").some((seg) => seg.startsWith("."))) return sendJson(res, 404, { ok: false, error: "not found" });
     const file = path.resolve(uiRoot, "." + rel);
     if (file !== uiRoot && !file.startsWith(uiRoot + path.sep)) return sendJson(res, 404, { ok: false, error: "not found" });
     let target = file;
-    if (!isFile(file)) {
+    if (isFile(file)) {
+      // Follow symlinks, then require the real file to still be inside the real UI folder.
+      let real: string;
+      try {
+        real = fs.realpathSync(file);
+      } catch {
+        return sendJson(res, 404, { ok: false, error: "not found" });
+      }
+      if (!real.startsWith(realRoot + path.sep)) return sendJson(res, 404, { ok: false, error: "not found" });
+      target = real;
+    } else {
       // A client-side route falls back to the page; a missing file with an extension is a real 404.
       if (path.extname(rel) !== "") return sendJson(res, 404, { ok: false, error: "not found" });
-      target = path.join(uiRoot, "index.html");
+      target = path.join(realRoot, "index.html");
     }
     const type = TYPES[path.extname(target).toLowerCase()] ?? "application/octet-stream";
-    const hashed = target.startsWith(path.join(uiRoot, "assets") + path.sep);
+    const hashed = target.startsWith(path.join(realRoot, "assets") + path.sep);
     const data = await fs.promises.readFile(target);
     res.writeHead(200, {
       "Content-Type": type, "Content-Length": data.length, ...SECURITY,
@@ -150,8 +162,8 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const raw = req.url ?? "/";
-    // A target like //host/x would be read as a protocol-relative URL.
-    if (!raw.startsWith("/") || raw.startsWith("//")) return sendJson(res, 400, { ok: false, error: "bad request" });
+    // Refuse targets that are not a plain absolute path (//host/x, /\\host/x) before parsing; a cheap sanity check, not the security boundary (authorize and the path checks are).
+    if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return sendJson(res, 400, { ok: false, error: "bad request" });
     const auth = authorize({ method: req.method ?? "GET", url: raw, headers: req.headers }, { token: o.token, port });
     const url = new URL(raw, "http://localhost");
     const isApi = url.pathname.startsWith("/api/");
@@ -194,7 +206,11 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     port,
     close: () =>
       new Promise<void>((resolve) => {
-        for (const res of streams) res.end();
+        // Unsubscribe first, so no event or ping can write to a response that is ending.
+        for (const [res, cleanup] of [...streams]) {
+          cleanup();
+          res.end();
+        }
         streams.clear();
         server.close(() => resolve());
         // Idle keep-alive connections close with the server; this is for a browser that holds one open.

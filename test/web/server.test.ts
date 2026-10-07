@@ -103,6 +103,8 @@ before(async () => {
   fs.writeFileSync(path.join(tmp, "ui", "index.html"), "<!doctype html><title>dw</title>");
   fs.writeFileSync(path.join(tmp, "ui", "assets", "app-abc.js"), "console.log(1)");
   fs.writeFileSync(path.join(tmp, "secret.txt"), "SECRET");
+  fs.writeFileSync(path.join(tmp, "ui", ".hidden"), "HIDDEN");
+  fs.symlinkSync(path.join(tmp, "secret.txt"), path.join(tmp, "ui", "link.txt"));
   manager = new CountingManager([snapshot(1, "one")]);
   ctx = makeCtx(manager);
   server = await startServer({ ctx, token: TOKEN, uiDir: path.join(tmp, "ui") });
@@ -217,4 +219,40 @@ test("close ends open streams instead of hanging", { timeout: 5000 }, async () =
   await s2.close();
   assert.equal(m.subs, 0);
   stream.close();
+});
+
+test("a symlink out of the UI folder and dotfiles are not served", async () => {
+  const link = await request(server.port, "GET", "/link.txt", { headers: authed });
+  assert.equal(link.status, 404);
+  assert.ok(!link.body.includes("SECRET"));
+  const dot = await request(server.port, "GET", "/.hidden", { headers: authed });
+  assert.equal(dot.status, 404);
+  assert.ok(!dot.body.includes("HIDDEN"));
+});
+
+test("a malformed request target is 400", async () => {
+  assert.equal((await request(server.port, "GET", "//evil", { headers: authed })).status, 400);
+  assert.equal((await request(server.port, "GET", "/\\evil", { headers: authed })).status, 400);
+});
+
+test("close with a manager event in flight does not crash and unsubscribes", { timeout: 5000 }, async () => {
+  const errors: unknown[] = [];
+  const onError = (e: unknown): void => void errors.push(e);
+  process.on("uncaughtException", onError);
+  try {
+    const m = new CountingManager([]);
+    const s2 = await startServer({ ctx: makeCtx(m), token: TOKEN, uiDir: path.join(tmp, "ui") });
+    const stream = await openStream(s2.port, authed);
+    await stream.next();
+    m.emit({ type: "toast", level: "info", message: "before" });
+    const closing = s2.close();
+    m.emit({ type: "toast", level: "info", message: "after" });
+    await closing;
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(m.subs, 0);
+    assert.deepEqual(errors, []);
+    stream.close();
+  } finally {
+    process.off("uncaughtException", onError);
+  }
 });
