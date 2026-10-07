@@ -13,6 +13,7 @@ import { AbortedError } from "../src/proc.ts";
 import type { ProcResult } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../src/pw.ts";
+import { createTwoFactor } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
 
 class FakePW extends PlaywrightCLI {
@@ -544,4 +545,60 @@ test("request_action_uses_earlier_captured_calls_and_records_origin", async () =
   assert.equal(r.history[1].results[0], "ok 201 {}");
   assert.deepEqual(r.history[1].requestOrigins, ["https://shop.example.com"]);
   assert.equal(r.history[0].requestOrigins, undefined);
+});
+
+const TF_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+const TF_CODE = "287082"; // the RFC 6238 code at t=59 s
+const ECHO = `### Ran Playwright code\n\`\`\`js\nawait page.getByLabel('Code').fill('${TF_CODE}');\n\`\`\`\n`;
+const twofa = () => createTwoFactor({
+  secret: TF_SECRET, human: null, timeoutSec: 5, signal: new AbortController().signal, now: () => 59_000,
+});
+
+test("twofa_codes_are_scrubbed_from_records_events_and_prompts", async () => {
+  // Every playwright-cli reply echoes the code, as a page that shows what you typed would.
+  const pw = new FakePW({ runStdout: ECHO });
+  const brain = new FakeBrain([dec([["twofa", ["totp", "e1"]]]), dec([["done", ["success", "ok"]]])]);
+  const events = new RunEvents();
+  const seen: RunEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  const r = await agent(pw, brain, { twofa: twofa(), events }).run();
+  assert.equal(r.success, true);
+  assert.deepEqual(r.history[0].results, ["ok"]);
+  assert.deepEqual(r.history[0].codes, ["await page.getByLabel('Code').fill('[2FA CODE]');"]);
+  assert.ok(!brain.prompts[1].includes(TF_CODE), "the next prompt is clean");
+  assert.ok(brain.prompts[1].includes("[2FA CODE]"));
+  const blob = JSON.stringify([r, seen]);
+  assert.ok(!blob.includes(TF_CODE), "records and events are clean");
+  assert.ok(!blob.includes(TF_SECRET));
+});
+
+test("twofa_codes_are_scrubbed_from_the_final_answer", async () => {
+  const pw = new FakePW({ runStdout: ECHO });
+  const brain = new FakeBrain([dec([["twofa", ["totp", "e1"]]]), dec([["done", ["success", `code was ${TF_CODE}`]]])]);
+  const r = await agent(pw, brain, { twofa: twofa() }).run();
+  assert.equal(r.answer, "code was [2FA CODE]");
+});
+
+test("twofa_codes_are_scrubbed_from_network_entries_and_files", async () => {
+  class EchoNet extends NetPW {
+    override async run(cmd: string, args: string[]): Promise<ProcResult> {
+      if (cmd === "requests" && args[0] !== "--clear") {
+        return { code: 0, stdout: `### Result\n1. [GET] http://h/a?c=${TF_CODE} => [200] OK\n`, stderr: "" };
+      }
+      return super.run(cmd, args);
+    }
+  }
+  const workdir = tmpDir();
+  const r = await agent(new EchoNet({ runStdout: ECHO }), new FakeBrain([dec([["twofa", ["totp", "e1"]]]), dec([["done", ["success", "ok"]]])]),
+    { network: true, workdir, twofa: twofa() }).run();
+  assert.equal(r.history[0].network?.[0].url, "http://h/a?c=[2FA CODE]");
+  const file = fs.readFileSync(path.join(workdir, "network", "0001", "request.json"), "utf8");
+  assert.ok(!file.includes(TF_CODE));
+  assert.ok(file.includes("[2FA CODE]"));
+});
+
+test("without_twofa_nothing_is_scrubbed", async () => {
+  const brain = new FakeBrain([dec([["done", ["success", TF_CODE]]])]);
+  const r = await agent(new FakePW(), brain).run();
+  assert.equal(r.answer, TF_CODE);
 });
