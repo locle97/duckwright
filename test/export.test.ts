@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { ExportError, NO_ASSERTIONS, SPEC_NAME, exportRun, loadHistory, renderSpec } from "../src/export.ts";
+import { ExportError, NO_ASSERTIONS, SPEC_NAME, TOTP_HELPER, TOTP_IMPORT, exportRun, loadHistory, renderSpec } from "../src/export.ts";
 import type { HistoryData } from "../src/export.ts";
 import { ROOT, tmpDir } from "./helpers.ts";
 
@@ -431,4 +432,94 @@ test("request_with_invalid_args_is_skipped_with_a_warning", () => {
 test("request_only_run_has_code_but_no_assertions_warning", () => {
   const { warnings } = renderSpec(run([reqStep(["GET", "/api/items"], "ok 200")]));
   assert.ok(warnings.includes(NO_ASSERTIONS));
+});
+
+const MASKED_FILL = "await page.getByLabel('Code').fill('[2FA CODE]');";
+
+test("twofa_totp_exports_a_helper_call_not_a_code", () => {
+  const { spec, warnings } = renderSpec(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["twofa", ["totp", "e5"], MASKED_FILL]]),
+    step([["expect", ["url", "https://example.com/home"], EXPECT]]),
+  ]));
+  assert.ok(spec.includes(TOTP_IMPORT));
+  assert.ok(spec.includes(TOTP_HELPER));
+  assert.ok(spec.includes("  await page.getByLabel('Code').fill(totp()); // 2FA\n"));
+  assert.ok(!spec.includes("[2FA CODE]"));
+  assert.ok(!spec.includes("cannot run unattended"));
+  assert.deepEqual(warnings, []);
+});
+
+test("twofa_totp_keeps_the_submit_lines_after_the_fill", () => {
+  const { spec } = renderSpec(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["twofa", ["totp", "e5"], `${MASKED_FILL}\nawait page.getByLabel('Code').press('Enter');`]]),
+  ]));
+  assert.ok(spec.includes("  await page.getByLabel('Code').fill(totp()); // 2FA\n  await page.getByLabel('Code').press('Enter');\n"));
+});
+
+test("twofa_human_kinds_export_as_manual_steps_with_a_header_note_and_warnings", () => {
+  const { spec, warnings } = renderSpec(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["twofa", ["sms", "e5"], MASKED_FILL]]),
+    step([["twofa", ["email", "e6"], MASKED_FILL]]),
+    step([["twofa", ["passkey"], null]]),
+    step([["expect", ["url", "https://example.com/home"], EXPECT]]),
+  ]));
+  assert.ok(spec.includes("  // MANUAL: enter the sms code here\n  await page.pause();\n"));
+  assert.ok(spec.includes("  // MANUAL: enter the email code here\n  await page.pause();\n"));
+  assert.ok(spec.includes("  // MANUAL: approve the passkey prompt\n  await page.pause();\n"));
+  assert.ok(spec.includes("cannot run unattended"));
+  assert.ok(!spec.includes("[2FA CODE]"));
+  assert.ok(!spec.includes("totp()"));
+  assert.deepEqual(warnings, [
+    "twofa sms in step 2 is a manual step; the test cannot run unattended",
+    "twofa email in step 3 is a manual step; the test cannot run unattended",
+    "twofa passkey in step 4 is a manual step; the test cannot run unattended",
+  ]);
+});
+
+test("twofa_without_a_recorded_code_fails_the_export_except_passkey", () => {
+  assert.throws(() => renderSpec(run([step([["twofa", ["totp", "e5"], null]])])),
+    exportError(1, /twofa in step 1 has no recorded code/));
+  assert.throws(() => renderSpec(run([step([["twofa", ["sms", "e5"], null]])])),
+    exportError(1, /twofa in step 1 has no recorded code/));
+});
+
+test("a_totp_step_whose_code_has_no_mask_fails_the_export", () => {
+  assert.throws(() => renderSpec(run([step([["twofa", ["totp", "e5"], "await page.getByLabel('Code').fill('123456');"]])])),
+    exportError(1, /twofa in step 1 has no recorded code/));
+});
+
+test("a_failed_twofa_is_skipped_with_a_warning", () => {
+  const { warnings } = renderSpec(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["twofa", ["sms", "e5"], null]], ["error: timed out waiting for the 2FA code"]),
+    step([["expect", ["url", "https://example.com/home"], EXPECT]]),
+  ]));
+  assert.deepEqual(warnings, ["twofa in step 2 failed and was skipped"]);
+});
+
+test("a_request_after_twofa_is_refused_like_one_after_any_ui_action", () => {
+  assert.throws(() => renderSpec(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["twofa", ["totp", "e5"], MASKED_FILL]]),
+    { ...step([["request", ["POST", "/api/x"], "marker"]], ["ok 201"]), request_origins: ["https://example.com"] },
+  ])), exportError(1, /request in step 3 comes after a UI action in step 2/));
+});
+
+test("the_totp_helper_matches_rfc_6238", () => {
+  const body = `${TOTP_HELPER}\nreturn totp();`;
+  const at = (seconds: number, secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"): string =>
+    new Function("createHmac", "process", "Date", body)(
+      createHmac, { env: { DUCKWRIGHT_TOTP_SECRET: secret } }, { now: () => seconds * 1000 });
+  assert.equal(at(59), "287082");
+  assert.equal(at(1111111109), "081804");
+  assert.equal(at(20000000000), "353130");
+  assert.equal(at(59, "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=x"), "287082");
+});
+
+test("the_totp_helper_demands_the_env_secret", () => {
+  assert.throws(() => new Function("createHmac", "process", "Date", `${TOTP_HELPER}\nreturn totp();`)(
+    createHmac, { env: {} }, Date), /set DUCKWRIGHT_TOTP_SECRET to run this test/);
 });

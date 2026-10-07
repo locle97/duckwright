@@ -7,6 +7,7 @@ import { renderApiSpec } from "./exportApi.ts";
 import { resolvePath } from "./paths.ts";
 import { redactBody } from "./redact.ts";
 import { checkRequestCallArgs, renderRequestSetup } from "./request.ts";
+import { CODE_MASK } from "./scrub.ts";
 import { splitLines } from "./text.ts";
 
 export const SPEC_NAME = "duckwright.spec.ts";
@@ -20,6 +21,35 @@ const UI_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 const COOKIES_NOTE = "request replays use the test's own browser context; add test.use({ storageState: 'auth.json' }) if the site needs the run's cookies";
 export const NO_ASSERTIONS = "no assertions recorded; add expect(...) lines by hand";
+export const TOTP_IMPORT = "import { createHmac } from 'node:crypto';\n";
+// Plain JavaScript that is also valid TypeScript (no annotations), so the tests can run it as is.
+export const TOTP_HELPER = `function totp() {
+  let secret = process.env.DUCKWRIGHT_TOTP_SECRET;
+  if (!secret) throw new Error('set DUCKWRIGHT_TOTP_SECRET to run this test');
+  if (/^otpauth:/i.test(secret)) secret = new URL(secret).searchParams.get('secret') || '';
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bytes = [];
+  let bits = 0;
+  let acc = 0;
+  for (const ch of secret.replace(/[\\s=-]/g, '').toUpperCase()) {
+    acc = (acc << 5) | alphabet.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((acc >>> (bits - 8)) & 255);
+      bits -= 8;
+      acc &= (1 << bits) - 1;
+    }
+  }
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+  const mac = createHmac('sha1', Buffer.from(bytes)).update(counter).digest();
+  const offset = mac[mac.length - 1] & 15;
+  const value = ((mac[offset] & 127) << 24) | (mac[offset + 1] << 16) | (mac[offset + 2] << 8) | mac[offset + 3];
+  return String(value % 1000000).padStart(6, '0');
+}
+`;
+const MANUAL_NOTE = "// NOTE: this test has manual 2FA steps (marked MANUAL) and cannot run unattended.\n";
+const MASKED_CODE = new RegExp(`(['"\`])${CODE_MASK.replace(/[[\]]/g, "\\$&")}\\1`, "g");
 
 /** One action in history.json, with the Playwright code playwright-cli ran for it. */
 export interface HistoryAction {
@@ -119,6 +149,8 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   let setups = 0;
   let hasCode = false;
   let asserted = false;
+  let usesTotp = false;
+  const manual: string[] = [];
   for (const [index, rec] of data.history.entries()) {
     const results: unknown[] = Array.isArray(rec.results) ? rec.results : [];
     for (const [i, a] of rec.actions.entries()) {
@@ -154,6 +186,39 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
           lines[index].push(...renderRequestSetup(args, origin, status, ++setups).map((line) => `  ${line}`));
           hasCode = true;
         }
+        continue;
+      }
+      if (cmd === "twofa") {
+        const args = Array.isArray(a.args) ? a.args : [];
+        const kind = args[0];
+        if (result !== "ok") {
+          if (typeof result === "string" && result.startsWith("error:")) {
+            warnings.push(`twofa in step ${index + 1} failed and was skipped`);
+          }
+          continue;
+        }
+        if (firstUi === null) firstUi = index + 1;
+        const recorded = typeof code === "string" ? code : "";
+        if (kind !== "passkey" && recorded.trim() === "") {
+          throw new ExportError(`twofa in step ${index + 1} has no recorded code to replay`, 1);
+        }
+        if (kind === "totp") {
+          const filled = recorded.replace(MASKED_CODE, "totp()");
+          if (!filled.includes("totp()")) {
+            throw new ExportError(`twofa in step ${index + 1} has no recorded code to replay`, 1);
+          }
+          lines[index].push(...splitLines(filled).map((line) => `  ${line.includes("totp()") ? `${line} // 2FA` : line}`));
+          usesTotp = true;
+        } else if (kind === "sms" || kind === "email" || kind === "passkey") {
+          lines[index].push(
+            kind === "passkey" ? "  // MANUAL: approve the passkey prompt" : `  // MANUAL: enter the ${kind} code here`,
+            "  await page.pause();",
+          );
+          manual.push(`twofa ${kind} in step ${index + 1} is a manual step; the test cannot run unattended`);
+        } else {
+          continue;
+        }
+        hasCode = true;
         continue;
       }
       if (firstUi === null && UI_COMMANDS.has(cmd) && result === "ok") firstUi = index + 1;
@@ -193,7 +258,9 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   warnings.unshift(...tabs.map((t) => `run used ${t}; edit the test by hand, it assumes a single page`));
   if (setups > 0) warnings.push(COOKIES_NOTE);
   if (!asserted) warnings.push(NO_ASSERTIONS);
-  const spec = HEADER + "\n"
+  warnings.push(...manual);
+  const head = HEADER + (manual.length > 0 ? MANUAL_NOTE : "") + (usesTotp ? `${TOTP_IMPORT}\n${TOTP_HELPER}` : "");
+  const spec = head + "\n"
     + `test(${JSON.stringify(data.task)}, async ({ page }) => {\n`
     + body.map((line) => line + "\n").join("")
     + "});\n";
