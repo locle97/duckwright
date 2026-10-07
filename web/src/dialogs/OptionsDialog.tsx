@@ -8,7 +8,7 @@ import { clean } from "../clean.ts";
 import type { WebState } from "../store.ts";
 import { Button, Modal } from "../ui.tsx";
 
-type Draft = { model: string; maxSteps: string; headed: string; export: string; snapshot: string };
+type Draft = { model: string; maxSteps: string; headed: string; snapshot: string };
 
 /** Options for one task (`taskId`) or, with null, the global options. An empty field inherits. */
 export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispatch: Dispatch }) {
@@ -19,7 +19,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
   const onOff = (v: boolean | undefined): string => (v === undefined ? "" : v ? "on" : "off");
   const [draft, setDraft] = useState<Draft>({
     model: overrides.model ?? "", maxSteps: overrides.maxSteps === undefined ? "" : String(overrides.maxSteps),
-    headed: onOff(overrides.headed), export: onOff(overrides.export), snapshot: overrides.snapshot ?? "",
+    headed: onOff(overrides.headed), snapshot: overrides.snapshot ?? "",
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +39,6 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
       o.maxSteps = n;
     }
     if (draft.headed !== "") o.headed = draft.headed === "on";
-    if (draft.export !== "") o.export = draft.export === "on";
     if (draft.snapshot !== "") o.snapshot = draft.snapshot;
     setBusy(true);
     const r = task ? await checked(p.dispatch, api.put(`/api/tasks/${task.id}/overrides`, o)) : await checked(p.dispatch, api.put("/api/globals", o));
@@ -47,7 +46,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
     if (r.ok) close();
     else setError(r.error);
   };
-  const onOffSelect = (k: "headed" | "export", label: string, now: boolean) => (
+  const onOffSelect = (k: "headed", label: string, now: boolean) => (
     <div className="field">
       <label htmlFor={`opt-${k}`}>{label}</label>
       <select id={`opt-${k}`} value={draft[k]} onChange={(e) => set(k, e.target.value)}>
@@ -64,7 +63,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
       onClose={close}
       footer={
         <>
-          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", export: "", snapshot: "" })}>Reset all</Button>
+          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "" })}>Reset all</Button>
           <Button onClick={close}>Cancel</Button>
           <Button kind="green" disabled={busy} onClick={() => void save()}>Save</Button>
         </>
@@ -79,7 +78,6 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
         <input id="opt-max" inputMode="numeric" value={draft.maxSteps} placeholder={`inherit (${effective.maxSteps})`} onChange={(e) => set("maxSteps", e.target.value)} />
       </div>
       {onOffSelect("headed", "headed", effective.headed)}
-      {onOffSelect("export", "export", effective.export)}
       <div className="field">
         <label htmlFor="opt-snapshot">snapshot mode</label>
         <select id="opt-snapshot" value={draft.snapshot} onChange={(e) => set("snapshot", e.target.value)}>

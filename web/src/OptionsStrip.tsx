@@ -19,7 +19,6 @@ export function OptionsStrip(p: { state: WebState; dispatch(a: Action): void }) 
       {chip("model", eff.model, o.model !== undefined)}
       {chip("max steps", String(eff.maxSteps), o.maxSteps !== undefined)}
       {chip("headed", eff.headed ? "on" : "off", o.headed !== undefined)}
-      {chip("export", eff.export ? "on" : "off", o.export !== undefined)}
       {chip("snapshot", eff.snapshot, o.snapshot !== undefined)}
     </div>
   );

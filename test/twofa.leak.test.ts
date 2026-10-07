@@ -73,7 +73,7 @@ for (const sc of scenarios) for (const snapshot of ["full", "grep"] as const) te
   const human: Human = { code: async (kind) => (kind === "totp" ? TYPED_TOTP : SMS), approve: async () => {} };
   const args: RunArgs = {
     task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
-    state: null, allowFileAccess: false, export: true, snapshot, print: false, maxParallel: null, plan: null, network: true,
+    state: null, allowFileAccess: false, snapshot, print: false, maxParallel: null, plan: null, network: true,
     twofaTimeout: 300, web: false, port: null,
   };
   const printed: string[] = [];

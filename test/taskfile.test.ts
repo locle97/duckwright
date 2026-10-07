@@ -41,9 +41,9 @@ test("body_only", () => {
 });
 
 test("front_matter_and_body", () => {
-  const p = w(tmpDir(), "---\nmodel: opus\nmax-steps: 15\nheaded: true\nexport: false\nsession: s1\n---\nGo\n");
+  const p = w(tmpDir(), "---\nmodel: opus\nmax-steps: 15\nheaded: true\nsession: s1\n---\nGo\n");
   const tf = loadTaskFile(p);
-  assert.deepEqual(tf.settings, { model: "opus", maxSteps: 15, headed: true, export: false, session: "s1" });
+  assert.deepEqual(tf.settings, { model: "opus", maxSteps: 15, headed: true, session: "s1" });
   assert.equal(tf.task, "Go");
 });
 
@@ -53,8 +53,8 @@ test("comments_and_quotes", () => {
 });
 
 test("quoted_typed_values", () => {
-  const p = w(tmpDir(), "---\nexport: \"true\"\nmax-steps: '15'\n---\nGo");
-  assert.deepEqual(loadTaskFile(p).settings, { export: true, maxSteps: 15 });
+  const p = w(tmpDir(), "---\nheaded: \"true\"\nmax-steps: '15'\n---\nGo");
+  assert.deepEqual(loadTaskFile(p).settings, { headed: true, maxSteps: 15 });
 });
 
 test("quoted_value_then_comment_without_space", () => {
@@ -298,7 +298,6 @@ test("settingvalue_messages_match_front_matter", () => {
   const cases: [string, string, string][] = [
     ["max-steps", "0", "max-steps must be a whole number of at least 1, got \"0\""],
     ["headed", "yes", "headed must be true or false, got \"yes\""],
-    ["export", "1", "export must be true or false, got \"1\""],
     ["snapshot", "tree", "snapshot must be full, grep or hybrid, got \"tree\""],
   ];
   for (const [key, raw, message] of cases) {

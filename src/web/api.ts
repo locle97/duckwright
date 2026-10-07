@@ -70,10 +70,6 @@ export function parseOverrides(raw: unknown): Overrides | string {
     if (typeof raw.headed !== "boolean") return "headed must be true or false";
     o.headed = raw.headed;
   }
-  if (raw.export !== undefined) {
-    if (typeof raw.export !== "boolean") return "export must be true or false";
-    o.export = raw.export;
-  }
   if (raw.snapshot !== undefined) {
     if (typeof raw.snapshot !== "string" || !SNAPSHOTS.includes(raw.snapshot)) return "snapshot must be hybrid, full or grep";
     o.snapshot = raw.snapshot as SnapshotMode;

@@ -6,7 +6,7 @@ import { formKey, formResult, openForm } from "../../src/tui/form.ts";
 import type { FormState } from "../../src/tui/form.ts";
 import { key } from "../../src/tui/keypress.ts";
 
-const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, export: false, snapshot: "hybrid" };
+const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid" };
 
 function press(f: FormState, ...specs: string[]): FormState {
   return specs.reduce((s, spec) => formKey(s, key(spec)), f);
@@ -16,10 +16,10 @@ test("form_open_prefills_effective_and_overrides", () => {
   const f = openForm(7, EFF, { maxSteps: 5, headed: true });
   assert.equal(f.taskId, 7);
   assert.equal(f.focus, 0);
-  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "export", "snapshot"]);
-  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "export", "snapshot mode"]);
-  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "false", "hybrid"]);
-  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false, false]);
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot"]);
+  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode"]);
+  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid"]);
+  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false]);
   assert.ok(f.fields.every((x) => x.error === null));
 });
 
@@ -31,16 +31,14 @@ test("form_toggle_and_cycle", () => {
   assert.equal(f.fields[2].overridden, true);
   f = press(f, "left");
   assert.equal(f.fields[2].raw, "false");
-  f = press(f, "tab", "right");
+  f = press(f, "tab", "space");
   assert.equal(f.focus, 3);
-  assert.equal(f.fields[3].raw, "true");
-  f = press(f, "down", "space");
-  assert.equal(f.fields[4].raw, "full");
+  assert.equal(f.fields[3].raw, "full");
   f = press(f, "space");
-  assert.equal(f.fields[4].raw, "grep");
+  assert.equal(f.fields[3].raw, "grep");
   f = press(f, "right");
-  assert.equal(f.fields[4].raw, "hybrid");
-  f = press(f, "up", "up", "up", "up", "up");
+  assert.equal(f.fields[3].raw, "hybrid");
+  f = press(f, "up", "up", "up", "up");
 });
 
 test("form_text_editing", () => {
@@ -74,7 +72,7 @@ test("form_ctrl_r_clears_override", () => {
 
 test("form_result_only_overridden", () => {
   let f = openForm(1, EFF, { model: "m2" });
-  f = press(f, "down", "down", "space", "down", "down", "space");
+  f = press(f, "down", "down", "space", "down", "space");
   const r = formResult(f);
   assert.deepEqual(r, { ok: true, overrides: { model: "m2", headed: true, snapshot: "full" } });
 });

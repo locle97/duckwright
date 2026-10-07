@@ -100,7 +100,7 @@ test("DELETE /api/tasks/:id removes, 409 when refused, 404 when unknown", async 
 
 test("overrides and globals are validated then saved", async () => {
   const { m, ctx } = setup();
-  const good = { model: "opus", maxSteps: 9, headed: true, export: false, snapshot: "grep" };
+  const good = { model: "opus", maxSteps: 9, headed: true, snapshot: "grep" };
   assert.equal((await call(ctx, "PUT", "/api/tasks/1/overrides", good)).status, 200);
   assert.deepEqual(m.overrides, [{ id: 1, o: good }]);
   assert.equal((await call(ctx, "PUT", "/api/globals", { model: "haiku" })).status, 200);

@@ -15,7 +15,6 @@ export type TaskSettings = Partial<{
   skill: string;
   session: string;
   state: string;
-  export: boolean;
   network: boolean;
   twofaTimeout: number;
   snapshot: SnapshotMode;
@@ -34,7 +33,6 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   skill: ["skill", "path"],
   session: ["session", "str"],
   state: ["state", "path"],
-  export: ["export", "bool"],
   network: ["network", "bool"],
   "twofa-timeout": ["twofaTimeout", "int"],
   snapshot: ["snapshot", "snapshot"],
@@ -136,7 +134,7 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
  * Throws TaskFileError with the front-matter message, minus the file and line prefix.
  */
 export function settingValue(
-  key: "max-steps" | "model" | "headed" | "export" | "snapshot", raw: string,
+  key: "max-steps" | "model" | "headed" | "snapshot", raw: string,
 ): string | number | boolean {
   try {
     if (!raw) throw new LineError(`"${key}" has no value`);

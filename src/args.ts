@@ -17,7 +17,6 @@ export interface RunArgs {
   session: string;
   state: string | null;
   allowFileAccess: boolean;
-  export: boolean;
   network: boolean;
   twofaTimeout: number;
   snapshot: SnapshotMode;
@@ -57,7 +56,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE
   + "                  [--max-steps MAX_STEPS] [--model MODEL]\n"
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
   + "                  [--state FILE] [--allow-file-access]\n"
-  + "                  [--export | --no-export] [--network | --no-network]\n"
+  + "                  [--network | --no-network]\n"
   + "                  [--twofa-timeout SEC]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
   + "                  [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
@@ -99,9 +98,6 @@ options:
                         in the browser. A hijacked agent could read any file
                         you can (e.g. ~/.ssh) and leak it; only use with
                         trusted pages and trusted tasks
-  --export, --no-export
-                        after a successful run, write a Playwright test to
-                        runs/<id>/${SPEC_NAME}
   --network, --no-network
                         record the API calls the page makes each step,
                         redacted, under runs/<id>/network (default on)
@@ -125,7 +121,7 @@ options:
 
 With no -p, duckwright opens the interactive TUI (or the web UI with --web) and starts any task or task
 files given. Run a task file and exit: duckwright -p -f tasks/login.md. To
-turn an earlier run into a test: duckwright export runs/<id>. Plan a test
+re-export an earlier run's test: duckwright export runs/<id>. Plan a test
 plan: duckwright plan docs/qa-plan.md
 `;
 
@@ -196,7 +192,6 @@ const RUN_SPEC: OptionSpec = {
     "--max-steps": "--max-steps", "--model": "--model", "--skill": "--skill",
     "--session": "--session", "--state": "--state",
     "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
-    "--export": "--export/--no-export", "--no-export": "--export/--no-export",
     "--twofa-timeout": "--twofa-timeout", "--network": "--network/--no-network", "--no-network": "--network/--no-network",
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
@@ -218,7 +213,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   };
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
-    session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid", network: true,
+    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", network: true,
     print: false, maxParallel: null, web: false, port: null, plan: null, twofaTimeout: 300,
     ...settings,
   };
@@ -296,7 +291,6 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     if (name === "-h" || name === "--help") return { kind: "help", text: RUN_HELP };
     if (name === "--version") return { kind: "version" };
     if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
-    else if (name === "--export" || name === "--no-export") args.export = name === "--export";
     else if (name === "--network" || name === "--no-network") args.network = name === "--network";
     else if (name === "--allow-file-access") args.allowFileAccess = true;
     else if (name === "-p" || name === "--print") args.print = true;
