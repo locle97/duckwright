@@ -7,38 +7,65 @@ export function Sidebar(p: { state: WebState; dispatch(a: Action): void; open: b
   const { state: s, dispatch } = p;
   const rows = visibleRows(s);
 
+  const pick = (selection: any) => {
+    dispatch({ type: "select", selection });
+    p.onPicked();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, selection: any) => {
+    if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      pick(selection);
+    }
+  };
+
   const renderRow = (r: Row) => {
     if (r.kind === "plan") {
       const t = planTally(s, r.plan);
       const sel = s.selection?.kind === "plan" && s.selection.id === r.plan.id;
       const closed = s.collapsed.includes(r.plan.id);
+      const rowClasses = ["row", "plan", sel ? "sel" : ""].filter(Boolean).join(" ");
       return (
-        <div key={`p${r.plan.id}`} className={`row plan ${sel ? "sel" : ""}`} onClick={() => { dispatch({ type: "select", selection: { kind: "plan", id: r.plan.id } }); p.onPicked(); }}
-          role="button" tabIndex={0}
-          onKeyDown={(e) => { if (e.key === "Enter") dispatch({ type: "select", selection: { kind: "plan", id: r.plan.id } }); }}>
-          <span className="name">
-            <span onClick={(e) => { e.stopPropagation(); dispatch({ type: "collapse", id: r.plan.id }); }} title={closed ? "Expand" : "Collapse"}>{closed ? "▸" : "▾"} </span>
-            {clean(r.plan.name)}
-          </span>
-          <span className="row-actions">
-            {r.plan.state === "planning" ? <Tag tone="run">planning</Tag> : null}
-            {r.plan.state === "failed" ? <Tag tone="fail">failed</Tag> : null}
-            {r.plan.state === "ready" ? <Tag tone={t.running ? "run" : t.failed > 0 ? "fail" : t.passed === t.total && t.total > 0 ? "pass" : "idle"}>{t.passed}/{t.total}</Tag> : null}
-          </span>
+        <div key={`p${r.plan.id}`} className={rowClasses} aria-current={sel ? "true" : undefined}>
+          <button
+            type="button"
+            onClick={() => { dispatch({ type: "collapse", id: r.plan.id }); }}
+            aria-expanded={!closed}
+            aria-label={closed ? "Expand plan" : "Collapse plan"}
+            title={closed ? "Expand" : "Collapse"}
+            className="caret-button">
+            {closed ? "▸" : "▾"}
+          </button>
+          <div
+            className="selection-control"
+            onClick={() => { pick({ kind: "plan", id: r.plan.id }); }}
+            role="button" tabIndex={0}
+            onKeyDown={(e) => { handleKeyDown(e, { kind: "plan", id: r.plan.id }); }}>
+            <span className="name">
+              {clean(r.plan.name)}
+            </span>
+            <span className="row-actions">
+              {r.plan.state === "planning" ? <Tag tone="run">planning</Tag> : null}
+              {r.plan.state === "failed" ? <Tag tone="fail">failed</Tag> : null}
+              {r.plan.state === "ready" ? <Tag tone={t.running ? "run" : t.failed > 0 ? "fail" : t.passed === t.total && t.total > 0 ? "pass" : "idle"}>{t.passed}/{t.total}</Tag> : null}
+            </span>
+          </div>
         </div>
       );
     }
     const task = r.task;
     const sel = s.selection?.kind === "task" && s.selection.id === task.id;
     const tag = STATE_TAG[task.state];
+    const rowClasses = ["row", r.planId !== null ? "child" : "", task.past && task.runCount === 0 ? "past" : "", sel ? "sel" : ""].filter(Boolean).join(" ");
     return (
-      <div key={`t${task.id}`} className={`row ${r.planId !== null ? "child" : ""} ${task.past && task.runCount === 0 ? "past" : ""} ${sel ? "sel" : ""}`}
-        onClick={() => { dispatch({ type: "select", selection: { kind: "task", id: task.id } }); p.onPicked(); }}
+      <div key={`t${task.id}`} className={rowClasses}
+        onClick={() => { pick({ kind: "task", id: task.id }); }}
         role="button" tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter") dispatch({ type: "select", selection: { kind: "task", id: task.id } }); }}>
+        onKeyDown={(e) => { handleKeyDown(e, { kind: "task", id: task.id }); }}
+        aria-current={sel ? "true" : undefined}>
         <span className="name" title={clean(task.text)}>{task.past && task.runCount === 0 ? "past: " : ""}{clean(task.name)}</span>
         <span className="row-actions">
-          {task.twofa ? <Tag tone="ask">?</Tag> : null}
+          {task.twofa ? <span title="waiting for a code"><Tag tone="ask">?</Tag></span> : null}
           <Tag tone={tag.tone}>{tag.label}</Tag>
         </span>
       </div>
