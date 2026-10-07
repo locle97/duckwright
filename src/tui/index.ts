@@ -1,4 +1,4 @@
-// The real `--tui` entry point: mounts the Ink workspace on the alternate screen and hands back
+// The real TUI entry point: mounts the Ink workspace on the alternate screen and hands back
 // a handle the CLI awaits, and uses to put the terminal back, whatever happened.
 import { render } from "ink";
 import { createElement as h } from "react";

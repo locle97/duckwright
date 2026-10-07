@@ -43,6 +43,7 @@ function env(): Env {
     deps: (over = {}) => ({
       which: (n) => "/usr/bin/" + n,
       createAgent: never,
+      isTTY: () => false,
       stdout: (l) => out.push(...l.split("\n")),
       stderr: (l) => err.push(...l.split("\n")),
       ...over,
@@ -482,7 +483,7 @@ test("task_and_file_exits_2", async () => {
 
 test("neither_task_nor_file_exits_2", async () => {
   const e = env();
-  assert.equal(await main(e.argv.slice(1), e.deps()), 2);
+  assert.equal(await main(["-p", ...e.argv.slice(1)], e.deps()), 2);
   assert.ok(e.err.join("\n").includes("error: give a task or --file"));
 });
 
@@ -872,37 +873,55 @@ function fakeTui(rejectWith: Error | null = null): FakeTui {
 
 const tuiAgent = agentWith(async () => result(true, [], 0.5));
 
-test("tui_needs_tty", async () => {
+test("no_tty_falls_back_to_print", async () => {
   const e = env();
   const fake = fakeTui();
-  const code = await main(["--tui", "--skill", e.argv[2]], e.deps({ isTTY: () => false, loadTui: fake.load }));
-  assert.equal(code, 2);
-  assert.deepEqual(e.err, ["--tui needs an interactive terminal"]);
+  const ok = agentWith(async () => result(true));
+  assert.equal(await main([...e.argv, "--theme", "dark", "--max-parallel", "2"],
+    e.deps({ isTTY: () => false, loadTui: fake.load, createAgent: ok })), 0);
+  assert.equal(fake.loads, 0);
+  assert.equal(histories(e.tmp).length, 1);
+});
+
+test("no_tty_without_task_says_why", async () => {
+  const e = env();
+  const fake = fakeTui();
+  assert.equal(await main(["--skill", e.argv[2]], e.deps({ isTTY: () => false, loadTui: fake.load })), 2);
+  assert.ok(e.err.some((l) => l.includes("no terminal for the TUI: give a task or --file to run in print mode")));
   assert.equal(fake.loads, 0);
 });
 
-test("tui_rejects_task_and_file", async () => {
+test("print_skips_the_tui_on_a_terminal", async () => {
   const e = env();
   const fake = fakeTui();
-  const over = e.deps({ isTTY: () => true, loadTui: fake.load });
-  assert.equal(await main(["--tui", "task"], over), 2);
-  assert.ok(e.err.some((l) => l.includes("give tasks inside the TUI, not with --tui")));
-  e.err.length = 0;
-  assert.equal(await main(["--tui", "-f", "a.md"], over), 2);
-  assert.ok(e.err.some((l) => l.includes("give tasks inside the TUI, not with --tui")));
+  const ok = agentWith(async () => result(true));
+  assert.equal(await main(["-p", ...e.argv], e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: ok })), 0);
   assert.equal(fake.loads, 0);
+  assert.equal(histories(e.tmp).length, 1);
 });
 
-test("tui_max_parallel_needs_tui", async () => {
+test("print_needs_a_task", async () => {
   const e = env();
-  assert.equal(await main([...e.argv, "--max-parallel", "2"], e.deps()), 2);
-  assert.ok(e.err.some((l) => l.includes("--max-parallel needs --tui")));
+  assert.equal(await main(["-p", "--skill", e.argv[2]], e.deps({ isTTY: () => true })), 2);
+  assert.ok(e.err.some((l) => l.endsWith("error: give a task or --file")));
+});
+
+test("print_rejects_tui_options", async () => {
+  for (const [flags, msg] of [
+    [["--max-parallel", "2"], "--max-parallel applies to the TUI, not with -p"],
+    [["--past", "3"], "--past applies to the TUI, not with -p"],
+    [["--theme", "dark"], "--theme applies to the TUI, not with -p"],
+  ] as const) {
+    const e = env();
+    assert.equal(await main(["-p", ...e.argv, ...flags], e.deps()), 2);
+    assert.ok(e.err.some((l) => l.includes(msg)), msg);
+  }
 });
 
 test("tui_preflight_fails_before_load", async () => {
   const e = env();
   const fake = fakeTui();
-  const code = await main(["--tui", "--skill", path.join(e.tmp, "missing.md")],
+  const code = await main(["--skill", path.join(e.tmp, "missing.md")],
     e.deps({ isTTY: () => true, loadTui: fake.load }));
   assert.equal(code, 2);
   assert.ok(e.err[0].startsWith("playwright-cli skill not found"));
@@ -912,7 +931,7 @@ test("tui_preflight_fails_before_load", async () => {
 test("tui_prints_summary_and_exit_code", async () => {
   const e = env();
   const fake = fakeTui();
-  const code = await main(["--tui", "--skill", e.argv[2]],
+  const code = await main(["--skill", e.argv[2]],
     e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
   assert.equal(code, 0);
   assert.equal(fake.restores, 1);
@@ -924,7 +943,7 @@ test("tui_restores_terminal_when_done_rejects", async () => {
   const e = env();
   const fake = fakeTui(new Error("boom"));
   await assert.rejects(
-    main(["--tui", "--skill", e.argv[2]],
+    main(["--skill", e.argv[2]],
       e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent })),
     /boom/,
   );
@@ -934,7 +953,7 @@ test("tui_restores_terminal_when_done_rejects", async () => {
 test("tui_max_parallel_reaches_manager", async () => {
   const e = env();
   const fake = fakeTui();
-  await main(["--tui", "--max-parallel", "1", "--skill", e.argv[2]],
+  await main(["--max-parallel", "1", "--skill", e.argv[2]],
     e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
   const m = fake.manager!;
   const a = m.addTyped("a");
@@ -975,7 +994,7 @@ test("tui_outside_sigint_quits", { timeout: 5000 }, async () => {
   const e = env();
   const fake = quitOnlyTui(true);
   const ac = new AbortController();
-  const p = main(["--tui", "--skill", e.argv[2]],
+  const p = main(["--skill", e.argv[2]],
     e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: untilAborted, signal: ac.signal }));
   await new Promise((r) => setTimeout(r, 20));
   ac.abort();
@@ -990,7 +1009,7 @@ test("tui_outside_sigint_quits_without_runs", { timeout: 5000 }, async () => {
   const e = env();
   const fake = quitOnlyTui(false);
   const ac = new AbortController();
-  const p = main(["--tui", "--skill", e.argv[2]],
+  const p = main(["--skill", e.argv[2]],
     e.deps({ isTTY: () => true, loadTui: fake.load, signal: ac.signal }));
   await new Promise((r) => setTimeout(r, 20));
   ac.abort();
@@ -1025,20 +1044,73 @@ function optsTui(): OptsTui {
   return t;
 }
 
-test("past_and_theme_need_tui", async () => {
-  for (const [flags, msg] of [
-    [["--past", "3"], "--past needs --tui"],
-    [["--theme", "dark"], "--theme needs --tui"],
-  ] as const) {
-    const e = env();
-    assert.equal(await main([...e.argv, ...flags], e.deps()), 2);
-    assert.ok(e.err.some((l) => l.includes(msg)), msg);
-  }
+/** A TUI that starts nothing itself and closes once `n` tasks have passed. */
+function autoTui(n: number) {
+  const t = { loads: 0, manager: null as ManagerLike | null, load: null as never as () => Promise<TuiModule> };
+  t.load = async () => {
+    t.loads++;
+    return {
+      startTui({ manager }): TuiHandle {
+        t.manager = manager;
+        const done = new Promise<void>((resolve) => {
+          const off = manager.subscribe(() => {
+            if (manager.list().filter((x) => x.state === "passed").length === n) {
+              off();
+              setImmediate(resolve);
+            }
+          });
+        });
+        return { done, restoreTerminal: () => {}, quit: () => {} };
+      },
+    };
+  };
+  return t;
+}
+
+test("tui_starts_the_given_task", async () => {
+  const e = env();
+  const t = autoTui(1);
+  const code = await main(e.argv, e.deps({ isTTY: () => true, loadTui: t.load, createAgent: tuiAgent }));
+  assert.equal(code, 0);
+  assert.equal(t.loads, 1);
+  assert.deepEqual(t.manager!.list().map((x) => x.text), ["task"]);
+  assert.ok(e.out[0].startsWith("Batch: 1 passed, 0 failed, 0 stopped"));
+  assert.ok(e.out[1].startsWith('pass  "task"'));
+});
+
+test("tui_queues_given_files_past_the_limit", async () => {
+  const e = env();
+  fs.writeFileSync(path.join(e.tmp, "a.md"), "task a\n");
+  fs.writeFileSync(path.join(e.tmp, "b.md"), "task b\n");
+  const t = autoTui(2);
+  let peak = 0;
+  const createAgent = agentWith(async () => {
+    peak = Math.max(peak, t.manager!.activeCount());
+    await new Promise((r) => setTimeout(r, 5));
+    return result(true);
+  });
+  const code = await main(["-f", "a.md", "b.md", "--max-parallel", "1", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: t.load, createAgent }));
+  assert.equal(code, 0);
+  assert.equal(peak, 1);
+  assert.deepEqual(t.manager!.list().map((x) => x.name), ["a.md", "b.md"]);
+  assert.ok(e.out[0].startsWith("Batch: 2 passed"));
+});
+
+test("tui_bad_task_file_fails_before_load", async () => {
+  const e = env();
+  const t = autoTui(1);
+  assert.equal(await main(["-f", "missing.md", "--skill", e.argv[2]], e.deps({ isTTY: () => true, loadTui: t.load })), 2);
+  assert.ok(e.err[0].includes("missing.md"));
+  assert.equal(t.loads, 0);
+});
+
+test("past_and_theme_bad_values", async () => {
   const e1 = env();
-  assert.equal(await main(["--tui", "--past", "x"], e1.deps()), 2);
+  assert.equal(await main(["--past", "x"], e1.deps({ isTTY: () => true })), 2);
   assert.ok(e1.err.some((l) => l.includes("argument --past: invalid int value: 'x'")));
   const e2 = env();
-  assert.equal(await main(["--tui", "--theme", "blue"], e2.deps()), 2);
+  assert.equal(await main(["--theme", "blue"], e2.deps({ isTTY: () => true })), 2);
   assert.ok(e2.err.some((l) => l.includes("invalid choice: 'blue'")));
 });
 
@@ -1051,7 +1123,7 @@ test("tui_passes_theme_notices_and_past", async () => {
     const e = env();
     const t = optsTui();
     let limit = -1;
-    const code = await main(["--tui", "--theme", "light", "--past", "5", "--skill", e.argv[2]], e.deps({
+    const code = await main(["--theme", "light", "--past", "5", "--skill", e.argv[2]], e.deps({
       isTTY: () => true, loadTui: t.load,
       loadPastRuns: (l) => { limit = l; return { runs: [aPastRun()], skipped }; },
     }));
@@ -1067,7 +1139,7 @@ test("tui_past_theme_defaults_and_zero", async () => {
   const e = env();
   const t = optsTui();
   let limit = -1;
-  await main(["--tui", "--skill", e.argv[2]], e.deps({
+  await main(["--skill", e.argv[2]], e.deps({
     isTTY: () => true, loadTui: t.load, loadPastRuns: (l) => { limit = l; return { runs: [], skipped: 0 }; },
   }));
   assert.equal(limit, 20);
@@ -1075,7 +1147,7 @@ test("tui_past_theme_defaults_and_zero", async () => {
 
   const e2 = env();
   let called = false;
-  await main(["--tui", "--past", "0", "--skill", e2.argv[2]], e2.deps({
+  await main(["--past", "0", "--skill", e2.argv[2]], e2.deps({
     isTTY: () => true, loadTui: optsTui().load, loadPastRuns: () => { called = true; return { runs: [], skipped: 0 }; },
   }));
   assert.equal(called, false);
@@ -1103,7 +1175,7 @@ test("tui_sink_warning_becomes_toast", async () => {
       return { done, restoreTerminal: () => {}, quit: () => {} };
     },
   });
-  await main(["--tui", "--skill", e.argv[2]], e.deps({
+  await main(["--skill", e.argv[2]], e.deps({
     isTTY: () => true, loadTui: load, loadPastRuns: () => ({ runs: [], skipped: 0 }), createAgent: sinkBlocker(),
   }));
   const t = toasts.find((x) => x.type === "toast" && x.message.startsWith("could not write "));

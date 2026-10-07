@@ -39,19 +39,19 @@ case "$err" in
   *) echo "stderr missing 'claude CLI not found':" >&2; echo "$err" >&2; exit 1 ;;
 esac
 
-# --tui refuses to start without a terminal.
+# With no terminal and no task, the TUI cannot open and print mode has nothing to run.
 set +e
-err="$("$prefix/bin/duckwright" --tui </dev/null 2>&1 >/dev/null)"
+err="$("$prefix/bin/duckwright" </dev/null 2>&1 >/dev/null)"
 code=$?
 set -e
 if [ "$code" -ne 2 ]; then
-  echo "expected --tui exit code 2, got $code" >&2
+  echo "expected no-terminal exit code 2, got $code" >&2
   echo "$err" >&2
   exit 1
 fi
 case "$err" in
-  *"--tui needs an interactive terminal"*) ;;
-  *) echo "stderr missing '--tui needs an interactive terminal':" >&2; echo "$err" >&2; exit 1 ;;
+  *"no terminal for the TUI"*) ;;
+  *) echo "stderr missing 'no terminal for the TUI':" >&2; echo "$err" >&2; exit 1 ;;
 esac
 
 # Ink and React must resolve from the installed tarball.
