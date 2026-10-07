@@ -27,6 +27,9 @@ class EchoPW extends PlaywrightCLI {
       this.filled.push(args[1]);
       return { code: 0, stdout: `### Ran Playwright code\n\`\`\`js\nawait page.getByLabel('Code').fill('${args[1]}');\n\`\`\`\n`, stderr: "" };
     }
+    if (cmd === "requests" && args[0] === "--clear") return { code: 0, stdout: "", stderr: "" };
+    if (cmd === "requests") return { code: 0, stdout: `### Result\n1. [GET] http://h/a?c=${this.last} => [200] OK\n`, stderr: "" };
+    if (cmd === "request") return { code: 0, stdout: `### Result\nGeneral\n  url: http://h/a?c=${this.last}\n  duration: 5ms\n`, stderr: "" };
     return { code: 0, stdout: `- tab 0 (current): Verify ${this.last}`, stderr: "" };
   }
   override async open(): Promise<ProcResult> { return { code: 0, stdout: "", stderr: "" }; }
@@ -60,7 +63,7 @@ test("no_secret_or_code_reaches_any_file_prompt_or_output", async () => {
   const human: Human = { secret: async () => SECRET, code: async () => SMS, approve: async () => {} };
   const args: RunArgs = {
     task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
-    state: null, allowFileAccess: false, export: true, snapshot: "full", tui: false, maxParallel: null, network: false,
+    state: null, allowFileAccess: false, export: true, snapshot: "full", tui: false, maxParallel: null, network: true,
     twofaTimeout: 300,
   };
   const printed: string[] = [];
@@ -77,6 +80,9 @@ test("no_secret_or_code_reaches_any_file_prompt_or_output", async () => {
   const [totp, sms] = pw.filled;
   assert.match(totp, /^\d{6}$/);
   assert.equal(sms, SMS);
+
+  const networkFiles = filesUnder(path.join(handle.workdir, "network"));
+  assert.ok(networkFiles.length > 0, "network capture wrote no files, so the scan would be vacuous");
 
   const secrets = [SECRET, totp, SMS];
   const haystacks: [string, string][] = [
@@ -96,6 +102,7 @@ test("no_secret_or_code_reaches_any_file_prompt_or_output", async () => {
   const history = JSON.parse(fs.readFileSync(path.join(handle.workdir, "history.json"), "utf8"));
   assert.deepEqual(history.history.map((s: { actions: { cmd: string }[] }) => s.actions[0].cmd), ["twofa", "twofa", "done"]);
   assert.ok(history.history[0].actions[0].code.includes("[2FA CODE]"));
+  assert.ok(history.history[1].actions[0].code.includes("[2FA CODE]"));
   const events = fs.readFileSync(path.join(handle.workdir, "events.jsonl"), "utf8");
   assert.ok(events.includes('"twofa:wait"'));
 });
