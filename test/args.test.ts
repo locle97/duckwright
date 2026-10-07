@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
-    print: false, maxParallel: null, network: true,
+    print: false, maxParallel: null, plan: null, network: true,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
-    print: false, maxParallel: null, network: true,
+    print: false, maxParallel: null, plan: null, network: true,
   });
 });
 

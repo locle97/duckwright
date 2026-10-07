@@ -15,6 +15,7 @@ import type { Theme } from "./theme.ts";
 export const MAX_LINES = 6;
 const MAX_ERRORS = 3;
 const PLACEHOLDER = "Describe a task, or @ a task file or folder…";
+const PLAN_PLACEHOLDER = "@ a plan file to break into tasks, or a planned folder…";
 
 /** The error rows shown: up to MAX_ERRORS, then `…and N more`. */
 function errorRows(errors: string[]): string[] {
@@ -66,23 +67,26 @@ export interface AddBoxProps {
   errors: string[];
   /** Default: the dark 16-colour theme. A plain function, so it takes the theme as a prop. */
   theme?: Theme;
+  /** The box takes a plan file rather than a task. */
+  forPlan?: boolean;
 }
 
-export function AddBox({ compose, focused, width, exists, errors, theme = DEFAULT_THEME }: AddBoxProps): ReactElement {
+export function AddBox({ compose, focused, width, exists, errors, theme = DEFAULT_THEME, forPlan = false }: AddBoxProps): ReactElement {
+  const placeholder = forPlan ? PLAN_PLACEHOLDER : PLACEHOLDER;
   const { lines: all, row, col } = lines(compose);
   const first = Math.min(Math.max(0, row - MAX_LINES + 1), Math.max(0, all.length - MAX_LINES));
   const marked = spans(compose.text, exists);
   const offsets: number[] = [];
   all.reduce((at, line) => (offsets.push(at), at + line.length + 1), 0);
-  // Border and padding take 4 columns, the prompt 2; keep one more for the cursor.
-  const room = Math.max(1, width - 6 - 1);
+  // Border and padding take 4 columns, then the prompt; keep one more for the cursor.
+  const room = Math.max(1, width - 4 - (forPlan ? 7 : 2) - 1);
   const shown = all.slice(first, first + MAX_LINES).map((line, i) => {
     const n = first + i;
-    const prompt = n === 0 ? "› " : "  ";
+    const prompt = n === 0 ? (forPlan ? "plan › " : "› ") : forPlan ? "       " : "  ";
     if (compose.text === "") {
       // While focused the cursor sits on the placeholder's first letter.
       return h(Text, { key: i, wrap: "truncate-end" }, prompt,
-        h(Text, { dimColor: true, inverse: focused }, PLACEHOLDER[0]), h(Text, { dimColor: true }, PLACEHOLDER.slice(1)));
+        h(Text, { dimColor: true, inverse: focused }, placeholder[0]), h(Text, { dimColor: true }, placeholder.slice(1)));
     }
     const pieces = linePieces(marked, offsets[n] ?? 0, line);
     if (!focused || n !== row) {

@@ -27,6 +27,8 @@ export interface PromptPaths {
   snapshotFull: string;
   snapshotGrep: string;
   snapshotHybrid: string;
+  /** Plan mode's planner. */
+  planner: string;
 }
 
 // ../../prompts from both src/runs/ (tests) and dist/runs/ (installed).
@@ -37,6 +39,7 @@ export const PROMPTS: PromptPaths = {
   snapshotFull: path.join(PROMPTS_DIR, "snapshot-full.md"),
   snapshotGrep: path.join(PROMPTS_DIR, "snapshot-grep.md"),
   snapshotHybrid: path.join(PROMPTS_DIR, "snapshot-hybrid.md"),
+  planner: path.join(PROMPTS_DIR, "planner.md"),
 };
 
 export interface AgentLike {

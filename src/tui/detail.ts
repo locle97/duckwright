@@ -1,13 +1,14 @@
-// Detail pane: the selected task's text and settings, or its latest run's header and timeline.
+// Detail pane: the selected task's text and settings, or its latest run's header and timeline;
+// for a plan's header row, the plan: its state, shared setup, notes, tasks in order and skipped scenarios.
 import { Box, Text } from "ink";
 import { createElement as h } from "react";
 import type { ReactElement } from "react";
 
-import type { Effective, TaskSnapshot } from "../runs/manager.ts";
+import type { Effective, PlanSnapshot, TaskSnapshot } from "../runs/manager.ts";
 import { sanitize } from "./sanitize.ts";
-import { selectedRun, selectedTask } from "./state.ts";
+import { planOf, planTally, selectedPlan, selectedRun, selectedTask } from "./state.ts";
 import type { RunView, ViewState } from "./state.ts";
-import { paneBorder } from "./theme.ts";
+import { paneBorder, spinnerFrame } from "./theme.ts";
 import type { Theme } from "./theme.ts";
 import { useTheme } from "./themeContext.ts";
 import { Timeline } from "./timeline.ts";
@@ -33,14 +34,62 @@ export function duration(ms: number): string {
   return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
-function IdleTask({ t }: { t: TaskSnapshot }): ReactElement {
+function PlanDetail({ s, p }: { s: ViewState; p: PlanSnapshot }): ReactElement {
+  const theme = useTheme();
+  const { role } = theme;
+  const tally = planTally(s, p);
+  const muted = (text: string): ReactElement => h(Text, { color: role.muted }, text);
+  let state: ReactElement;
+  if (p.state === "planning") {
+    state = h(Text, { color: role.running }, `${spinnerFrame(s.now)} planning ${duration(s.now - p.startedAt)}`);
+  } else if (p.state === "failed") {
+    state = h(Text, { color: role.error }, "✗ planning failed");
+  } else {
+    const parts = [`${tally.passed}/${tally.total} passed`];
+    if (tally.failed > 0) parts.push(`${tally.failed} failed`);
+    if (tally.running) parts.push(p.queued.length > 0 ? `running, ${p.queued.length} to go` : "running");
+    state = h(Text, {}, parts.join("  "));
+  }
+  const cost = p.cost + tally.cost;
+  const out: (ReactElement | null)[] = [
+    h(Box, { key: "head", flexDirection: "row" },
+      h(Box, { flexShrink: 1 }, row(h(Text, { bold: true }, sanitize(p.name)))),
+      h(Box, { flexShrink: 0, marginLeft: 2 }, row(state, `  $${cost.toFixed(3)}`))),
+    row(muted("plan: "), sanitize(p.source), p.folder !== null ? muted("  tasks: ") : null, p.folder !== null ? sanitize(p.folder) : null),
+  ];
+  if (p.error !== null) out.push(row(h(Text, { color: role.error }, `! ${sanitize(p.error)}`)), row(muted("space plan again · d remove")));
+  if (p.state === "planning") out.push(row(muted("Claude is splitting the plan into one task per scenario. s cancels.")));
+  const section = (key: string, title: string, items: (ReactElement | string)[]): void => {
+    if (items.length === 0) return;
+    out.push(h(Box, { key: `${key}-gap` }, row(" ")), h(Box, { key }, row(h(Text, { bold: true }, title))),
+      ...items.map((x, i) => h(Box, { key: `${key}${i}` }, typeof x === "string" ? row(x) : x)));
+  };
+  if (p.setup !== null) {
+    section("setup", "Shared setup, done first in every task (e edits)", sanitize(p.setup, { multiline: true }).split("\n").map((l) => `  ${l}`));
+  }
+  section("notes", "Before you run (the agent can't do these)", p.notes.map((n) => `  - ${sanitize(n)}`));
+  section("tasks", "Tasks, in run order (J/K move a task)", p.taskIds.flatMap((id, i) => {
+    const t = s.tasks.find((x) => x.id === id);
+    if (!t) return [];
+    const icon = p.queued.includes(id) ? { icon: "◌", color: role.running } : theme.taskIcon(t.state);
+    return [row(`  ${String(i + 1).padStart(String(p.taskIds.length).length)}. `, h(Text, { color: icon.color }, icon.icon), ` ${sanitize(t.name)}`)];
+  }));
+  section("skipped", "Not planned: they need more than a browser", p.skipped.map((x) => `  - ${sanitize(x.id)} ${sanitize(x.title)}: ${sanitize(x.reason)}`));
+  return h(Box, { flexDirection: "column" }, ...out);
+}
+
+function IdleTask({ s, t }: { s: ViewState; t: TaskSnapshot }): ReactElement {
   const { role } = useTheme();
+  const plan = planOf(s, t);
   const text = sanitize(t.text, { multiline: true }).split("\n");
   const width = Math.max(...SETTINGS.map(([, label]) => label.length)) + 2;
   return h(Box, { flexDirection: "column" },
     ...text.map((line, i) => h(Box, { key: `t${i}` }, row(line))),
     row(" "),
     row(h(Text, { color: role.muted }, "source: "), t.source.kind === "file" ? sanitize(t.source.path) : "typed"),
+    plan !== null
+      ? row(h(Text, { color: role.muted }, "plan: "), `${sanitize(plan.name)}, task ${plan.taskIds.indexOf(t.id) + 1} of ${plan.taskIds.length}`)
+      : null,
     row(" "),
     ...SETTINGS.map(([key, label]) => {
       const value = sanitize(String(t.effective[key]));
@@ -77,12 +126,15 @@ export function Detail({ s, width, height, focused }: DetailProps): ReactElement
   const framed = height >= 3;
   const inner = Math.max(0, height - (framed ? 2 : 0));
   const t = selectedTask(s);
+  const p = selectedPlan(s);
   const run = selectedRun(s);
   let body: ReactElement;
-  if (t === null) {
-    body = row(h(Text, { color: theme.role.muted }, "No tasks yet. Press a to add one."));
+  if (p !== null) {
+    body = h(PlanDetail, { s, p });
+  } else if (t === null) {
+    body = row(h(Text, { color: theme.role.muted }, "No tasks yet. Press a to add one, or P to plan a test plan file."));
   } else if (run === null) {
-    body = h(IdleTask, { t });
+    body = h(IdleTask, { s, t });
   } else {
     body = h(Box, { flexDirection: "column" },
       runHeader(t, run, s.now, theme),

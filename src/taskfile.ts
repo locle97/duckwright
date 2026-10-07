@@ -17,6 +17,8 @@ export type TaskSettings = Partial<{
   export: boolean;
   network: boolean;
   snapshot: SnapshotMode;
+  /** A shared setup file whose text is put before the task; resolved by loadTaskFile, never a run setting. */
+  setup: string;
 }>;
 
 type Kind = "int" | "str" | "bool" | "path" | "snapshot";
@@ -33,6 +35,7 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   export: ["export", "bool"],
   network: ["network", "bool"],
   snapshot: ["snapshot", "snapshot"],
+  setup: ["setup", "path"],
 };
 const FENCE = "---";
 const COMMENT = /\s#/;
@@ -45,9 +48,28 @@ export class TaskFileError extends Error {
 }
 
 export interface TaskFile {
+  /** The text the agent gets: the setup file's text first when `setup:` names one, then the body. */
   task: string;
+  /** Run settings from the front matter (never `setup`). */
   settings: TaskSettings;
   baseDir: string;
+  /** The resolved `setup:` file, or null. */
+  setup: string | null;
+}
+
+/** The task text with a shared setup put first, so every task of a plan starts the same way. */
+export function withSetup(setup: string, body: string): string {
+  return `Setup (do this first, then the task below):\n${setup}\n\nTask:\n${body}`;
+}
+
+function readUtf8(p: string, label: string): string {
+  try {
+    // fatal: invalid UTF-8 is an error, as in Python; a leading BOM is dropped.
+    return new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(p));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new TaskFileError(`${label}: file not found`);
+    throw new TaskFileError(`${label}: cannot read: ${(e as Error).message}`);
+  }
 }
 
 /** A problem on one front-matter line; becomes a TaskFileError with its location. */
@@ -148,14 +170,7 @@ function parseSettings(lines: [number, string][], baseDir: string, where: string
  * Errors name `p` as given, so pass the user's string to keep it as typed.
  */
 export function loadTaskFile(p: string): TaskFile {
-  let text: string;
-  try {
-    // fatal: invalid UTF-8 is an error, as in Python; a leading BOM is dropped.
-    text = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(p));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new TaskFileError(`${p}: file not found`);
-    throw new TaskFileError(`${p}: cannot read: ${(e as Error).message}`);
-  }
+  const text = readUtf8(p, p);
   const baseDir = resolvePath(path.dirname(path.resolve(p)));
   const lines = text.replaceAll("\r\n", "\n").split("\n");
   let settings: TaskSettings = {};
@@ -170,7 +185,11 @@ export function loadTaskFile(p: string): TaskFile {
   }
   const task = body.join("\n").trim();
   if (!task) throw new TaskFileError(`${p}: no task text`);
-  return { task, settings, baseDir };
+  const { setup, ...rest } = settings;
+  if (setup === undefined) return { task, settings: rest, baseDir, setup: null };
+  const shared = readUtf8(setup, `${p}: setup ${setup}`).replaceAll("\r\n", "\n").trim();
+  if (!shared) throw new TaskFileError(`${p}: setup ${setup} is empty`);
+  return { task: withSetup(shared, task), settings: rest, baseDir, setup };
 }
 
 export const TASK_SUFFIXES = [".md", ".txt"];

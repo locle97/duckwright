@@ -258,7 +258,7 @@ test("keys_too_small_screen", () => {
 test("hints_per_mode_and_state", () => {
   assert.equal(footer(mk("running")), "⏎ details · tab add · p pause · s stop · ? help");
   assert.equal(footer(mk("paused")), "⏎ details · tab add · r resume · n step · s stop · ? help");
-  assert.equal(footer(mk("idle")), "space run · ⏎ details · tab add · o options · d remove · ? help");
+  assert.equal(footer(mk("idle")), "space run · ⏎ details · e edit · tab add · o options · d remove · ? help");
   assert.equal(footer(mk("stopping")), "⏎ details · tab add · ? help");
   assert.equal(footer(initialState(0)), "tab add · ? help");
   assert.equal(footer(reduce(mk("idle"), { type: "focus", target: "compose" })), "⏎ add · @ file · alt+⏎ newline · ↑↓ history · tab tasks · esc back");
@@ -280,7 +280,7 @@ test("help_lists_mode_bindings", () => {
   const detail = helpBindings(reduce(mk("idle"), { type: "focus", target: "detail" })).map((h) => `${h.key} ${h.label}`);
   assert.ok(detail.some((l) => l.includes("expand all")));
   assert.ok(detail.some((l) => l.includes("collapse all")));
-  assert.ok(!detail.some((l) => l.startsWith("space run")));
+  assert.ok(!detail.includes("space run"));
   assert.ok(detail.some((l) => l.startsWith("tab tasks")));
 });
 
