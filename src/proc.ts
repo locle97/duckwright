@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants } from "node:os";
 
 import { universalNewlines } from "./text.ts";
+import { isBatchFile, quoteForCmd, which } from "./which.ts";
 
 export interface ProcResult {
   code: number;
@@ -34,10 +35,14 @@ export const runProcess: Runner = (argv, stdin, timeoutSec, opts = {}) =>
       reject(new AbortedError());
       return;
     }
-    const child = spawn(argv[0], argv.slice(1), {
-      cwd,
-      stdio: [stdin === null ? "ignore" : "pipe", "pipe", "pipe"],
-    });
+    // Windows starts only .exe by name; resolve npm's .cmd shims through PATHEXT.
+    const exe = process.platform === "win32" ? which(argv[0]) ?? argv[0] : argv[0];
+    const stdio: ["ignore" | "pipe", "pipe", "pipe"] = [stdin === null ? "ignore" : "pipe", "pipe", "pipe"];
+    const child = process.platform === "win32" && isBatchFile(exe)
+      ? spawn(process.env.ComSpec ?? "cmd.exe",
+        ["/d", "/s", "/c", `"${[exe, ...argv.slice(1)].map(quoteForCmd).join(" ")}"`],
+        { cwd, stdio, windowsVerbatimArguments: true })
+      : spawn(exe, argv.slice(1), { cwd, stdio });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     child.stdout!.on("data", (b: Buffer) => out.push(b));
