@@ -110,7 +110,7 @@ duckwright [--max-parallel N] [--past N] [--theme NAME] [--web [--port PORT]] [o
 duckwright ["<task>" | -f FILE|FOLDER ...] [options]
 duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE]
-                  [--allow-file-access] [--[no-]export] [--[no-]network]
+                  [--allow-file-access] [--[no-]network]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
@@ -132,7 +132,6 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
-| `--export` | off | After a successful run, write a Playwright test to `runs/<id>/duckwright.spec.ts` (see [Regression tests](#turning-a-run-into-a-regression-test)); `--no-export` overrides a task file |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
 | `--twofa-timeout` | `300` | Seconds (at most `2147483`) to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
 | `--max-parallel` | `3` | TUI and web: how many runs may be active at once; tasks given on the command line past the limit start as earlier runs finish. An error with `-p` |
@@ -159,7 +158,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 
 A task or `-f` on the command line is added to the task list and started as soon as the TUI opens, up to `--max-parallel` at once, with the rest starting in order as runs finish: `duckwright -f tasks/` runs a whole folder in the TUI. A missing or invalid file is reported before the TUI opens (exit `2`). When you quit, the TUI prints the same kind of summary as a [batch run](#batch-runs).
 
-**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, export, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
+**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
 
 **Past runs.** Runs saved in `runs/` are listed on the sidebar's History tab, newest `--past N` of them (default 20); press `tab` to switch between Tasks and History. Each tab keeps its own selection and filter. Past runs are read-only: select one to see its timeline, and press `space` to run it again with the current flags, which moves it to the Tasks tab.
 
@@ -302,7 +301,6 @@ The file is the task text, optionally preceded by front matter with the run's se
 model: opus
 max-steps: 15
 state: auth.json
-export: true
 ---
 Open https://example.com/form, enter the name Linh, submit,
 and check the greeting says "Hello, Linh!".
@@ -316,14 +314,13 @@ and check the greeting says "Hello, Linh!".
 | `skill` | a path |
 | `session` | text |
 | `state` | a path |
-| `export` | `true` or `false` |
 | `network` | `true` or `false` |
 | `twofa-timeout` | a whole number from 1 to 2147483 |
 | `snapshot` | `hybrid`, `full` or `grep` |
 | `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
-- Flags on the command line override the file, for example `--max-steps 5` or `--no-export`.
+- Flags on the command line override the file, for example `--max-steps 5`.
 - Relative `skill`, `state` and `setup` paths are resolved from the file's folder, not the current directory.
 - `allow-file-access` can only be given on the command line, so a shared task file can never turn it on.
 - With `-p`, give either a task or `-f`, not both (the TUI takes both). A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
@@ -366,7 +363,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 - `network/<request id>/`: with network capture on (the default), one folder per captured API call, numbered `0001`, `0002`, … across the run. It holds `request.json` (id, step, method, redacted URL and headers), `response.json` (status, status text, type, MIME type, duration and redacted headers), and, only when non-empty, `request-body.txt` and `response-body.txt` (redacted) or `response-body.bin` (a binary response, copied unredacted). Nothing is created with `--no-network`.
 - `events.jsonl`: every run event, one JSON object per line
-- `duckwright.spec.ts`: the generated regression test, only with `--export`
+- `duckwright.spec.ts`: the generated regression test, written after every successful run
 
 > [!CAUTION]
 > `code` contains whatever the agent typed, passwords included. Treat `history.json` and any exported spec like `auth.json`. 2FA codes are the exception: they are replaced by `[2FA CODE]`.
@@ -395,12 +392,11 @@ Limits:
 
 A successful run already contains the steps of a Node.js `@playwright/test` test, so you don't need to drive the agent again:
 
-1. Export it, either afterwards or as part of the run:
+1. A successful run writes `duckwright.spec.ts` automatically. To export a run again, or elsewhere:
    ```bash
    duckwright export runs/<id>                      # writes runs/<id>/duckwright.spec.ts
    duckwright export runs/<id> -o e2e/greet.spec.ts # or anywhere else
    duckwright export --api runs/<id>                # API-only spec: runs/<id>/duckwright.api.spec.ts
-   duckwright "<task>" --export                     # export right after a successful run
    ```
    The test contains each action's recorded `code` in step order, including the assertions the agent checked with `expect`, using the semantic locators `playwright-cli` generates:
    ```ts
@@ -425,11 +421,11 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
 
    A `request` is exported as a setup call, `page.request.fetch(...)` followed by a status check, in the order it ran. It is for setup only: the export refuses a run where a `request` comes after any interaction other than `goto`. The JSON body the agent sent is written into the call (re-serialised as JSON), so check it for secrets, as with `fill`. The call uses the test's own context, so for a run that used `--state` add `test.use({ storageState: 'auth.json' })` or the cookies will be missing. `request` cannot send headers (an endpoint that needs a CSRF header will not work), a query string, or a call to another origin.
 
-   **API-only spec.** `duckwright export --api` replays the run's captured `fetch`/`xhr` calls with the `request` fixture and asserts each call's status, so the backend flow runs without the UI. It needs network capture. Only the `content-type` and `accept` headers are kept, and captured values are redacted, so the export warns wherever `[REDACTED]` appears; supply auth by hand, and for a `--state` run add `test.use({ storageState: 'auth.json' })`. It exits `1` when there are no captured API calls. `--export` on a run still writes the UI spec only.
+   **API-only spec.** `duckwright export --api` replays the run's captured `fetch`/`xhr` calls with the `request` fixture and asserts each call's status, so the backend flow runs without the UI. It needs network capture. Only the `content-type` and `accept` headers are kept, and captured values are redacted, so the export warns wherever `[REDACTED]` appears; supply auth by hand, and for a `--state` run add `test.use({ storageState: 'auth.json' })`. It exits `1` when there are no captured API calls. A run itself still writes the UI spec only.
 2. Add any further assertions the agent did not record.
 3. Run it with `npx playwright test` and fix any locator that fails. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 
-Only successful runs can be exported. `duckwright export` exits with `0` when the test was written, `1` when it refused (the run did not succeed, or it recorded no Playwright code), and `2` when the path or `history.json` cannot be used. With `--export`, a failed export is reported on stderr but does not change the run's exit code.
+Only successful runs can be exported. `duckwright export` exits with `0` when the test was written, `1` when it refused (the run did not succeed, or it recorded no Playwright code), and `2` when the path or `history.json` cannot be used. When a run exports its test automatically, a failed export is reported on stderr but does not change the run's exit code.
 
 > [!IMPORTANT]
 > Some setup leaves no `code` behind. If the run used `--state FILE`, load the same state in the test with `test.use({ storageState: 'auth.json' })`. If it used `tab-new`, `tab-select` or `tab-close`, the export marks the spot with a `// TODO(duckwright)` line and prints a warning: edit that part by hand, because the test assumes a single `page`.
@@ -493,11 +489,11 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Test generation**
 
-- [x] **Automatic test export**: `duckwright export runs/<id>`, or `--export` on a run, writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
+- [x] **Automatic test export**: `duckwright export runs/<id>`, or any successful run, writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
 - [x] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
 - [x] **Direct API requests**: a `request` action for fast test setup, replayed in exports as `page.request.fetch(...)`.
 - [ ] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that currently need hand edits.
-- [ ] **Verified exports**: `duckwright verify runs/<id>`, run automatically by `--export`, runs the generated spec headless a few times and only reports success when every run passes, so a flaky or broken spec never counts as done.
+- [ ] **Verified exports**: `duckwright verify runs/<id>`, run automatically after each run, runs the generated spec headless a few times and only reports success when every run passes, so a flaky or broken spec never counts as done.
 
 **Reliability and cost**
 

@@ -684,7 +684,7 @@ test("app_global_options_edit_and_save", async () => {
 test("app_global_options_pane_scrolls_to_focus", async () => {
   const t = mount(new FakeManager([snapshot(1, "First")]));   // 100x24: a 5-row pane
   await settle();
-  await t.type("O", "\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B");
+  await t.type("O", "\x1b[B", "\x1b[B", "\x1b[B");
   assert.match(t.frame(), /OPTIONS/);
   assert.match(t.frame(), /› snapshot mode/, "the focused last field is visible");
 });

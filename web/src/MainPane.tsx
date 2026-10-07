@@ -80,7 +80,7 @@ function TaskView(p: { state: WebState; task: TaskSnapshot; dispatch: Dispatch }
           <Tag tone={tag.tone}>{tag.label}</Tag>
         </div>
         <div className="muted">
-          {task.source.kind === "file" ? clean(task.source.path) : "typed task"} · {clean(e.model)} · max {e.maxSteps} steps · {e.headed ? "headed" : "headless"} · snapshot {e.snapshot}{e.export ? " · export" : ""}
+          {task.source.kind === "file" ? clean(task.source.path) : "typed task"} · {clean(e.model)} · max {e.maxSteps} steps · {e.headed ? "headed" : "headless"} · snapshot {e.snapshot}
         </div>
         <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: "8px 0 0", maxHeight: 160, overflow: "auto" }}>{clean(task.text, { multiline: true })}</pre>
         {task.error ? <p className="error">{clean(task.error)}</p> : null}

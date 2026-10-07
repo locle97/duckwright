@@ -367,9 +367,9 @@ function fakeRun(success = true, actions?: Action[], codes?: (string | null)[]) 
   });
 }
 
-test("run_with_export_writes_spec", async () => {
+test("run_writes_spec", async () => {
   const e = env();
-  assert.equal(await main([...e.argv, "--export"], e.deps({ createAgent: fakeRun() })), 0);
+  assert.equal(await main(e.argv, e.deps({ createAgent: fakeRun() })), 0);
   const [runDir] = runDirs(e.tmp);
   assert.ok(fs.statSync(path.join(runDir, "history.json")).isFile());
   const spec = path.join(runDir, "duckwright.spec.ts");
@@ -378,15 +378,9 @@ test("run_with_export_writes_spec", async () => {
   assert.equal(e.out[e.out.length - 1], `Test: ${path.relative(e.tmp, spec)}`);
 });
 
-test("run_without_export_writes_no_spec", async () => {
+test("failed_run_skips_export", async () => {
   const e = env();
-  assert.equal(await main(e.argv, e.deps({ createAgent: fakeRun() })), 0);
-  assert.equal(fs.existsSync(path.join(runDirs(e.tmp)[0], "duckwright.spec.ts")), false);
-});
-
-test("run_export_on_failed_run", async () => {
-  const e = env();
-  assert.equal(await main([...e.argv, "--export"], e.deps({ createAgent: fakeRun(false) })), 1);
+  assert.equal(await main(e.argv, e.deps({ createAgent: fakeRun(false) })), 1);
   assert.equal(fs.existsSync(path.join(runDirs(e.tmp)[0], "duckwright.spec.ts")), false);
   assert.ok(e.out.includes("Test: not exported (run did not succeed)"));
 });
@@ -394,7 +388,7 @@ test("run_export_on_failed_run", async () => {
 test("run_export_failure_keeps_exit_0", async () => {
   const e = env();
   const createAgent = fakeRun(true, [{ cmd: "done", args: ["success", "a"] }], [null]);
-  assert.equal(await main([...e.argv, "--export"], e.deps({ createAgent })), 0);
+  assert.equal(await main(e.argv, e.deps({ createAgent })), 0);
   assert.equal(histories(e.tmp).length, 1);
   assert.ok(e.err.join("\n").includes("export failed: nothing to export"));
 });
@@ -445,23 +439,15 @@ test("file_runs_body_with_settings", async () => {
 
 test("cli_flag_beats_file", async () => {
   const e = env();
-  const f = taskFile(e.tmp, "---\nmax-steps: 7\nexport: true\n---\nGo\n");
+  const f = taskFile(e.tmp, "---\nmax-steps: 7\n---\nGo\n");
   let maxSteps: number | undefined;
   const inner = fakeRun();
   const createAgent = (opts: AgentOptions) => {
     maxSteps = opts.maxSteps;
     return inner(opts);
   };
-  assert.equal(await main([...e.argv.slice(1), "-f", f, "--max-steps", "3", "--no-export"], e.deps({ createAgent })), 0);
+  assert.equal(await main([...e.argv.slice(1), "-f", f, "--max-steps", "3"], e.deps({ createAgent })), 0);
   assert.equal(maxSteps, 3);
-  assert.equal(fs.existsSync(path.join(runDirs(e.tmp)[0], "duckwright.spec.ts")), false);
-});
-
-test("file_export_setting_writes_spec", async () => {
-  const e = env();
-  const f = taskFile(e.tmp, "---\nexport: true\n---\nGo\n");
-  assert.equal(await main([...e.argv.slice(1), "-f", f], e.deps({ createAgent: fakeRun() })), 0);
-  assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "duckwright.spec.ts")));
 });
 
 test("cli_state_relative_to_cwd_with_file", async () => {

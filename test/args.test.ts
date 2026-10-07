@@ -15,7 +15,7 @@ const usage = (message: string) => (e: unknown) => e instanceof UsageError && e.
 test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
-    session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
+    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid",
     print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null,
   });
 });
@@ -27,10 +27,10 @@ test("default_session", () => {
 test("every option", () => {
   assert.deepEqual(parse(
     "--max-steps", "7", "--model=opus", "--headed", "--skill", "s.md", "--session", "s1",
-    "--state", "a.json", "--allow-file-access", "--export", "--snapshot-grep", "go",
+    "--state", "a.json", "--allow-file-access", "--snapshot-grep", "go",
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
-    session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
+    session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep",
     print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null,
   });
 });
@@ -62,7 +62,6 @@ test("file needs a value", () => {
 
 test("negatable booleans", () => {
   assert.equal(args(parseRunArgs(["--no-headed", "x"], "/s", { headed: true })).headed, false);
-  assert.equal(args(parseRunArgs(["--no-export", "x"], "/s", { export: true })).export, false);
   assert.equal(parse("--headed", "--no-headed", "x").headed, false);
 });
 
@@ -148,7 +147,6 @@ test("short options take an attached value", () => {
 });
 
 test("flags reject an explicit value", () => {
-  assert.throws(() => parse("--export=yes", "x"), usage("argument --export/--no-export: ignored explicit argument 'yes'"));
   assert.throws(() => parse("--no-headed=1", "x"), usage("argument --headed/--no-headed: ignored explicit argument '1'"));
   assert.throws(() => parse("--allow-file-access=1", "x"), usage("argument --allow-file-access: ignored explicit argument '1'"));
   assert.throws(() => parse("--snapshot-full=1", "x"), usage("argument --snapshot-full: ignored explicit argument '1'"));
@@ -242,9 +240,9 @@ test("help_mentions_network", () => {
   const entry = "  --network, --no-network\n                        record the API calls the page makes each step,\n"
     + "                        redacted, under runs/<id>/network (default on)\n";
   const at = text.indexOf(entry);
-  assert.ok(at > text.indexOf("  --export, --no-export\n"));
+  assert.ok(at > text.indexOf("  --allow-file-access"));
   assert.ok(at < text.indexOf("  --snapshot-hybrid"));
-  assert.ok(RUN_USAGE.includes("[--export | --no-export] [--network | --no-network]"));
+  assert.ok(RUN_USAGE.includes("[--network | --no-network]"));
 });
 
 test("export_api_flag", () => {

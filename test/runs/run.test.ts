@@ -20,7 +20,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, allowFileAccess: false, export: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null, ...over,
+    session: "s-1", state: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null, ...over,
   };
 }
 
@@ -62,7 +62,7 @@ test("run_pass_writes_history_and_outcome", async () => {
   assert.equal(o.costUsd, 0.5);
   assert.equal(o.historyPath, path.join(h.workdir, "history.json"));
   assert.equal(h.id, path.basename(h.workdir));
-  assert.deepEqual(o.export, { kind: "off" });
+  assert.equal(o.export.kind, "written");
   assert.equal(readHistory(h.workdir).success, true);
 });
 
@@ -136,15 +136,15 @@ test("run_emits_start_and_end_once", async () => {
 });
 
 test("run_export_written_skipped_failed", async () => {
-  const written = setup(agentWith(async () => result(true, [rec()])), { export: true });
+  const written = setup(agentWith(async () => result(true, [rec()])), {});
   const w = await startRun(written.spec, written.deps).done;
   assert.equal(w.export.kind, "written");
   assert.ok(fs.statSync((w.export as { path: string }).path).isFile());
 
-  const skipped = setup(agentWith(async () => result(false, [rec()])), { export: true });
+  const skipped = setup(agentWith(async () => result(false, [rec()])), {});
   assert.deepEqual((await startRun(skipped.spec, skipped.deps).done).export, { kind: "skipped" });
 
-  const failed = setup(agentWith(async () => result(true, [rec([null, null])])), { export: true });
+  const failed = setup(agentWith(async () => result(true, [rec([null, null])])), {});
   const f = await startRun(failed.spec, failed.deps).done;
   assert.equal(f.export.kind, "failed");
   assert.equal(f.status, "pass");
@@ -214,8 +214,8 @@ test("run_failing_sink_keeps_outcome", async () => {
   });
   bad.deps.onWarning = (m) => warnings.push(m);
   const good = setup(agentWith(body));
-  const { historyPath: _a, ...o1 } = await startRun(bad.spec, bad.deps).done;
-  const { historyPath: _b, ...o2 } = await startRun(good.spec, good.deps).done;
+  const { historyPath: _a, export: _x, ...o1 } = await startRun(bad.spec, bad.deps).done;
+  const { historyPath: _b, export: _y, ...o2 } = await startRun(good.spec, good.deps).done;
   assert.equal(warnings.length, 1);
   assert.ok(warnings[0].startsWith("could not write "));
   assert.ok(warnings[0].includes("events.jsonl"));

@@ -7,7 +7,6 @@ max-steps: 25        # stop after this many steps
 # state: auth.json   # storage state loaded before the first step
 # session: login     # playwright-cli session name
 # headed: true       # show the browser window
-# export: true       # write duckwright.spec.ts after a successful run
 ---
 Open https://example.com/form.
 Enter the name Linh in the Name field and submit the form.

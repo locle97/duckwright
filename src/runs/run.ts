@@ -209,19 +209,17 @@ async function execute(
     const warnings: string[] = [];
     let exported: ExportOutcome = { kind: "off" };
     let error: string | null = null;
-    if (args.export) {
-      if (!result.success) {
-        exported = { kind: "skipped" };
-      } else {
-        try {
-          const r = exportRun(workdir);
-          warnings.push(...r.warnings);
-          exported = { kind: "written", path: r.path };
-        } catch (e) {
-          // The run itself succeeded; a failed export does not change that.
-          if (e instanceof ExportError) exported = { kind: "failed", message: e.message };
-          else error = errorText(e);
-        }
+    if (!result.success) {
+      exported = { kind: "skipped" };
+    } else {
+      try {
+        const r = exportRun(workdir);
+        warnings.push(...r.warnings);
+        exported = { kind: "written", path: r.path };
+      } catch (e) {
+        // The run itself succeeded; a failed export does not change that.
+        if (e instanceof ExportError) exported = { kind: "failed", message: e.message };
+        else error = errorText(e);
       }
     }
     const ok = result.success && error === null;

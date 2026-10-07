@@ -95,7 +95,7 @@ test("manager_globals_layering", () => {
   const b = mgr.addTyped("b");
   mgr.setOverrides(b, { model: "haiku" });
   assert.deepEqual(mgr.globals(), {
-    base: { model: "opus", maxSteps: 9, headed: false, export: false, snapshot: "hybrid" }, overrides: {},
+    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid" }, overrides: {},
   });
   events.length = 0;
   mgr.setGlobals({ model: "sonnet", headed: true });
