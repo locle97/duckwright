@@ -16,6 +16,7 @@ export type TaskSettings = Partial<{
   state: string;
   export: boolean;
   network: boolean;
+  twofaTimeout: number;
   snapshot: SnapshotMode;
 }>;
 
@@ -32,6 +33,7 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   state: ["state", "path"],
   export: ["export", "bool"],
   network: ["network", "bool"],
+  "twofa-timeout": ["twofaTimeout", "int"],
   snapshot: ["snapshot", "snapshot"],
 };
 const FENCE = "---";

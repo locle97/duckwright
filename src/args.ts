@@ -18,6 +18,7 @@ export interface RunArgs {
   allowFileAccess: boolean;
   export: boolean;
   network: boolean;
+  twofaTimeout: number;
   snapshot: SnapshotMode;
   tui: boolean;
   maxParallel: number | null;
@@ -50,6 +51,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-f FILE [FILE ...]
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
   + "                  [--state FILE] [--allow-file-access]\n"
   + "                  [--export | --no-export] [--network | --no-network]\n"
+  + "                  [--twofa-timeout SEC]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
   + "                  [--tui] [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
   + "                  [task]";
@@ -85,6 +87,8 @@ options:
   --network, --no-network
                         record the API calls the page makes each step,
                         redacted, under runs/<id>/network (default on)
+  --twofa-timeout SEC   seconds to wait for a person to enter a 2FA code or
+                        approve a passkey before the step fails (default 300)
   --snapshot-hybrid     default: paste page snapshots of up to 5,000
                         characters into the prompt, and let Claude grep larger
                         ones from the saved file
@@ -169,7 +173,7 @@ const RUN_SPEC: OptionSpec = {
     "--session": "--session", "--state": "--state",
     "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
     "--export": "--export/--no-export", "--no-export": "--export/--no-export",
-    "--network": "--network/--no-network", "--no-network": "--network/--no-network",
+    "--twofa-timeout": "--twofa-timeout", "--network": "--network/--no-network", "--no-network": "--network/--no-network",
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
     "--snapshot-grep": "--snapshot-grep", "--tui": "--tui", "--max-parallel": "--max-parallel",
@@ -178,7 +182,7 @@ const RUN_SPEC: OptionSpec = {
   shortWithValue: ["-f"],
 };
 
-const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme"];
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme", "--twofa-timeout"];
 
 // Python's int(): optional sign, digits with single underscores between them, spaces around.
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
@@ -191,7 +195,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid", network: true,
-    tui: false, maxParallel: null,
+    tui: false, maxParallel: null, twofaTimeout: 300,
     ...settings,
   };
   const extras: string[] = [];
@@ -246,6 +250,11 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
           fail(`argument --theme: invalid choice: '${v}' (choose from ${THEME_NAMES.map((t) => `'${t}'`).join(", ")})`);
         }
         args.theme = v as ThemeName;
+      } else if (name === "--twofa-timeout") {
+        if (!PY_INT.test(v!)) fail(`argument --twofa-timeout: invalid int value: '${v}'`);
+        const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
+        if (n < 1) fail("argument --twofa-timeout: must be at least 1");
+        args.twofaTimeout = n;
       } else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
       else if (name === "--session") args.session = v!;

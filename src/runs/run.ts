@@ -18,6 +18,8 @@ import { AbortedError } from "../proc.ts";
 import type { StepRecord } from "../prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../pw.ts";
 import { makeRunDir } from "../rundir.ts";
+import { SECRET_ENV, createTwoFactor } from "../twofa.ts";
+import type { Human } from "../twofa.ts";
 import { jsonlSink } from "./sink.ts";
 
 export interface PromptPaths {
@@ -56,6 +58,10 @@ export interface RunDeps {
   createAgent(opts: AgentOptions): AgentLike;
   runsDir?: string; // default "runs"
   onWarning?: (message: string) => void;
+  /** Who can be asked for a 2FA code in this run; null (the default) when nobody is attached. */
+  humanFor?: (ctx: { signal: AbortSignal; events: RunEvents }) => Human | null;
+  /** Where the TOTP secret is read from. Default `process.env`. */
+  env?: Record<string, string | undefined>;
 }
 
 export interface RunHandle {
@@ -151,11 +157,17 @@ async function execute(
       signal,
     });
     const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
+    const twofa = createTwoFactor({
+      secret: (deps.env ?? process.env)[SECRET_ENV] ?? null,
+      human: deps.humanFor?.({ signal, events }) ?? null,
+      timeoutSec: args.twofaTimeout,
+      signal, events,
+    });
     agent = deps.createAgent({
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
       snapshotMode: args.snapshot, network: args.network,
-      signal, events, control,
+      signal, events, control, twofa,
     });
     events.emit({
       type: "run:start", task, maxSteps: args.maxSteps, model: args.model, snapshot: args.snapshot,
