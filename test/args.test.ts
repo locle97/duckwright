@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, export: false, snapshot: "hybrid",
-    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300,
+    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, export: true, snapshot: "grep",
-    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300,
+    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null,
   });
 });
 
@@ -280,4 +280,29 @@ test("twofa_timeout_must_be_a_positive_int", () => {
   assert.equal(parse("t", "--twofa-timeout", "2147483").twofaTimeout, 2147483);
   assert.throws(() => parse("t", "--twofa-timeout", "2147484"), /argument --twofa-timeout: must be at most 2147483/);
   assert.throws(() => parse("t", "--twofa-timeout", "99999999999999"), /argument --twofa-timeout: must be at most 2147483/);
+});
+
+test("web flag and port", () => {
+  assert.equal(parse("--web").web, true);
+  assert.equal(parse("x").web, false);
+  assert.equal(parse("--web", "--port", "8080").port, 8080);
+  assert.equal(parse("--port=3000").port, 3000);
+  assert.equal(parse("x").port, null);
+});
+
+test("port rejects bad values", () => {
+  assert.throws(() => parse("--port", "0"), usage("argument --port: must be between 1 and 65535"));
+  assert.throws(() => parse("--port", "65536"), usage("argument --port: must be between 1 and 65535"));
+  assert.throws(() => parse("--port", "x"), usage("argument --port: invalid int value: 'x'"));
+  assert.throws(() => parse("--port"), usage("argument --port: expected one argument"));
+  assert.throws(() => parse("--web=1"), usage("argument --web: ignored explicit argument '1'"));
+});
+
+test("help and usage mention the web options", () => {
+  const p = parseRunArgs(["--help"], "/s");
+  assert.equal(p.kind, "help");
+  const text = (p as { kind: "help"; text: string }).text;
+  assert.ok(text.includes("--web"));
+  assert.ok(text.includes("--port PORT"));
+  assert.ok(RUN_USAGE.includes("[--web] [--port PORT]"));
 });
