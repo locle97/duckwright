@@ -162,3 +162,4 @@ kbd { border: 2px solid var(--ink); padding: 0 4px; background: var(--paper-2); 
   .sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: 86%; max-width: 360px; z-index: 5; transform: translateX(-102%); transition: transform 0.15s; padding-top: 52px; }
   .sidebar.open { transform: translateX(0); }
 }
+.net .tag { white-space: normal; word-break: break-all; }
