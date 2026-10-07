@@ -1,7 +1,5 @@
 // Pure view-state reducer: turns manager events and UI actions into the screen state the Ink
 // components render. No ink/react here; labels are raw (sanitising happens at render time).
-import type { ControlState, Phase, RunEvent, RunOutcome } from "../events.ts";
-import type { NetworkEntry } from "../network.ts";
 import type { EditTarget, Globals, ManagerEvent, PlanId, PlanSnapshot, TaskId, TaskSnapshot, TaskState } from "../runs/manager.ts";
 import { rank } from "./candidates.ts";
 import type { Candidate, CandidateIndex } from "./candidates.ts";
@@ -10,46 +8,13 @@ import type { ComposeState } from "./compose.ts";
 import { matches, visibleIndexes } from "./filter.ts";
 import { FIELD_COUNT } from "./form.ts";
 import type { FormState } from "./form.ts";
+import { foldPast, newRunView, reduceRunEvent, reduceTimeline } from "../runviews.ts";
+import type { RunView, TimelineOp } from "../runviews.ts";
+
+export type { RunView, StepView } from "../runviews.ts";
 
 /** `quitting`: a confirmed quit is stopping the runs; the panes stay and only Ctrl-C acts. */
 export type Mode = "list" | "detail" | "options" | "compose" | "form" | "help" | "confirm" | "filter" | "edit" | "quitting";
-
-export interface StepView {
-  step: number;
-  goal: string;
-  evaluation: string;
-  /** Only when it changed from the earlier step's memory. */
-  memory: string | null;
-  actions: { label: string; result: string | null }[];
-  runningAction: number | null;
-  phase: Phase | null;
-  status: "running" | "ok" | "warn" | "brain" | "done";
-  error: string | null;
-  cost: number | null;
-  durationMs: number | null;
-  /** Calls captured by this step's actions; empty when capture was off, the step predates it, or the data was malformed. */
-  network: NetworkEntry[];
-  networkErrors: string[];
-}
-
-export interface RunView {
-  runId: string;
-  maxSteps: number;
-  startedAt: number;
-  steps: StepView[];
-  control: ControlState;
-  pausedSince: number | null;
-  pausedMs: number;
-  cost: number;
-  brainFailures: number;
-  outcome: RunOutcome | null;
-  /** Index into `steps`. */
-  selected: number;
-  expanded: number[];
-  follow: boolean;
-  /** Replayed from a past run folder rather than observed live. */
-  past?: boolean;
-}
 
 export interface Toast { id: number; level: "info" | "error"; message: string; until: number }
 
@@ -126,7 +91,7 @@ export type UiAction =
   | { type: "optionsMove"; delta: number }
   | { type: "compose"; next: ComposeState } | { type: "form"; next: FormState | null }
   | { type: "help"; open: boolean } | { type: "confirm"; value: ViewState["confirm"] }
-  | { type: "timeline"; op: "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll"; delta?: number }
+  | { type: "timeline"; op: TimelineOp; delta?: number }
   | { type: "toast"; level: "info" | "error"; message: string } | { type: "ctrlC" } | { type: "quitting" }
   | { type: "completion"; value: ViewState["completion"] } | { type: "completionMove"; delta: number }
   | { type: "addFailed"; errors: string[]; cursor: number } | { type: "selectTask"; id: TaskId }
@@ -136,35 +101,11 @@ export type UiAction =
 
 const TOAST_MS = 4000;
 
-/** Folds a past task's recorded events into a read-only run view; a malformed event keeps just the outcome. */
+/** Shows a past task's recorded events as a read-only run view. */
 function replayPast(s: ViewState, task: TaskSnapshot): ViewState {
   const past = task.past;
   if (!past) return s;
-  let next: ViewState | null = null;
-  try {
-    let cur = s;
-    for (const event of past.events) {
-      cur = reduceManager(cur, { type: "run", taskId: task.id, runId: past.runId, event });
-    }
-    next = cur;
-  } catch {
-    next = null;
-  }
-  let view = next?.runs[past.runId];
-  if (!next || !view) {
-    let outcome: RunOutcome | null = null;
-    for (const e of past.events) if (e.type === "run:end") outcome = e.outcome;
-    view = {
-      runId: past.runId, maxSteps: 0, startedAt: 0, steps: [], control: "running", pausedSince: null, pausedMs: 0,
-      cost: 0, brainFailures: 0, outcome, selected: 0, expanded: [], follow: false,
-    };
-    next = s;
-  }
-  const done: RunView = {
-    ...view, past: true, follow: false, selected: Math.max(0, view.steps.length - 1), expanded: [],
-    cost: view.outcome?.costUsd ?? view.cost,
-  };
-  return { ...next, runs: { ...next.runs, [past.runId]: done } };
+  return { ...s, runs: { ...s.runs, [past.runId]: foldPast(past.runId, past.events) } };
 }
 
 export function initialState(
@@ -379,105 +320,6 @@ function updateRun(s: ViewState, runId: string, fn: (r: RunView) => RunView): Vi
   return r ? { ...s, runs: { ...s.runs, [runId]: fn(r) } } : s;
 }
 
-function updateStep(r: RunView, step: number, fn: (v: StepView) => StepView): RunView {
-  const i = r.steps.findIndex((v) => v.step === step);
-  const cur = r.steps[i];
-  if (!cur) return r;
-  return { ...r, steps: r.steps.map((v, j) => (j === i ? fn(cur) : v)) };
-}
-
-/** Under follow, selection tracks the last step and the running (last) step is expanded. */
-function applyFollow(r: RunView, previousLast: number): RunView {
-  if (!r.follow || r.steps.length === 0) return r;
-  const last = r.steps.length - 1;
-  const expanded = r.expanded.filter((i) => i !== previousLast || i === last);
-  if (!expanded.includes(last)) expanded.push(last);
-  return { ...r, selected: last, expanded };
-}
-
-function closePause(r: RunView, at: number): RunView {
-  return r.pausedSince === null ? r : { ...r, pausedMs: r.pausedMs + (at - r.pausedSince), pausedSince: null };
-}
-
-function previousMemory(r: RunView): string | null {
-  for (let i = r.steps.length - 1; i >= 0; i--) {
-    const m = r.steps[i]?.memory;
-    if (m !== null && m !== undefined) return m;
-  }
-  return null;
-}
-
-function stepStatus(results: (string | null)[], actions: StepView["actions"]): StepView["status"] {
-  const done = actions.some((a, i) => a.label.split(" ")[0] === "done" && (a.result ?? results[i]) === "done");
-  if (done) return "done";
-  return actions.some((a) => a.result?.startsWith("error:")) ? "warn" : "ok";
-}
-
-const isEntry = (v: unknown): v is NetworkEntry => {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const e = v as NetworkEntry;
-  return typeof e.method === "string" && typeof e.url === "string" && typeof e.statusText === "string"
-    && (e.status === null || typeof e.status === "number") && (e.durationMs === null || typeof e.durationMs === "number");
-};
-const entriesOf = (v: unknown): NetworkEntry[] => (Array.isArray(v) ? v.filter(isEntry) : []);
-const stringsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-
-function reduceRunEvent(r: RunView, e: RunEvent): RunView {
-  switch (e.type) {
-    case "run:start":
-      return r;
-    case "step:start": {
-      const previousLast = r.steps.length - 1;
-      const view: StepView = {
-        step: e.step, goal: "", evaluation: "", memory: null, actions: [], runningAction: null,
-        phase: null, status: "running", error: null, cost: null, durationMs: null, network: [], networkErrors: [],
-      };
-      return applyFollow({ ...r, steps: [...r.steps, view] }, previousLast);
-    }
-    case "phase":
-      return updateStep(r, e.step, (v) => ({ ...v, phase: e.phase }));
-    case "decision": {
-      const prev = previousMemory(r);
-      const d = e.decision;
-      const memory = d.memory === (prev ?? "") ? null : d.memory;
-      const next = updateStep(r, e.step, (v) => ({
-        ...v, goal: d.nextGoal, evaluation: d.evaluationPreviousGoal, memory,
-        actions: d.actions.map((a) => ({ label: [a.cmd, ...a.args].join(" "), result: null })),
-        cost: (v.cost ?? 0) + e.cost,
-      }));
-      return { ...next, cost: r.cost + e.cost, brainFailures: 0 };
-    }
-    case "action:start":
-      return updateStep(r, e.step, (v) => ({ ...v, runningAction: e.index }));
-    case "action:result":
-      return updateStep(r, e.step, (v) => ({
-        ...v, runningAction: v.runningAction === e.index ? null : v.runningAction,
-        actions: v.actions.map((a, i) => (i === e.index ? { ...a, result: e.result } : a)),
-      }));
-    case "brain:error": {
-      const next = updateStep(r, e.step, (v) => ({ ...v, status: "brain", error: e.message, cost: (v.cost ?? 0) + e.cost }));
-      return { ...next, cost: r.cost + e.cost, brainFailures: e.failures };
-    }
-    case "step:end":
-      return updateStep(r, e.record.step, (v) => ({
-        ...v, durationMs: e.durationMs, runningAction: null, phase: null,
-        network: entriesOf(e.record.network), networkErrors: stringsOf(e.record.networkErrors),
-        status: v.status === "brain" ? "brain" : stepStatus(e.record.results, v.actions),
-      }));
-    case "twofa:wait":
-    case "twofa:done":
-      return r;
-    case "control": {
-      if (e.state === "paused") {
-        return { ...r, control: e.state, pausedSince: r.pausedSince ?? e.at };
-      }
-      return { ...closePause(r, e.at), control: e.state };
-    }
-    case "run:end":
-      return { ...closePause(r, e.at), outcome: e.outcome };
-  }
-}
-
 function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
   switch (e.type) {
     case "task:added": {
@@ -520,38 +362,10 @@ function reduceManager(s: ViewState, e: ManagerEvent): ViewState {
     case "globals:updated":
       return { ...s, globals: e.globals };
     case "run": {
-      if (e.event.type === "run:start") {
-        const view: RunView = {
-          runId: e.runId, maxSteps: e.event.maxSteps, startedAt: e.event.at, steps: [], control: "running",
-          pausedSince: null, pausedMs: 0, cost: 0, brainFailures: 0, outcome: null, selected: 0, expanded: [], follow: true,
-        };
-        return { ...s, runs: { ...s.runs, [e.runId]: view } };
-      }
+      if (e.event.type === "run:start") return { ...s, runs: { ...s.runs, [e.runId]: newRunView(e.runId, e.event) } };
       const event = e.event;
       return updateRun(s, e.runId, (r) => reduceRunEvent(r, event));
     }
-  }
-}
-
-function reduceTimeline(r: RunView, op: Extract<UiAction, { type: "timeline" }>["op"], delta: number): RunView {
-  const last = r.steps.length - 1;
-  if (last < 0) return r;
-  switch (op) {
-    case "move":
-    case "page":
-      return { ...r, selected: clamp(r.selected + delta, 0, last), follow: delta < 0 ? false : r.follow };
-    case "first":
-      return { ...r, selected: 0, follow: false };
-    case "last": {
-      const expanded = r.expanded.includes(last) ? r.expanded : [...r.expanded, last];
-      return { ...r, selected: last, follow: true, expanded };
-    }
-    case "toggle":
-      return { ...r, expanded: r.expanded.includes(r.selected) ? r.expanded.filter((i) => i !== r.selected) : [...r.expanded, r.selected] };
-    case "expandAll":
-      return { ...r, expanded: r.steps.map((_, i) => i) };
-    case "collapseAll":
-      return { ...r, expanded: [] };
   }
 }
 
