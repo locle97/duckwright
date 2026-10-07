@@ -9,7 +9,8 @@ import { HelpDialog } from "./dialogs/HelpDialog.tsx";
 import { OptionsDialog } from "./dialogs/OptionsDialog.tsx";
 import { TwofaDialog } from "./dialogs/TwofaDialog.tsx";
 import { Header } from "./Header.tsx";
-import { commandFor } from "./keys.ts";
+import { commandFor, shouldIgnore } from "./keys.ts";
+import type { Command, KeyInfo } from "./keys.ts";
 import { MainPane } from "./MainPane.tsx";
 import { OptionsStrip } from "./OptionsStrip.tsx";
 import { Sidebar } from "./Sidebar.tsx";
@@ -48,22 +49,32 @@ export function App() {
 
   const ref = useRef<WebState>(state);
   ref.current = state;
+  const run = (c: Command): void => {
+    switch (c.type) {
+      case "action": dispatch(c.action); break;
+      case "task": void taskControl(dispatch, c.id, c.verb); break;
+      case "runPlan": void runPlan(dispatch, c.id, "all"); break;
+      case "editTask": void openEditor(dispatch, { kind: "task", id: c.id }, c.name); break;
+      case "editSetup": void openEditor(dispatch, { kind: "setup", planId: c.planId }, c.name); break;
+      case "focusFilter": document.querySelector<HTMLInputElement>("[data-filter]")?.focus(); break;
+      case "quit": void quitServer(dispatch); break;
+    }
+  };
+  const runRef = useRef(run);
+  runRef.current = run;
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const s = ref.current;
-      if (e.ctrlKey || e.metaKey || e.altKey || editable(e.target) || s.dialog !== null || pendingTwofa(s) !== null) return;
+      const info: KeyInfo = {
+        key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, defaultPrevented: e.defaultPrevented,
+        inEditable: editable(e.target),
+        inInteractive: !!(e.target as Element | null)?.closest?.("button, [role=button], a, summary"),
+      };
+      if (shouldIgnore(info, s)) return;
       const c = commandFor(e.key, s);
       if (!c) return;
       e.preventDefault();
-      switch (c.type) {
-        case "action": dispatch(c.action); break;
-        case "task": void taskControl(dispatch, c.id, c.verb); break;
-        case "runPlan": void runPlan(dispatch, c.id, "all"); break;
-        case "editTask": void openEditor(dispatch, { kind: "task", id: c.id }, c.name); break;
-        case "editSetup": void openEditor(dispatch, { kind: "setup", planId: c.planId }, c.name); break;
-        case "focusFilter": document.querySelector<HTMLInputElement>("[data-filter]")?.focus(); break;
-        case "quit": void quitServer(dispatch); break;
-      }
+      runRef.current(c);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -81,11 +92,7 @@ export function App() {
     <div className="app">
       {!state.connected ? <div className="banner" role="alert">Disconnected. Retrying…</div> : null}
       <Header state={state} onHelp={() => dispatch({ type: "dialog", value: { kind: "help" } })}
-        onQuit={() => {
-          const live = state.tasks.filter((t) => t.state === "running" || t.state === "paused" || t.state === "stopping").length;
-          if (live > 0) dispatch({ type: "dialog", value: { kind: "confirm", confirm: { kind: "quit", count: live } } });
-          else void quitServer(dispatch);
-        }}
+        onQuit={() => { const c = commandFor("q", state); if (c) run(c); }}
         onDrawer={() => setDrawer((v) => !v)} />
       <div className="body">
         <Sidebar state={state} dispatch={dispatch} open={drawer} onPicked={() => setDrawer(false)} />

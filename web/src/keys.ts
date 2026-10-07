@@ -1,6 +1,6 @@
 // What a key does outside a text field. Pure, so it is tested with node --test; App.tsx runs the result.
 import type { PlanId, TaskId } from "../../src/runs/manager.ts";
-import { liveCount, planTally, selectedPlan, selectedTask } from "./store.ts";
+import { liveCount, pendingTwofa, planTally, selectedPlan, selectedTask } from "./store.ts";
 import type { Action, WebState } from "./store.ts";
 
 export type Command =
@@ -14,6 +14,26 @@ export type Command =
 
 const act = (action: Action): Command => ({ type: "action", action });
 const dialog = (value: Extract<Action, { type: "dialog" }>["value"]): Command => act({ type: "dialog", value });
+
+export interface KeyInfo {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  defaultPrevented: boolean;
+  /** The target is a text field, select or contentEditable. */
+  inEditable: boolean;
+  /** The target is, or sits inside, a button, role=button, link or summary. */
+  inInteractive: boolean;
+}
+
+/** Whether the global shortcuts must stay out of the way of this key press. */
+export function shouldIgnore(k: KeyInfo, s: WebState): boolean {
+  if (k.ctrlKey || k.metaKey || k.altKey || k.defaultPrevented || k.inEditable) return true;
+  if (s.dialog !== null || pendingTwofa(s) !== null) return true;
+  if (s.ended || s.expired || !s.loaded) return true;
+  return k.inInteractive && (k.key === "Enter" || k.key === " ");
+}
 
 export function commandFor(key: string, s: WebState): Command | null {
   const task = selectedTask(s);
