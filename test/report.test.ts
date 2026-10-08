@@ -63,3 +63,12 @@ test("attach_plain_prints_step_line_on_step_end", () => {
   events.emit({ type: "step:end", record, cost: 0, durationMs: 1 });
   assert.equal(lines.length, 1);
 });
+
+test("print_video_line", () => {
+  const r = print(outcome({ video: "video.webm" }));
+  assert.deepEqual(r.out, [
+    "Result: success", "Answer: a", "Steps: 2  Cost: $0.0213", "History: runs/x/history.json",
+    "Video: runs/x/video.webm",
+  ]);
+  assert.equal(print(outcome()).out.some((l) => l.startsWith("Video:")), false);
+});

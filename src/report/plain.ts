@@ -1,4 +1,6 @@
 // Plain-text output for a run: step lines as they happen, then the final summary.
+import path from "node:path";
+
 import type { RunEvents, RunOutcome } from "../events.ts";
 import { stepLine } from "../prompt.ts";
 import { fixed4 } from "../text.ts";
@@ -18,6 +20,7 @@ export function printOutcome(o: RunOutcome, out: (l: string) => void, err: (l: s
   out(`Answer: ${o.answer}`);
   out(`Steps: ${o.steps}  Cost: $${fixed4(o.costUsd)}`);
   out(`History: ${o.historyPath}`);
+  if (o.video && o.historyPath) out(`Video: ${path.join(path.dirname(o.historyPath), o.video)}`);
   for (const w of o.warnings) err(`warning: ${w}`);
   const x = o.export;
   if (x.kind === "skipped") out("Test: not exported (run did not succeed)");

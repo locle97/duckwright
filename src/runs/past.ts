@@ -97,7 +97,8 @@ export function outcomeFromHistory(h: HistoryData, historyPath: string): RunOutc
   return {
     status, exitCode: status === "pass" ? 0 : status === "stop" ? 130 : 1, success: h.success,
     answer: h.answer, steps: h.steps, costUsd: h.cost_usd, historyPath,
-    export: { kind: "off" }, warnings: [], error: h.success ? null : h.answer,
+    export: { kind: "off" }, warnings: [], ...(h.video === "video.webm" ? { video: h.video } : {}),
+    error: h.success ? null : h.answer,
   };
 }
 
@@ -123,6 +124,8 @@ export function eventsFromHistory(h: HistoryData, workdir: string, at: number): 
       type: "step:end", at, cost: 0, durationMs: 0,
       record: {
         step: s.step, decision, results: [...s.results], codes,
+        ...(typeof s.screenshot === "string" ? { screenshot: s.screenshot } : {}),
+        ...(typeof s.screenshot_error === "string" ? { screenshotError: s.screenshot_error } : {}),
         ...(s.network ? { network: s.network } : {}),
         ...(s.network_errors?.length ? { networkErrors: [...s.network_errors] } : {}),
       },
