@@ -15,7 +15,7 @@ Setup:
 
 - **Tools:** Node >= 22.18, `bash`, `jq`, `curl`, `openssl`, `sudo` (for `/etc/hosts` and port 443), a browser (Chrome or Firefox) for the web UI, a terminal at least 120x40 for the TUI. `playwright-cli` installed as README -> Prerequisites describes.
 - **Build gate:** in the branch checkout (`$REPO`), run `npm ci && npm run build`. Then `export DW="node $REPO/dist/bin.js"`.
-- **QA workspace:** `export QA_WORK=/tmp/dw-jev QA_DIR=/tmp/dw-jev/out XDG_CONFIG_HOME=/tmp/dw-jev/xdg`, then `mkdir -p $QA_WORK/bin $QA_WORK/scripts $QA_WORK/tasks $QA_DIR $XDG_CONFIG_HOME/duckwright && chmod 777 $QA_DIR` and `cd $QA_WORK`. Run every `$DW` command from `$QA_WORK`, so runs land in `$QA_WORK/runs/`. `XDG_CONFIG_HOME` keeps your real `duckwright.conf` out of the way.
+- **QA workspace:** `export QA_WORK=/tmp/dw-jev QA_DIR=/tmp/dw-jev/out XDG_CONFIG_HOME=/tmp/dw-jev/xdg`, then `mkdir -p $QA_WORK/bin $QA_WORK/scripts $QA_WORK/tasks $QA_WORK/plans $QA_DIR $XDG_CONFIG_HOME/duckwright && chmod 777 $QA_DIR` and `cd $QA_WORK`. Run every `$DW` command from `$QA_WORK`, so runs land in `$QA_WORK/runs/`. `XDG_CONFIG_HOME` keeps your real `duckwright.conf` out of the way.
 - **PATH:** `export PATH="$QA_WORK/bin:$PATH"` (after writing `bin/claude`, Test data).
 - **Certificate:** `openssl req -x509 -newkey rsa:2048 -nodes -keyout $QA_WORK/jev.key -out $QA_WORK/jev.crt -days 7 -subj /CN=api.typesafe.ai -addext subjectAltName=DNS:api.typesafe.ai`, then `export NODE_EXTRA_CA_CERTS=$QA_WORK/jev.crt`.
 - **Host name:** `echo '127.0.0.1 api.typesafe.ai' | sudo tee -a /etc/hosts`. Remove that line when QA is finished.
@@ -89,6 +89,8 @@ https.createServer({ key: fs.readFileSync(`${W}/jev.key`), cert: fs.readFileSync
 }).listen(443, "127.0.0.1");
 ```
 
+Every `jev/*.json` file must be valid JSON: the stub does not catch a parse error in a script file, and a crash breaks every later scenario. Check new files with `jq . <file>`.
+
 Stub script entries (`jev/N.json` answers the Nth HTTP request of the run, including retries; `jev/default.json` answers any request without its own file; with neither, the stub answers HTTP 500):
 
 - `{"action":"click","ac":0.93,"target":"link \"QA Two\"","tc":0.88}`: answers `click` on the ref whose description is `link "QA Two"`. Usage defaults to 1000 in / 10 out.
@@ -145,7 +147,7 @@ Each `scripts/<NAME>/claude/N.json` answers the Nth **Claude call** of the run (
 | `R429` | 1 goto `one.html`; 2 done | 1 `{"status":429}`; 2 as `ACC` 1; 3 `{"action":"needs_text","ac":0.99}` | 1 Claude, 2 Jev click, 3 Claude done |
 | `R429X` | 1 goto `one.html`; 2 done | 1, 2, 3 `{"status":429}` | 1, 2 Claude |
 | `R529X` | 1 goto `one.html`; 2 done | 1, 2, 3 `{"status":529}` | 1, 2 Claude |
-| `E422` | 1 goto `one.html`; 2 goto `two.html`; 3 done | 1 `{"status":422,"text":"bad \n\n  state"}` (written with `printf` so the `\n` are real newlines); 2 `{"status":422,"text":"<300 x>"}` made with `printf '{"status":422,"text":"%s"}' $(printf 'x%.0s' {1..300})` | 1, 2, 3 Claude |
+| `E422` | 1 goto `one.html`; 2 goto `two.html`; 3 done | 1 `{"status":422,"text":"bad \n\n  state"}`, written so the file keeps `\n` as JSON escapes (raw newlines inside a JSON string are invalid and would crash the stub): `echo '{"status":422,"text":"bad \n\n  state"}' > scripts/E422/jev/1.json` (plain `echo`, no `-e`). `JSON.parse` turns the escapes into real newlines in the body the stub sends; 2 `{"status":422,"text":"<300 x>"}` made with `printf '{"status":422,"text":"%s"}' $(printf 'x%.0s' {1..300})` | 1, 2, 3 Claude |
 | `SLOW` | 1 goto `one.html`; 2 done | 1 `{"delay_ms":12000}` | 1, 2 Claude |
 | `DROP` | 1 goto `one.html`; 2 done | 1 `{"destroy":true}` | 1, 2 Claude |
 | `BAD` | 1 goto `one.html`; 2 goto `two.html`; 3 goto `one.html`; 4 done | 1 `{"raw":"not json"}`; 2 `{"action":"zzz","ac":0.9,"tc":0.9}`; 3 `{"action":"click","ac":1.5,"tc":0.9}` | 1 to 4 Claude |
@@ -163,7 +165,13 @@ Each `scripts/<NAME>/claude/N.json` answers the Nth **Claude call** of the run (
 - `tasks/thr-only.md`: `---` / `jev-threshold: 0.5` / `---` / `QA task threshold only`
 - `tasks/bad-jev.md`: `---` / `jev: maybe` / `---` / `QA bad`. The bad value is on line 2.
 - `tasks/bad-thr-0.md`, `tasks/bad-thr-15.md`, `tasks/bad-thr-abc.md`: `---` / `jev-threshold: 0` (resp. `1.5`, `abc`) / `---` / `QA bad`. Line 2.
-- `plans/qa-jev-plan.md`: a one-scenario plan: `# QA jev plan` / `## Scenarios` / `### TS-1: open page one` / `Open http://localhost:8765/one.html and report its heading.`
+- `plans/qa-jev-plan.md`: a one-scenario plan: `# QA jev plan` / `## Scenarios` / `### TS-1: open page one` / `Open http://localhost:8765/one.html and report its heading.` Only the planned folder's `source` field names it; nothing plans it.
+- `tasks/qa-jev-plan/` (planned folder, written by hand so no real planner call is needed; recreate it after each reset, since reset deletes it):
+  - `tasks/qa-jev-plan/01-open-page-one.md`: the single line `QA ACC`.
+  - `tasks/qa-jev-plan/plan.json`:
+    ```json
+    {"version":1,"name":"qa-jev-plan.md","source":"plans/qa-jev-plan.md","setup":null,"notes":[],"skipped":[],"tasks":[{"file":"01-open-page-one.md","id":"TS-1","title":"open page one"}]}
+    ```
 
 ## Coverage
 
@@ -568,12 +576,13 @@ Each `scripts/<NAME>/claude/N.json` answers the Nth **Claude call** of the run (
 **Preconditions:** reset; `qa_use SLOW`.
 
 **Steps:**
-1. Run `SLOW` with `--jev`, timing it with `time`.
+1. Run `SLOW` with `--jev`.
 2. `jq -r '.history[1].jev.routed, .history[1].source' $H`.
+3. Measure the gap between the Jev request and step 2's Claude call: `echo $(( $(date -r $QA_DIR/prompt-2.txt +%s%3N) - $(jq .t $QA_DIR/jev-req-1.json) ))` (ms; `prompt-2.txt` is written when the Claude stub is called after Jev gives up).
 
 **Expected:**
 - `exit=0`; routed `error: jev timeout after 10s`; source `claude`; 1 Jev request.
-- The run takes at least 10 s and less than 20 s.
+- The gap is at least 10000 ms and below 11500 ms (the client gives up at 10 s, before the stub's 12 s answer; browser start-up and step 1 are not in this window).
 
 ### TS-25: A dropped connection is a network error
 
@@ -672,7 +681,7 @@ Each `scripts/<NAME>/claude/N.json` answers the Nth **Claude call** of the run (
 
 **Contract:** C1 · **Criteria:** SC2, SC5 · **Type:** UI, File · **Priority:** P3
 
-**Preconditions:** reset; `qa_use ACC`. Create the planned folder once **with the real `claude`** (remove `$QA_WORK/bin` from `PATH` for this command only): `$DW plan plans/qa-jev-plan.md -p`, which writes `tasks/qa-jev-plan/`. Restore `PATH`.
+**Preconditions:** reset; `qa_use ACC`; write `tasks/qa-jev-plan/` by hand as in Test data -> Task files (the stub `claude` stays on `PATH`; nothing calls the real planner).
 
 **Steps:**
 1. Run `$DW --web --port 4173 --jev --plan tasks/qa-jev-plan/` (opening a planned folder does not call the planner).
