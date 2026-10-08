@@ -626,7 +626,7 @@ test("state_options_focus", () => {
   s = reduce(s, { type: "optionsMove", delta: -1 });
   assert.equal(s.optionsSelected, 0, "clamped at the first field");
   s = reduce(s, { type: "optionsMove", delta: 9 });
-  assert.equal(s.optionsSelected, 3, "clamped at the last field");
+  assert.equal(s.optionsSelected, 5, "clamped at the last field");
   s = reduce(s, { type: "escape" });
   assert.deepEqual([s.focus, s.mode], ["list", "list"]);
 });

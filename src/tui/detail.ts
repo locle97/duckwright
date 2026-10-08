@@ -22,6 +22,7 @@ export interface DetailProps {
 
 const SETTINGS: readonly [keyof Effective, string][] = [
   ["model", "model"], ["maxSteps", "max steps"], ["headed", "headed"], ["snapshot", "snapshot mode"],
+  ["video", "video"], ["screenshot", "screenshot"],
 ];
 
 const row = (...children: (ReactElement | string | null)[]): ReactElement => h(Text, { wrap: "truncate-end" }, ...children);

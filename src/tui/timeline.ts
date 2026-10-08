@@ -36,7 +36,7 @@ function stepRow(v: StepView, i: number, now: number, selected: boolean, theme: 
   return { key: `s${i}`, step: i, el };
 }
 
-function detailRows(v: StepView, i: number, now: number, theme: Theme): Line[] {
+function detailRows(v: StepView, i: number, now: number, theme: Theme, workdir: string): Line[] {
   const items: (ReactElement | string)[][] = [];
   const decided = v.goal !== "" || v.actions.length > 0;
   const label = (text: string): ReactElement => h(Text, { color: theme.role.muted }, text);
@@ -60,6 +60,8 @@ function detailRows(v: StepView, i: number, now: number, theme: Theme): Line[] {
     const more = v.networkErrors.length > 1 ? ` (+${v.networkErrors.length - 1} more)` : "";
     items.push([h(Text, { color: theme.role.error }, `net error  ${sanitize(v.networkErrors[0]!)}${more}`)]);
   }
+  if (v.screenshot !== null) items.push([label("shot  "), sanitize(`${workdir}/${v.screenshot}`)]);
+  else if (v.screenshotError !== null) items.push([h(Text, { color: theme.role.error }, `shot error  ${sanitize(v.screenshotError)}`)]);
   if (v.error !== null) items.push([h(Text, { color: theme.role.error }, `error  ${sanitize(v.error)}`)]);
   return items.map((parts, j) => ({
     key: `s${i}d${j}`, step: i, el: row(`  ${j === items.length - 1 ? "└" : "├"} `, ...parts),
@@ -85,7 +87,7 @@ function testLine(o: RunOutcome): string | null {
   }
 }
 
-function banner(o: RunOutcome, theme: Theme): Line[] {
+function banner(o: RunOutcome, run: RunView, theme: Theme): Line[] {
   const result = RESULT[o.status];
   const els: ReactElement[] = [
     row(" "),
@@ -96,6 +98,7 @@ function banner(o: RunOutcome, theme: Theme): Line[] {
     row(`Cost: $${fixed4(o.costUsd)}`),
     row(`History: ${o.historyPath !== null ? sanitize(o.historyPath) : "-"}`),
   ];
+  if (run.video) els.push(row(`video  ${sanitize(`${run.workdir}/${run.video}`)}`));
   const test = testLine(o);
   if (test !== null) els.push(row(test));
   return els.map((el, i) => ({ key: `b${i}`, step: null, el }));
@@ -119,9 +122,9 @@ export function Timeline({ run, now, height, focused }: {
   const lines: Line[] = [];
   run.steps.forEach((v, i) => {
     lines.push(stepRow(v, i, now, focused && run.selected === i, theme));
-    if (run.expanded.includes(i)) lines.push(...detailRows(v, i, now, theme));
+    if (run.expanded.includes(i)) lines.push(...detailRows(v, i, now, theme, run.workdir));
   });
-  if (run.outcome !== null) lines.push(...banner(run.outcome, theme));
+  if (run.outcome !== null) lines.push(...banner(run.outcome, run, theme));
   const start = windowStart(lines, run, Math.max(0, height));
   return h(Box, { flexDirection: "column", height: Math.max(0, height), overflow: "hidden" },
     ...lines.slice(start, start + Math.max(0, height)).map((l) => h(Box, { key: l.key, flexDirection: "column" }, l.el)));

@@ -129,6 +129,8 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--max-steps` | `25` | Maximum number of loop iterations |
 | `--model` | `sonnet` | Model passed to `claude -p --model` |
 | `--headed` | off | Show the browser window (`--no-headed` overrides a task file) |
+| `--video` | off | Record one video of the whole run to `runs/<id>/video.webm` (`--no-video` overrides a task file). See [Evidence](#evidence-screenshots-and-video) |
+| `--screenshot` | off | Save a screenshot of the page after every step to `runs/<id>/screenshots/` (`--no-screenshot` overrides a task file). See [Evidence](#evidence-screenshots-and-video) |
 | `--skill` | bundled `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
@@ -159,7 +161,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 
 A task or `-f` on the command line is added to the task list and started as soon as the TUI opens, up to `--max-parallel` at once, with the rest starting in order as runs finish: `duckwright -f tasks/` runs a whole folder in the TUI. A missing or invalid file is reported before the TUI opens (exit `2`). When you quit, the TUI prints the same kind of summary as a [batch run](#batch-runs).
 
-**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, snapshot mode). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
+**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, snapshot mode, video, screenshot). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
 
 **Past runs.** Runs saved in `runs/` are listed on the sidebar's History tab, newest `--past N` of them (default 20); press `tab` to switch between Tasks and History. Each tab keeps its own selection and filter. Past runs are read-only: select one to see its timeline, and press `space` to run it again with the current flags, which moves it to the Tasks tab.
 
@@ -317,6 +319,8 @@ and check the greeting says "Hello, Linh!".
 | `session` | text |
 | `state` | a path |
 | `network` | `true` or `false` |
+| `video` | `true` or `false` |
+| `screenshot` | `true` or `false` |
 | `twofa-timeout` | a whole number from 1 to 2147483 |
 | `snapshot` | `hybrid`, `full` or `grep` |
 | `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
@@ -387,6 +391,8 @@ Each step's history line is printed as it happens, followed by the result, answe
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 - `network/<request id>/`: with network capture on (the default), one folder per captured API call, numbered `0001`, `0002`, … across the run. It holds `request.json` (id, step, method, redacted URL and headers), `response.json` (status, status text, type, MIME type, duration and redacted headers), and, only when non-empty, `request-body.txt` and `response-body.txt` (redacted) or `response-body.bin` (a binary response, copied unredacted). Nothing is created with `--no-network`.
 - `events.jsonl`: every run event, one JSON object per line
+- `screenshots/step-NNN.png`: with `--screenshot`, the page after each step (`step-001.png`, `step-002.png`, …). Each step in `history.json` gains a `screenshot` path relative to the run folder, or a `screenshot_error` message when the capture failed
+- `video.webm`: with `--video`, one recording of the whole run. `history.json` gains a top-level `video` key (`"video.webm"`) when it was saved, and `-p` prints a `Video:` line with its path
 - `duckwright.spec.ts`: the generated regression test, written after every successful run
 
 > [!CAUTION]
@@ -394,6 +400,15 @@ Each step's history line is printed as it happens, followed by the result, answe
 
 > [!CAUTION]
 > Redaction of captured network data is pattern-based (secret-named headers, secret-named keys in JSON, form and URL query data, and Bearer/Basic credentials). Captured bodies can still hold secrets it misses, and binary response bodies are not redacted at all. Treat `network/` like `history.json`.
+
+### Evidence: screenshots and video
+
+`--video` and `--screenshot` (or `video: true` / `screenshot: true` in a task file's front matter or the config file) keep visual evidence of a run. Both are off by default. Command-line flags override the task file, which overrides the config file.
+
+> [!CAUTION]
+> Screenshots and video are not scrubbed. They show whatever the page shows, including typed passwords, 2FA codes and any other data on screen, because the 2FA scrubber cannot redact pixels. Leave them off unless you need them, and treat `screenshots/` and `video.webm` like `auth.json`.
+
+The video follows the page that `playwright-cli` records, not other tabs that the agent opens. A failed screenshot or video never changes the run's outcome or exit code. In the TUI, the Options pane and each task's `o` form have `video` and `screenshot` fields, an expanded step shows a `shot` row with the file path, and the end banner shows a `video` row. In the web UI, the Options dialog has an Evidence group with both checkboxes, each step shows a thumbnail that opens full size in a dialog, and a finished run has a video player; past runs show the same.
 
 **Network capture.** After each step that ran actions, Duckwright reads the page's requests through `playwright-cli`, redacts them in memory (secrets become a literal `[REDACTED]`), and writes them to `network/`. Each such step in `history.json` gains a `network` array of entries (`id`, `method`, `url`, `status`, `statusText`, `type`, `durationMs`), and, if something went wrong while capturing or clearing the request list, a `network_errors` array of messages. Steps where the brain failed have neither key. The next prompt shows the agent a short `<network>` summary of its last step's calls. Capture errors never change the run's outcome or exit code.
 

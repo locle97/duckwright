@@ -16,11 +16,35 @@ test("form_open_prefills_effective_and_overrides", () => {
   const f = openForm(7, EFF, { maxSteps: 5, headed: true });
   assert.equal(f.taskId, 7);
   assert.equal(f.focus, 0);
-  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot"]);
-  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode"]);
-  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid"]);
-  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false]);
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot"]);
+  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode", "video", "screenshot"]);
+  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid", "false", "false"]);
+  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false, false, false]);
   assert.ok(f.fields.every((x) => x.error === null));
+});
+
+test("form_evidence_fields", () => {
+  let f = openForm(null, EFF, {});
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot"]);
+  assert.deepEqual(f.fields.slice(-2).map((x) => x.label), ["video", "screenshot"]);
+  f = press(f, "down", "down", "down", "down");
+  assert.equal(f.fields[4].key, "video");
+  f = press(f, "x");
+  assert.equal(f.fields[4].raw, "false", "other input is ignored");
+  assert.equal(f.fields[4].overridden, false);
+  f = press(f, "space");
+  assert.equal(f.fields[4].raw, "true");
+  assert.equal(f.fields[4].overridden, true);
+  assert.deepEqual(formResult(f), { ok: true, overrides: { video: true } });
+  f = press(f, "left");
+  assert.equal(f.fields[4].raw, "false");
+  f = press(f, "right");
+  assert.equal(f.fields[4].raw, "true");
+  f = press(f, "ctrl+r");
+  assert.equal(f.fields[4].raw, "false");
+  assert.equal(f.fields[4].overridden, false);
+  f = press(f, "down", "space");
+  assert.deepEqual(formResult(f), { ok: true, overrides: { screenshot: true } });
 });
 
 test("form_toggle_and_cycle", () => {
