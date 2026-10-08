@@ -30,7 +30,7 @@ export type TaskSettings = Partial<{
   setup: string;
 }>;
 
-export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme";
+export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme" | "threshold";
 
 // Front-matter key -> (setting, kind). allow-file-access is deliberately absent:
 // a shared task file must not be able to grant the browser unrestricted file access.
@@ -45,6 +45,8 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   video: ["video", "bool"],
   screenshot: ["screenshot", "bool"],
   "twofa-timeout": ["twofaTimeout", "int"],
+  jev: ["jev", "bool"],
+  "jev-threshold": ["jevThreshold", "threshold"],
   snapshot: ["snapshot", "snapshot"],
   setup: ["setup", "path"],
 };
@@ -134,6 +136,13 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
     if (v !== "true" && v !== "false") throw new LineError(`${key} must be true or false, got "${v}"`);
     return v === "true";
   }
+  if (kind === "threshold") {
+    const n = THRESHOLD_RE.test(v) ? Number(v) : 0;
+    if (!(n > 0 && n <= 1)) {
+      throw new LineError(`${key} must be a number greater than 0 and at most 1, got "${v}"`);
+    }
+    return n;
+  }
   if (kind === "snapshot") {
     if (!(SNAPSHOT_MODES as readonly string[]).includes(v)) {
       throw new LineError(`${key} must be full, grep or hybrid, got "${v}"`);
@@ -156,7 +165,7 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
  * Throws TaskFileError with the front-matter message, minus the file and line prefix.
  */
 export function settingValue(
-  key: "max-steps" | "model" | "headed" | "snapshot" | "video" | "screenshot", raw: string,
+  key: "max-steps" | "model" | "headed" | "jev" | "snapshot" | "video" | "screenshot", raw: string,
 ): string | number | boolean {
   try {
     if (!raw) throw new LineError(`"${key}" has no value`);
