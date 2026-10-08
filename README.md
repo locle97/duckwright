@@ -572,6 +572,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
 - [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
+- [ ] **Environment context**: a per-environment context file (for example `environments/staging.md`, chosen with `--env staging`) that is seeded into every task's prompt, so the agent starts each run knowing the basics of the environment under test: base URL, test accounts and where their credentials come from, seeded test data, feature flags, known quirks, and what is off-limits. Shared once instead of repeated in every task file, and never containing raw secrets (referenced by name, like `--state`).
 - [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
 - [x] **npm release**: `npm install -g duckwright`, published from GitHub releases by `release.yml`.
 
