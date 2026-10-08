@@ -16,7 +16,7 @@ test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid",
-    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null,
+    print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
   });
 });
 
@@ -31,7 +31,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep",
-    print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null,
+    print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
   });
 });
 
@@ -303,4 +303,40 @@ test("help and usage mention the web options", () => {
   assert.ok(text.includes("--web"));
   assert.ok(text.includes("--port PORT"));
   assert.ok(RUN_USAGE.includes("[--web] [--port PORT]"));
+});
+
+test("evidence_flags_default_off", () => {
+  const a = parse();
+  assert.equal(a.video, false);
+  assert.equal(a.screenshot, false);
+});
+
+test("evidence_flags_last_wins", () => {
+  const a = parse("--video", "--no-video", "--screenshot");
+  assert.equal(a.video, false);
+  assert.equal(a.screenshot, true);
+  assert.equal(parse("--no-screenshot", "--screenshot").screenshot, true);
+});
+
+test("evidence_flags_override_settings", () => {
+  assert.equal(args(parseRunArgs(["--no-video"], "/skill.md", { video: true })).video, false);
+});
+
+test("evidence_flag_rejects_value", () => {
+  assert.throws(() => parse("--video=x"), usage("argument --video/--no-video: ignored explicit argument 'x'"));
+  assert.throws(() => parse("--no-screenshot=1"), usage("argument --screenshot/--no-screenshot: ignored explicit argument '1'"));
+});
+
+test("evidence_help_lines", () => {
+  const p = parseRunArgs(["--help"], "/skill.md");
+  assert.equal(p.kind, "help");
+  const text = (p as { kind: "help"; text: string }).text;
+  assert.ok(RUN_USAGE.includes("[--network | --no-network]\n                  [--video | --no-video] [--screenshot | --no-screenshot]\n"));
+  const block = "  --video, --no-video   record one video of the whole run to\n"
+    + "                        runs/<id>/video.webm (default off)\n"
+    + "  --screenshot, --no-screenshot\n"
+    + "                        save a screenshot of the page after every step to\n"
+    + "                        runs/<id>/screenshots/ (default off)\n";
+  assert.ok(text.includes(block));
+  assert.ok(text.indexOf("--network, --no-network") < text.indexOf(block));
 });

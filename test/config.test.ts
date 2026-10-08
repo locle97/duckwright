@@ -112,3 +112,10 @@ test("duckwright init reports what it did", async () => {
   assert.match(out[1], /^Config already exists: /);
   assert.equal(await main(["init", "x"], deps), 2);
 });
+
+test("evidence_defaults_documented_and_loaded", () => {
+  assert.ok(DEFAULT_CONFIG.includes("# network: true\n# video: false\n# screenshot: false\n"));
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "duckwright.conf"), "screenshot: true\n");
+  assert.deepEqual(loadConfig(dir), { screenshot: true });
+});

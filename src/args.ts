@@ -18,6 +18,8 @@ export interface RunArgs {
   state: string | null;
   allowFileAccess: boolean;
   network: boolean;
+  video: boolean;
+  screenshot: boolean;
   twofaTimeout: number;
   snapshot: SnapshotMode;
   print: boolean;
@@ -57,6 +59,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
   + "                  [--state FILE] [--allow-file-access]\n"
   + "                  [--network | --no-network]\n"
+  + "                  [--video | --no-video] [--screenshot | --no-screenshot]\n"
   + "                  [--twofa-timeout SEC]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
   + "                  [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
@@ -101,6 +104,11 @@ options:
   --network, --no-network
                         record the API calls the page makes each step,
                         redacted, under runs/<id>/network (default on)
+  --video, --no-video   record one video of the whole run to
+                        runs/<id>/video.webm (default off)
+  --screenshot, --no-screenshot
+                        save a screenshot of the page after every step to
+                        runs/<id>/screenshots/ (default off)
   --twofa-timeout SEC   seconds to wait for a person to enter a 2FA code or
                         approve a passkey before the step fails (default 300, at
                         most 2147483)
@@ -194,6 +202,8 @@ const RUN_SPEC: OptionSpec = {
     "--session": "--session", "--state": "--state",
     "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
     "--twofa-timeout": "--twofa-timeout", "--network": "--network/--no-network", "--no-network": "--network/--no-network",
+    "--video": "--video/--no-video", "--no-video": "--video/--no-video",
+    "--screenshot": "--screenshot/--no-screenshot", "--no-screenshot": "--screenshot/--no-screenshot",
     "--allow-file-access": "--allow-file-access",
     "--snapshot-hybrid": "--snapshot-hybrid", "--snapshot-full": "--snapshot-full",
     "--snapshot-grep": "--snapshot-grep", "-p": "-p/--print", "--print": "-p/--print", "--max-parallel": "--max-parallel",
@@ -214,7 +224,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   };
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
-    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", network: true,
+    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", network: true, video: false, screenshot: false,
     print: false, maxParallel: null, web: false, port: null, plan: null, twofaTimeout: 300,
     ...settings,
   };
@@ -293,6 +303,8 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     if (name === "--version") return { kind: "version" };
     if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
     else if (name === "--network" || name === "--no-network") args.network = name === "--network";
+    else if (name === "--video" || name === "--no-video") args.video = name === "--video";
+    else if (name === "--screenshot" || name === "--no-screenshot") args.screenshot = name === "--screenshot";
     else if (name === "--allow-file-access") args.allowFileAccess = true;
     else if (name === "-p" || name === "--print") args.print = true;
     else if (name === "--web") args.web = true;
