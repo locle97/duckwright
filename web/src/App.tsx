@@ -16,7 +16,7 @@ import { OptionsStrip } from "./OptionsStrip.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { initialState, pendingTwofa, reduce } from "./store.ts";
 import type { WebState } from "./store.ts";
-import { Toasts } from "./ui.tsx";
+import { Button, Modal, Toasts } from "./ui.tsx";
 import { useServer } from "./useServer.ts";
 
 function Screen(p: { title: string; children?: ReactNode }) {
@@ -103,6 +103,12 @@ export function App() {
       {d?.kind === "edit" ? <EditorDialog draft={d.draft} dispatch={dispatch} /> : null}
       {d?.kind === "options" ? <OptionsDialog state={state} taskId={d.taskId} dispatch={dispatch} /> : null}
       {d?.kind === "confirm" ? <ConfirmDialog confirm={d.confirm} dispatch={dispatch} /> : null}
+      {d?.kind === "image" ? (
+        <Modal wide title={d.title} onClose={() => dispatch({ type: "dialog", value: null })}
+          footer={<Button onClick={() => dispatch({ type: "dialog", value: null })}>Close</Button>}>
+          <img className="evidence-full" src={d.src} alt={d.title} />
+        </Modal>
+      ) : null}
       {d?.kind === "help" ? <HelpDialog dispatch={dispatch} /> : null}
       {twofa ? <TwofaDialog task={twofa} dispatch={dispatch} /> : null}
       <Toasts toasts={state.toasts} />

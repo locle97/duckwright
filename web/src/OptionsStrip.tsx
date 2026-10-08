@@ -20,6 +20,8 @@ export function OptionsStrip(p: { state: WebState; dispatch(a: Action): void }) 
       {chip("max steps", String(eff.maxSteps), o.maxSteps !== undefined)}
       {chip("headed", eff.headed ? "on" : "off", o.headed !== undefined)}
       {chip("snapshot", eff.snapshot, o.snapshot !== undefined)}
+      {chip("video", eff.video ? "on" : "off", o.video !== undefined)}
+      {chip("screenshot", eff.screenshot ? "on" : "off", o.screenshot !== undefined)}
     </div>
   );
 }
