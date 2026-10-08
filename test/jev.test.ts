@@ -212,6 +212,18 @@ test("missing usage", async () => {
   });
 });
 
+test("negative usage", async () => {
+  for (const usage of [{ input_tokens: -1, output_tokens: 5 }, { input_tokens: 5, output_tokens: -1 }]) {
+    const { client } = setup([{ status: 200, body: okBody({ usage }) }]);
+    await assert.rejects(client.ask({}, QUESTIONS), (e: unknown) => {
+      assert.ok(e instanceof JevError);
+      assert.equal(e.message, "jev malformed response: bad usage");
+      assert.equal(e.cost, 0);
+      return true;
+    });
+  }
+});
+
 test("abort before call", async () => {
   const ac = new AbortController();
   ac.abort();

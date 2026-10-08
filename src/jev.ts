@@ -177,7 +177,9 @@ export class JevClient {
       typeof u.input_tokens !== "number" ||
       typeof u.output_tokens !== "number" ||
       !Number.isFinite(u.input_tokens) ||
-      !Number.isFinite(u.output_tokens)
+      !Number.isFinite(u.output_tokens) ||
+      u.input_tokens < 0 ||
+      u.output_tokens < 0
     ) {
       throw new JevError("jev malformed response: bad usage");
     }
