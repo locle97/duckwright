@@ -23,6 +23,7 @@ export interface RunOutcome {
   historyPath: string | null;
   export: ExportOutcome;
   warnings: string[];
+  video?: string;
   error: string | null; // the fail() message, e.g. "interrupted"
 }
 

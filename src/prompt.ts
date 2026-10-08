@@ -16,6 +16,8 @@ export interface StepRecord {
   network?: NetworkEntry[];
   networkErrors?: string[];
   requestOrigins?: (string | null)[];
+  screenshot?: string;
+  screenshotError?: string;
 }
 
 /** One history line: `step N | evaluation | next goal | cmd args → result; ...`. */

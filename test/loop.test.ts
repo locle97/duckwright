@@ -638,3 +638,120 @@ test("without_twofa_nothing_is_scrubbed", async () => {
   const r = await agent(new FakePW(), brain).run();
   assert.equal(r.answer, TF_CODE);
 });
+
+class EvidencePW extends FakePW {
+  shotFail: string | null = null;
+  shotThrow: Error | null = null;
+  startThrow: Error | null = null;
+
+  override async screenshot(p: string): Promise<void> {
+    this.calls.push(["screenshot", [p]]);
+    if (this.shotThrow) throw this.shotThrow;
+    if (this.shotFail) throw new PlaywrightError(this.shotFail);
+    fs.writeFileSync(p, "png");
+  }
+
+  override async videoStart(p: string): Promise<void> {
+    this.calls.push(["video-start", [p]]);
+    if (this.startThrow) throw this.startThrow;
+  }
+
+  override async videoStop(): Promise<void> {
+    this.calls.push(["video-stop", []]);
+    fs.writeFileSync(path.join(this.dir, "video.webm"), "x");
+  }
+
+  override async close(): Promise<void> {
+    this.calls.push(["close", []]);
+    await super.close();
+  }
+
+  dir = "";
+}
+
+const evAgent = (pw: EvidencePW, brain: FakeBrain, opts: Partial<ConstructorParameters<typeof Agent>[0]> = {}) => {
+  const workdir = tmpDir();
+  pw.dir = workdir;
+  return new Agent({ task: "t", pw, brain, workdir, ...opts });
+};
+const names = (pw: EvidencePW) => pw.calls.map((c) => c[0]);
+
+test("evidence_off_runs_nothing", async () => {
+  const pw = new EvidencePW();
+  const a = evAgent(pw, new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]));
+  await a.run();
+  assert.ok(!names(pw).some((n) => ["screenshot", "video-start", "video-stop"].includes(n)));
+  assert.equal(fs.existsSync(path.join(a.workdir, "screenshots")), false);
+  assert.deepEqual(a.evidence, { video: null, warnings: [] });
+});
+
+test("screenshot_every_step_including_brain_error", async () => {
+  const pw = new EvidencePW();
+  const events = new RunEvents();
+  const ends: StepRecord[] = [];
+  events.subscribe((e) => { if (e.type === "step:end") ends.push(e.record); });
+  const a = evAgent(pw, new FakeBrain([new BrainError("x"), dec([["done", ["success", "ok"]]])]), { screenshot: true, events });
+  const r = await a.run();
+  const shots = pw.calls.filter((c) => c[0] === "screenshot").map((c) => c[1][0] as string);
+  assert.equal(shots.length, 2);
+  assert.ok(shots[0].endsWith("screenshots/step-001.png") && shots[1].endsWith("screenshots/step-002.png"));
+  assert.deepEqual(ends.map((e) => e.screenshot), ["screenshots/step-001.png", "screenshots/step-002.png"]);
+  assert.deepEqual(r.history.map((h) => h.screenshot), ["screenshots/step-001.png", "screenshots/step-002.png"]);
+});
+
+test("screenshot_failure_is_a_warning", async () => {
+  const pw = new EvidencePW();
+  pw.shotFail = "boom";
+  const a = evAgent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { screenshot: true });
+  const r = await a.run();
+  assert.equal(r.success, true);
+  assert.equal(r.history[0].screenshotError, "boom");
+  assert.ok(!("screenshot" in r.history[0]));
+  assert.deepEqual(a.evidence.warnings, ["screenshot failed at step 1: boom"]);
+});
+
+test("screenshot_error_is_scrubbed", async () => {
+  const pw = new EvidencePW();
+  const tf = twofa();
+  pw.shotFail = `bad ${TF_SECRET}`;
+  const a = evAgent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { screenshot: true, twofa: tf });
+  const r = await a.run();
+  assert.ok(!JSON.stringify(r.history).includes(TF_SECRET));
+  assert.ok(!a.evidence.warnings.join().includes(TF_SECRET));
+  assert.equal(a.evidence.warnings.length, 1);
+});
+
+test("screenshot_abort_propagates_and_stops_video", async () => {
+  const pw = new EvidencePW();
+  pw.shotThrow = new AbortedError();
+  const a = evAgent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { screenshot: true, video: true });
+  await assert.rejects(a.run(), AbortedError);
+  assert.deepEqual(names(pw).slice(-3), ["screenshot", "video-stop", "close"]);
+});
+
+test("video_start_stop_order", async () => {
+  const pw = new EvidencePW();
+  const a = evAgent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { video: true });
+  await a.run();
+  const n = names(pw);
+  assert.equal(n[0], "open");
+  assert.equal(n[1], "video-start");
+  assert.ok((pw.calls[1][1][0] as string).endsWith("/video.webm"));
+  assert.deepEqual(n.slice(-2), ["video-stop", "close"]);
+  assert.equal(a.evidence.video, "video.webm");
+
+  const pw2 = new EvidencePW({ snapError: true });
+  const a2 = evAgent(pw2, new FakeBrain([dec()]), { video: true });
+  await assert.rejects(a2.run(), PlaywrightError);
+  assert.deepEqual(names(pw2).slice(-2), ["video-stop", "close"]);
+});
+
+test("video_start_failure_skips_stop", async () => {
+  const pw = new EvidencePW();
+  pw.startThrow = new PlaywrightError("nope");
+  const a = evAgent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), { video: true });
+  const r = await a.run();
+  assert.equal(r.success, true);
+  assert.ok(!names(pw).includes("video-stop"));
+  assert.deepEqual(a.evidence.warnings, ["video failed to start: nope"]);
+});

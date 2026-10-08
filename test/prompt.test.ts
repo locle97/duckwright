@@ -154,3 +154,8 @@ test("system_md_documents_twofa", () => {
   assert.ok(md.includes("never type or guess a code"));
   assert.ok(md.includes("A page-changing action (goto, click, press, tab-new, tab-select, tab-close, go-back, twofa)"));
 });
+
+test("stepline_ignores_evidence_fields", () => {
+  const base = rec(1);
+  assert.equal(stepLine({ ...base, screenshot: "screenshots/step-001.png", screenshotError: "boom" }), stepLine(base));
+});
