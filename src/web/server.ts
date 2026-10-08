@@ -8,6 +8,7 @@ import path from "node:path";
 import { handleApi, snapshotOf } from "./api.ts";
 import type { ApiContext } from "./api.ts";
 import { authorize } from "./auth.ts";
+import { matchEvidence, parseRange, resolveEvidence } from "./evidence.ts";
 
 export interface ServerOptions {
   ctx: ApiContext;
@@ -16,6 +17,8 @@ export interface ServerOptions {
   port?: number;
   /** The built UI (index.html and assets/). */
   uiDir: string;
+  /** Where run folders live (evidence files are served from here). Default: ./runs. */
+  runsDir?: string;
 }
 
 export interface RunningServer { port: number; close(): Promise<void> }
@@ -88,7 +91,50 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
   const uiRoot = path.resolve(o.uiDir);
   const streams = new Map<http.ServerResponse, () => void>();
   const realRoot = fs.realpathSync(uiRoot);
+  const runsDir = path.resolve(o.runsDir ?? "runs");
   let port = 0;
+
+  function serveEvidence(req: http.IncomingMessage, res: http.ServerResponse, rawPath: string): void {
+    const notFound = (): void => sendJson(res, 404, { ok: false, error: "not found" });
+    if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 405, { ok: false, error: "method not allowed" });
+    const m = matchEvidence(rawPath);
+    if (!m) return notFound();
+    const real = resolveEvidence(runsDir, m.runId, m.rel);
+    if (!real) return notFound();
+    let size: number;
+    try {
+      size = fs.statSync(real).size;
+    } catch {
+      return notFound();
+    }
+    const headers: Record<string, string | number> = {
+      "Content-Type": m.type, "Cache-Control": "no-store", ...SECURITY,
+    };
+    let status = 200;
+    let range: { start: number; end: number } | null = null;
+    if (m.type === "video/webm") {
+      headers["Accept-Ranges"] = "bytes";
+      const r = parseRange(req.headers.range, size);
+      if (r === "unsatisfiable") {
+        res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}`, "Content-Length": 0 });
+        return void res.end();
+      }
+      if (r) {
+        range = r;
+        status = 206;
+        headers["Content-Range"] = `bytes ${r.start}-${r.end}/${size}`;
+      }
+    }
+    headers["Content-Length"] = range ? range.end - range.start + 1 : size;
+    res.writeHead(status, headers);
+    if (req.method === "HEAD" || size === 0) return void res.end();
+    const stream = fs.createReadStream(real, range ? { start: range.start, end: range.end } : {});
+    stream.on("error", () => {
+      if (!res.headersSent) sendJson(res, 500, { ok: false, error: "internal error" });
+      else res.destroy();
+    });
+    stream.pipe(res);
+  }
 
   function events(res: http.ServerResponse): void {
     res.writeHead(200, {
@@ -178,6 +224,9 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
       res.writeHead(302, { Location: auth.redirectTo, "Set-Cookie": auth.setCookie!, ...SECURITY });
       return void res.end();
     }
+    // Routed on the raw path, so a literal ".." never gets normalised into something that matches.
+    const rawPath = raw.split("?")[0];
+    if (rawPath.startsWith("/api/runs/")) return serveEvidence(req, res, rawPath);
     if (!isApi) return serveStatic(req, res, url.pathname);
     if (req.method === "GET" && url.pathname === "/api/events") return events(res);
     const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readJson(req);
