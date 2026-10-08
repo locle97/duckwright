@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ACTION_OPTIONS,
+  ACTION_QUESTION,
+  HybridBrain,
   JEV_URL,
   JevAuthError,
   JevClient,
   JevError,
+  TARGET_QUESTION,
   extractTargets,
 } from "../src/jev.ts";
-import type { JevQuestion, JevTransport } from "../src/jev.ts";
+import type { JevAnswer, JevQuestion, JevTransport } from "../src/jev.ts";
+import { BrainError } from "../src/brain.ts";
+import type { Decision, StepInput } from "../src/brain.ts";
 import { AbortedError } from "../src/proc.ts";
 
 test("extractTargets keeps only target roles in order", () => {
@@ -247,4 +253,177 @@ test("abort during call", async () => {
   };
   const client = new JevClient({ apiKey: "k", transport, sleep: async () => {}, signal: ac.signal });
   await assert.rejects(client.ask({}, QUESTIONS), AbortedError);
+});
+
+// ---- HybridBrain ----
+
+const claudeDec: Decision = { evaluationPreviousGoal: "e", memory: "cm", nextGoal: "cg", actions: [{ cmd: "snapshot", args: [] }] };
+const SNAP = '- button "Submit" [ref=e12]\n- link "" [ref=e13] [cursor=pointer]';
+
+function mkStep(over: Partial<StepInput["ctx"]> = {}, snapshot = SNAP): StepInput {
+  return {
+    obs: { tabs: "tabs", snapshot, truncated: false, lines: 2, chars: 10 },
+    ctx: { step: 2, task: "T", memory: "M", historyLines: ["step 1 | …"], nudged: false, previousFailed: false, ...over },
+  };
+}
+
+function fakes(answers?: Record<string, JevAnswer>, jevErr?: Error, claudeErr?: Error) {
+  const asks: { state: unknown; questions: Record<string, JevQuestion> }[] = [];
+  const claudeCalls: [string, boolean | undefined][] = [];
+  const jev = {
+    async ask(state: unknown, questions: Record<string, JevQuestion>): Promise<[Record<string, JevAnswer>, number]> {
+      asks.push({ state, questions });
+      if (jevErr) throw jevErr;
+      return [answers!, 0.001];
+    },
+  };
+  const claude = {
+    async decide(prompt: string, grep?: boolean): Promise<[Decision, number]> {
+      claudeCalls.push([prompt, grep]);
+      if (claudeErr) throw claudeErr;
+      return [{ ...claudeDec }, 0.5];
+    },
+  };
+  return { jev, claude, asks, claudeCalls };
+}
+
+const ans = (a: string, ac: number, t = "e12", tc = 0.9): Record<string, JevAnswer> => ({
+  action: { choice: a, confidence: ac },
+  target: { choice: t, confidence: tc },
+});
+
+test("HybridBrain accepted click with target", async () => {
+  const f = fakes(ans("click", 0.93, "e12", 0.88));
+  const hb = new HybridBrain({ jev: f.jev, claude: f.claude });
+  const [d, cost] = await hb.decide("P", true, mkStep());
+  assert.equal(f.claudeCalls.length, 0);
+  assert.deepEqual(d, {
+    evaluationPreviousGoal: "",
+    memory: "M",
+    nextGoal: 'jev: click button "Submit" (0.88)',
+    actions: [{ cmd: "click", args: ["e12"] }],
+    source: "jev",
+    jev: { action: "click", action_confidence: 0.93, target: "e12", target_confidence: 0.88, routed: "accepted" },
+  });
+  assert.equal(cost, 0.001);
+  const q = f.asks[0];
+  assert.deepEqual(q.state, { task: "T", memory: "M", history: ["step 1 | …"], tabs: "tabs", snapshot: SNAP });
+  assert.equal(q.questions.action.question, ACTION_QUESTION);
+  assert.equal(q.questions.action.type, "choice");
+  assert.equal(q.questions.target.question, TARGET_QUESTION);
+  assert.deepEqual(Object.keys(q.questions.action.criteria), [
+    "click", "check", "uncheck", "hover", "press_enter", "press_tab", "press_escape", "go_back", "needs_text", "done",
+  ]);
+  assert.equal(
+    q.questions.action.criteria.click,
+    "Click one element on the page: a link, button, tab, menu item or option.",
+  );
+  assert.deepEqual(q.questions.target.criteria, { e12: 'button "Submit"', e13: "link (no name)" });
+  assert.equal(Object.keys(ACTION_OPTIONS).length, 10);
+});
+
+test("HybridBrain accepted press_enter ignores low target", async () => {
+  const f = fakes(ans("press_enter", 0.9, "e13", 0.1));
+  const [d] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep());
+  assert.deepEqual(d.actions, [{ cmd: "press", args: ["Enter"] }]);
+  assert.equal(d.nextGoal, "jev: press_enter (0.90)");
+  assert.deepEqual(d.jev, { action: "press_enter", action_confidence: 0.9, target: "e13", target_confidence: 0.1, routed: "accepted" });
+  assert.equal(d.source, "jev");
+});
+
+test("HybridBrain confidence equal to threshold is accepted", async () => {
+  const f = fakes(ans("click", 0.8, "e12", 0.8));
+  const [d] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep());
+  assert.equal(d.source, "jev");
+});
+
+test("HybridBrain low action confidence goes to claude", async () => {
+  const f = fakes(ans("click", 0.79));
+  const [d, cost] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", false, mkStep());
+  assert.deepEqual(f.claudeCalls, [["P", false]]);
+  assert.deepEqual(d, {
+    ...claudeDec,
+    source: "claude",
+    jev: { action: "click", action_confidence: 0.79, target: "e12", target_confidence: 0.9, routed: "low_confidence" },
+  });
+  assert.equal(cost, 0.501);
+});
+
+test("HybridBrain low target confidence goes to claude", async () => {
+  const f = fakes(ans("click", 0.95, "e12", 0.5));
+  const [d] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep());
+  assert.equal(d.source, "claude");
+  assert.equal(d.jev?.routed, "low_confidence");
+});
+
+for (const choice of ["needs_text", "done"]) {
+  test(`HybridBrain ${choice} goes to claude`, async () => {
+    const f = fakes(ans(choice, 0.99));
+    const [d, cost] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep());
+    assert.equal(f.claudeCalls.length, 1);
+    assert.equal(d.source, "claude");
+    assert.equal(d.jev?.routed, choice);
+    assert.equal(cost, 0.501);
+  });
+}
+
+const many = Array.from({ length: 256 }, (_, i) => `- button "B${i}" [ref=e${i + 1}]`).join("\n");
+const skipCases: [string, StepInput | undefined][] = [
+  ["step 1", mkStep({ step: 1 })],
+  ["nudged", mkStep({ nudged: true })],
+  ["previous failure", mkStep({ previousFailed: true })],
+  ["no targets", mkStep({}, '- textbox "Q" [ref=e1]')],
+  ["256 targets", mkStep({}, many)],
+  ["missing step", undefined],
+];
+for (const [name, step] of skipCases) {
+  test(`HybridBrain skips jev: ${name}`, async () => {
+    const f = fakes(ans("click", 0.99));
+    const [d, cost] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", false, step);
+    assert.equal(f.asks.length, 0);
+    assert.deepEqual(f.claudeCalls, [["P", false]]);
+    assert.equal(d.source, "claude");
+    assert.equal(d.jev, null);
+    assert.equal(cost, 0.5);
+  });
+}
+
+test("HybridBrain JevError falls back with its cost", async () => {
+  const f = fakes(undefined, new JevError("jev http 500", 0.002));
+  const [d, cost] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep());
+  assert.deepEqual(d.jev, {
+    action: null, action_confidence: null, target: null, target_confidence: null, routed: "error: jev http 500",
+  });
+  assert.equal(d.source, "claude");
+  assert.equal(cost, 0.502);
+});
+
+test("HybridBrain claude BrainError after jev carries cost and record", async () => {
+  const f = fakes(ans("click", 0.1), undefined, new BrainError("boom", 0.5));
+  await assert.rejects(
+    new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep()),
+    (e: unknown) => {
+      assert.ok(e instanceof BrainError);
+      assert.equal(e.cost, 0.501);
+      assert.equal(e.jev?.routed, "low_confidence");
+      return true;
+    },
+  );
+});
+
+test("HybridBrain propagates JevAuthError and AbortedError", async () => {
+  for (const err of [new JevAuthError(), new AbortedError()]) {
+    const f = fakes(undefined, err);
+    await assert.rejects(
+      new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep()),
+      (e: unknown) => e instanceof err.constructor,
+    );
+    assert.equal(f.claudeCalls.length, 0);
+  }
+});
+
+test("HybridBrain custom threshold", async () => {
+  const f = fakes(ans("click", 0.93));
+  const [d] = await new HybridBrain({ jev: f.jev, claude: f.claude, minConfidence: 0.95 }).decide("P", true, mkStep());
+  assert.equal(d.jev?.routed, "low_confidence");
 });

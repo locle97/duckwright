@@ -1,3 +1,5 @@
+import { BrainError } from "./brain.ts";
+import type { Action, DecideFn, Decision, JevRecord, StepInput } from "./brain.ts";
 import { AbortedError } from "./proc.ts";
 
 export type { JevRecord } from "./brain.ts";
@@ -198,5 +200,145 @@ export class JevClient {
       out[id] = a as unknown as JevAnswer;
     }
     return [out, cost];
+  }
+}
+
+// ---- Hybrid routing ----
+
+export const ACTION_QUESTION = "Which single next move best advances the task on this page?";
+export const TARGET_QUESTION = "Which element should that move act on?";
+
+export const ACTION_OPTIONS: Readonly<
+  Record<string, { description: string; cmd: string | null; args: readonly string[]; target: boolean }>
+> = {
+  click: {
+    description: "Click one element on the page: a link, button, tab, menu item or option.",
+    cmd: "click", args: [], target: true,
+  },
+  check: {
+    description: "Tick a checkbox or select a radio button that is not checked yet.",
+    cmd: "check", args: [], target: true,
+  },
+  uncheck: { description: "Untick a checkbox that is checked.", cmd: "uncheck", args: [], target: true },
+  hover: { description: "Hover over one element to reveal a menu or tooltip.", cmd: "hover", args: [], target: true },
+  press_enter: {
+    description: "Press the Enter key, for example to submit the focused form.",
+    cmd: "press", args: ["Enter"], target: false,
+  },
+  press_tab: {
+    description: "Press the Tab key to move the focus to the next field.",
+    cmd: "press", args: ["Tab"], target: false,
+  },
+  press_escape: {
+    description: "Press the Escape key to close a dialog or menu.",
+    cmd: "press", args: ["Escape"], target: false,
+  },
+  go_back: {
+    description: "Go back to the previous page in the browser history.",
+    cmd: "go-back", args: [], target: false,
+  },
+  needs_text: {
+    description:
+      "The next move needs typed text: open a URL, fill or type into a field, pick a select value, or anything not listed here.",
+    cmd: null, args: [], target: false,
+  },
+  done: {
+    description: "The task is complete or cannot be completed, and it is time to report the result.",
+    cmd: null, args: [], target: false,
+  },
+};
+
+export function targetDescription(t: Target): string {
+  return t.name === "" ? `${t.role} (no name)` : `${t.role} "${t.name}"`;
+}
+
+export class HybridBrain implements DecideFn {
+  readonly jev: Pick<JevClient, "ask">;
+  readonly claude: DecideFn;
+  readonly minConfidence: number;
+
+  constructor(o: { jev: Pick<JevClient, "ask">; claude: DecideFn; minConfidence?: number }) {
+    this.jev = o.jev;
+    this.claude = o.claude;
+    this.minConfidence = o.minConfidence ?? 0.8;
+  }
+
+  async decide(prompt: string, grep = true, step?: StepInput): Promise<[Decision, number]> {
+    const viaClaude = async (record: JevRecord | null, jevCost: number): Promise<[Decision, number]> => {
+      try {
+        const [d, c] = await this.claude.decide(prompt, grep);
+        return [{ ...d, source: "claude", jev: record }, jevCost + c];
+      } catch (e) {
+        if (e instanceof BrainError) {
+          e.cost += jevCost;
+          if (record) e.jev = record;
+        }
+        throw e;
+      }
+    };
+
+    if (!step || step.ctx.step === 1 || step.ctx.nudged || step.ctx.previousFailed) return viaClaude(null, 0);
+    const targets = extractTargets(step.obs.snapshot);
+    if (targets.length === 0 || targets.length > MAX_TARGETS) return viaClaude(null, 0);
+
+    const { ctx, obs } = step;
+    const criteria: Record<string, string> = {};
+    for (const [id, o] of Object.entries(ACTION_OPTIONS)) criteria[id] = o.description;
+    const targetCriteria: Record<string, string> = {};
+    for (const t of targets) targetCriteria[t.ref] = targetDescription(t);
+
+    let answers: Record<string, JevAnswer>;
+    let jevCost: number;
+    try {
+      [answers, jevCost] = await this.jev.ask(
+        { task: ctx.task, memory: ctx.memory, history: ctx.historyLines, tabs: obs.tabs, snapshot: obs.snapshot },
+        {
+          action: { type: "choice", question: ACTION_QUESTION, criteria },
+          target: { type: "choice", question: TARGET_QUESTION, criteria: targetCriteria },
+        },
+      );
+    } catch (e) {
+      if (e instanceof JevError) {
+        return viaClaude(
+          { action: null, action_confidence: null, target: null, target_confidence: null, routed: `error: ${e.message}` },
+          e.cost,
+        );
+      }
+      throw e;
+    }
+
+    const a = answers.action;
+    const t = answers.target;
+    const opt = ACTION_OPTIONS[a.choice];
+    const record: JevRecord = {
+      action: a.choice,
+      action_confidence: a.confidence,
+      target: t.choice,
+      target_confidence: t.confidence,
+      routed: "accepted",
+    };
+    const target = targets.find((x) => x.ref === t.choice);
+    if (a.choice === "needs_text" || a.choice === "done") {
+      record.routed = a.choice;
+    } else if (a.confidence < this.minConfidence || (opt.target && (!target || t.confidence < this.minConfidence))) {
+      record.routed = "low_confidence";
+    }
+    if (record.routed !== "accepted") return viaClaude(record, jevCost);
+
+    let action: Action;
+    let conf = a.confidence;
+    let goal: string;
+    if (opt.target) {
+      action = { cmd: opt.cmd!, args: [target!.ref] };
+      conf = Math.min(conf, t.confidence);
+      goal = `jev: ${a.choice} ${targetDescription(target!)} (${conf.toFixed(2)})`;
+    } else {
+      action = { cmd: opt.cmd!, args: [...opt.args] };
+      goal = `jev: ${a.choice} (${conf.toFixed(2)})`;
+    }
+    return [
+      { evaluationPreviousGoal: "", memory: ctx.memory, nextGoal: goal, actions: [action], source: "jev", jev: record },
+      jevCost,
+    ];
   }
 }
