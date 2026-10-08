@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import type { Action, Decision } from "../src/brain.ts";
 import type { Observation } from "../src/observe.ts";
-import { HISTORY_WINDOW, buildPrompt, stepLine } from "../src/prompt.ts";
+import { HISTORY_WINDOW, buildPrompt, historyLines, stepLine } from "../src/prompt.ts";
 import type { StepRecord } from "../src/prompt.ts";
 
 function decision(evaluation: string, memory: string, nextGoal: string, actions: Action[]): Decision {
@@ -158,4 +158,14 @@ test("system_md_documents_twofa", () => {
 test("stepline_ignores_evidence_fields", () => {
   const base = rec(1);
   assert.equal(stepLine({ ...base, screenshot: "screenshots/step-001.png", screenshotError: "boom" }), stepLine(base));
+});
+
+test("historyLines returns stepLines of the last window", () => {
+  const recs = Array.from({ length: 17 }, (_, i) => rec(i + 1));
+  const lines = historyLines(recs);
+  assert.equal(lines.length, 16);
+  assert.equal(lines[0], "(2 earlier steps omitted)");
+  assert.deepEqual(lines.slice(1), recs.slice(2).map(stepLine));
+  assert.deepEqual(historyLines([]), []);
+  assert.deepEqual(historyLines([rec(1), rec(2), rec(3)], 0), ["(3 earlier steps omitted)"]);
 });
