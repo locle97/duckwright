@@ -24,6 +24,7 @@ export interface RunOutcome {
   export: ExportOutcome;
   warnings: string[];
   video?: string;
+  jevSteps?: number;
   error: string | null; // the fail() message, e.g. "interrupted"
 }
 

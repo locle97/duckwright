@@ -117,6 +117,8 @@ test("playwright_error_history_shape", async () => {
     answer: "playwright error: snapshot died",
     steps: 1,
     cost_usd: 0,
+    jev_steps: 0,
+    claude_steps: 1,
     history: [{
       step: 1,
       evaluation_previous_goal: "ev",
@@ -124,6 +126,9 @@ test("playwright_error_history_shape", async () => {
       next_goal: "goal",
       actions: [{ cmd: "click", args: ["e1"], code: "await page.getByRole('button', { name: 'Go' }).click();" }],
       results: ["ok"],
+      cost_usd: 0,
+      source: "claude",
+      jev: null,
     }],
   });
   assert.ok(e.out.some((l) => l.startsWith("step 1 | ev | goal | click e1 → ok")));
