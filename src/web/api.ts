@@ -70,6 +70,11 @@ export function parseOverrides(raw: unknown): Overrides | string {
     if (typeof raw.headed !== "boolean") return "headed must be true or false";
     o.headed = raw.headed;
   }
+  for (const k of ["video", "screenshot"] as const) {
+    if (raw[k] === undefined) continue;
+    if (typeof raw[k] !== "boolean") return `${k} must be true or false`;
+    o[k] = raw[k] as boolean;
+  }
   if (raw.snapshot !== undefined) {
     if (typeof raw.snapshot !== "string" || !SNAPSHOTS.includes(raw.snapshot)) return "snapshot must be hybrid, full or grep";
     o.snapshot = raw.snapshot as SnapshotMode;

@@ -233,3 +233,13 @@ test("a throwing replaySpec becomes a generic 500", async () => {
   const r = await call(ctx, "POST", "/api/tasks/1/replay");
   assert.deepEqual([r.status, r.body], [500, { ok: false, error: "internal error" }]);
 });
+
+test("parse_overrides_evidence", async () => {
+  assert.deepEqual(parseOverrides({ video: true, screenshot: false }), { video: true, screenshot: false });
+  assert.equal(parseOverrides({ video: "yes" }), "video must be true or false");
+  assert.equal(parseOverrides({ screenshot: 1 }), "screenshot must be true or false");
+  const { ctx } = setup();
+  const r = await call(ctx, "PUT", "/api/globals", { video: 1 });
+  assert.equal(r.status, 400);
+  assert.deepEqual(r.body, { ok: false, error: "video must be true or false" });
+});

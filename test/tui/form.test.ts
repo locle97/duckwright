@@ -6,7 +6,7 @@ import { formKey, formResult, openForm } from "../../src/tui/form.ts";
 import type { FormState } from "../../src/tui/form.ts";
 import { key } from "../../src/tui/keypress.ts";
 
-const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid" };
+const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid", video: false, screenshot: false };
 
 function press(f: FormState, ...specs: string[]): FormState {
   return specs.reduce((s, spec) => formKey(s, key(spec)), f);
