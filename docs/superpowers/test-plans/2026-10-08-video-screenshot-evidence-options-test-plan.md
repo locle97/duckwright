@@ -16,7 +16,7 @@ Every scenario runs a real browser through a real `playwright-cli`. Only `claude
 - **Run a script (print mode):** `QA_SCRIPT=$QA_WORK/scripts/<NAME> $DW -p "QA <NAME>" --session qa-ev --max-steps 6 [flags]`. The stub answers step N with `scripts/<NAME>/N.json`.
 - **Locate the run:** after a reset there is one run, so `RUN=$(ls -d $QA_WORK/runs/2*/)` (ends with `/`). `RID=$(basename $RUN)`.
 - **Start the web UI:** `$DW --web --port 4173 [flags]` from `$QA_WORK`, with the same `QA_SCRIPT` exported. It prints `http://127.0.0.1:4173/?t=<token>`. Open that URL in the browser and set `TOKEN=<token> PORT=4173` in the shell.
-- **API calls:** `C="Cookie: dw_token_$PORT=$TOKEN"`, `O="Origin: http://127.0.0.1:$PORT"`, `B=http://127.0.0.1:$PORT`. Task ids: `curl -s -H "$C" $B/api/state | jq '.tasks[] | {id, name, state}'`.
+- **API calls:** `C="Cookie: dw_token_$PORT=$TOKEN"`, `O="Origin: http://127.0.0.1:$PORT"`, `B=http://127.0.0.1:$PORT`. Task ids: `curl -s -H "$C" $B/api/state | jq '.tasks[] | {id, name, state}'`. Ids may be numbers or strings, so jq filters compare them as text with `--arg tid "$TID"` and `(.id|tostring)==$tid`, and URLs use `"$TID"` quoted.
 - **Start the TUI:** `QA_SCRIPT=... $DW [flags]` in a terminal at least 120x40.
 - **Accounts / auth:** none for the CLI. The web UI uses the per-launch token above.
 - **Reset (before every scenario):** quit any running Duckwright (`q`, or Ctrl-C). Then `rm -rf $QA_WORK/runs $QA_DIR/* $XDG_CONFIG_HOME/duckwright/duckwright.conf && unset QA_PW_FAIL QA_PW_OUT QA_PW_EXIT QA_PW_NOOP QA_PW_SLEEP_ON QA_PW_SLEEP QA_PW_EMPTY_VIDEO QA_CLAUDE_SLEEP`. If a run was interrupted, run `playwright-cli -s=qa-ev close`. Scenarios that need **EVID-RUN** then restore it (Test data).
@@ -51,14 +51,18 @@ if [ -n "${QA_PW_FAIL:-}" ] && [[ "$sub" =~ $QA_PW_FAIL ]]; then
   printf '%b' "${QA_PW_OUT-qa injected failure\n}" >&2; exit "${QA_PW_EXIT:-1}"
 fi
 if [ -n "${QA_PW_NOOP:-}" ] && [[ "$sub" =~ $QA_PW_NOOP ]]; then exit 0; fi
-if [ -n "${QA_PW_SLEEP_ON:-}" ] && [[ "$sub" =~ $QA_PW_SLEEP_ON ]]; then sleep "${QA_PW_SLEEP:-0}"; fi
-if [ "${QA_PW_EMPTY_VIDEO:-}" = 1 ] && [ "$sub" = "video-stop" ]; then
-  "$QA_REAL_PW" "$@"; d=$(ls -dt "$QA_WORK"/runs/2*/ | head -1); : > "${d}video.webm"; exit 0
+# The delay must not hold stdout/stderr: if Duckwright kills this wrapper on a timeout,
+# an orphaned `sleep` that kept the pipes open would delay the child's `close` event.
+if [ -n "${QA_PW_SLEEP_ON:-}" ] && [[ "$sub" =~ $QA_PW_SLEEP_ON ]]; then sleep "${QA_PW_SLEEP:-0}" </dev/null >/dev/null 2>&1; fi
+if [ -n "${QA_PW_EMPTY_VIDEO:-}" ] && [ "$sub" = "video-stop" ]; then
+  "$QA_REAL_PW" "$@"; d=$(ls -dt "$QA_WORK"/runs/2*/ | head -1)
+  if [ "$QA_PW_EMPTY_VIDEO" = rm ]; then rm -f "${d}video.webm"; else : > "${d}video.webm"; fi
+  exit 0
 fi
 exec "$QA_REAL_PW" "$@"
 ```
 
-Knobs: `QA_PW_FAIL` is a bash regex on the command after the session flag (`^screenshot `, `^video-start `, `^video-stop$`). A match prints `QA_PW_OUT` (default `qa injected failure` + newline; set it to `''` for no output) to stderr and exits `QA_PW_EXIT` (default 1). `QA_PW_NOOP` matches commands that exit 0 without doing anything. `QA_PW_SLEEP_ON` + `QA_PW_SLEEP` delay a command. `QA_PW_EMPTY_VIDEO=1` runs the real `video-stop` and then truncates `video.webm` to 0 bytes.
+Knobs: `QA_PW_FAIL` is a bash regex on the command after the session flag (`^screenshot `, `^video-start `, `^video-stop$`). A match prints `QA_PW_OUT` (default `qa injected failure` + newline; set it to `''` for no output) to stderr and exits `QA_PW_EXIT` (default 1). `QA_PW_NOOP` matches commands that exit 0 without doing anything. `QA_PW_SLEEP_ON` + `QA_PW_SLEEP` delay a command (the `sleep` is detached from the pipes, so a timeout kill of the wrapper ends the call at once). `QA_PW_EMPTY_VIDEO=1` runs the real `video-stop` and then truncates `video.webm` to 0 bytes; `QA_PW_EMPTY_VIDEO=rm` runs it and then deletes `video.webm`.
 
 ### `qa-server.mjs`
 
@@ -156,7 +160,7 @@ Each `scripts/<NAME>/N.json` is `{"evaluation_previous_goal":"","memory":"","nex
 1. Run Script `A` with no evidence flags. Note the exit code.
 2. Run `grep -cE '^(screenshot|video-)' $QA_DIR/pw-calls.log`.
 3. Run `ls $RUN`.
-4. Run `jq 'has("video"), [.history[] | has("screenshot") or has("screenshot_error")] | any' $RUN/history.json`.
+4. Run `jq 'has("video"), ([.history[] | has("screenshot") or has("screenshot_error")] | any)' $RUN/history.json`.
 5. Run `jq -c 'select(.type=="step:end") | .record | [has("screenshot"), has("screenshotError")]' $RUN/events.jsonl` and `jq -c 'select(.type=="run:end") | .outcome | has("video")' $RUN/events.jsonl`.
 
 **Expected:**
@@ -431,11 +435,13 @@ Each `scripts/<NAME>/N.json` is `{"evaluation_previous_goal":"","memory":"","nex
 1. `export QA_PW_FAIL='^video-start '`. Run Script `A` with `--video`. Check `grep -c '^video-stop' $QA_DIR/pw-calls.log` and `jq 'has("video")' $RUN/history.json`.
 2. Reset; `export QA_PW_FAIL='^video-stop$'`. Run Script `A` with `--video`. Check the last two lines of `pw-calls.log` and `has("video")`.
 3. Reset; `unset QA_PW_FAIL`; `export QA_PW_EMPTY_VIDEO=1`. Run Script `A` with `--video`. Check `has("video")`.
+4. Reset; `export QA_PW_EMPTY_VIDEO=rm`. Run Script `A` with `--video`. Check `has("video")` and `ls $RUN`.
 
 **Expected:**
 - Step 1: exit `0`; stderr `warning: video failed to start: qa injected failure`; `0` `video-stop` calls; `false`; no `Video:` line.
 - Step 2: exit `0`; stderr `warning: video failed to stop: qa injected failure`; the log ends with `video-stop` then `close`; `false`; no `Video:` line.
 - Step 3: exit `0`; stderr `warning: video was not saved: video.webm is missing or empty`; `false`; no `Video:` line; `run:end` outcome has no `video`.
+- Step 4 (file missing): the same warning, exit `0`, `false`, no `Video:` line; `ls` shows no `video.webm`.
 
 ### TS-19: `video-stop` timeout is 60 s
 
@@ -449,7 +455,7 @@ Each `scripts/<NAME>/N.json` is `{"evaluation_previous_goal":"","memory":"","nex
 
 **Expected:**
 - Step 1 (over the 30 s default, under 60 s): `.video` is `"video.webm"`, no warning.
-- Step 2: the run ends roughly 60 s after the last step, exit `0`; stderr has one line starting `warning: video failed to stop:`; `history.json` has no `video` key; the log shows `close` after `video-stop`.
+- Step 2: the run ends roughly 60 s after the last step (clearly before the 75 s delay would end; this relies on the wrapper's detached `sleep`), exit `0`; stderr has one line starting `warning: video failed to stop:`; `history.json` has no `video` key; the log shows `close` after `video-stop`.
 
 ### TS-20: Interrupt (Ctrl-C) still saves the video and recorded evidence
 
@@ -590,8 +596,8 @@ Each `scripts/<NAME>/N.json` is `{"evaluation_previous_goal":"","memory":"","nex
 **Steps:**
 1. `curl -s -X PUT -H "$C" -H "$O" -H 'Content-Type: application/json' -d '{"video":true,"screenshot":false}' $B/api/globals`.
 2. `curl -s -H "$C" $B/api/state | jq -c '.globals | {o: .overrides, b: {video: .base.video, screenshot: .base.screenshot}}'`.
-3. `curl -s -X PUT ... -d '{"screenshot":true}' $B/api/tasks/$TID/overrides`.
-4. `curl -s -H "$C" $B/api/state | jq -c ".tasks[] | select(.id==$TID) | {overrides, e: {video: .effective.video, screenshot: .effective.screenshot}, i: {video: .inherited.video, screenshot: .inherited.screenshot}}"`.
+3. `curl -s -X PUT ... -d '{"screenshot":true}' "$B/api/tasks/$TID/overrides"`.
+4. `curl -s -H "$C" $B/api/state | jq -c --arg tid "$TID" '.tasks[] | select((.id|tostring)==$tid) | {overrides, e: {video: .effective.video, screenshot: .effective.screenshot}, i: {video: .inherited.video, screenshot: .inherited.screenshot}}'`.
 5. `curl -s -X PUT ... -d '{}' $B/api/globals`, then step 2 again.
 
 **Expected:**
@@ -609,8 +615,8 @@ Each `scripts/<NAME>/N.json` is `{"evaluation_previous_goal":"","memory":"","nex
 **Steps:**
 1. PUT `/api/globals` with `{"video":"yes"}`.
 2. PUT `/api/globals` with `{"screenshot":1}`.
-3. PUT `/api/tasks/$TID/overrides` with `{"video":null}`.
-4. PUT `/api/tasks/99999/overrides` with `{"video":true}`.
+3. PUT `"$B/api/tasks/$TID/overrides"` (quoted) with `{"video":null}`.
+4. PUT `/api/tasks/99999/overrides` with `{"video":true}` (an id no task has, whether ids are numbers or strings).
 5. PUT `/api/globals` with `{"headed":"x"}` (regression).
 
 **Expected:**
@@ -695,13 +701,16 @@ Each `scripts/<NAME>/N.json` is `{"evaluation_previous_goal":"","memory":"","nex
 
 **Preconditions:** as TS-32 before step 1, task not running.
 
+The UI only sends booleans, so the 400 path of C5 cannot be reached from the dialog; the only server rejection a tester can cause on Save is `404 no such task`. It needs the task removed behind the dialog's back.
+
 **Steps:**
 1. Open the task's Options dialog and check `Video`.
-2. In a shell, `curl -s -X DELETE -H "$C" -H "$O" $B/api/tasks/$TID`.
-3. Click Save in the dialog.
+2. In a shell, `curl -s -X DELETE -H "$C" -H "$O" "$B/api/tasks/$TID"`.
+3. If the dialog is still open, click Save in it.
 
 **Expected:**
 - The dialog stays open and its error paragraph shows `no such task`.
+- Limitation: if the UI closes the dialog by itself when the task disappears from state (step 2), Save cannot be clicked. Record the scenario as **not applicable** (not failed) and note it; the error display is then covered only by the implementation's tests.
 
 ### TS-34: Live run: thumbnails per step, Video card only after the end
 
@@ -805,7 +814,7 @@ Start the web UI with DevTools Network open.
 2. Quit. Reset. `export QA_PW_FAIL='^screenshot '`; run `$DW --screenshot "QA tui fail"`; press `e`.
 
 **Expected:**
-- Step 1: each expanded step shows `shot  <abs workdir>/screenshots/step-00N.png`; the result lines include `video  <abs workdir>/video.webm`. No image is drawn.
+- Step 1: each expanded step shows `shot  <workdir>/screenshots/step-00N.png`; the result lines include `video  <workdir>/video.webm`. `<workdir>` is the run's folder as the run prints it, the relative `runs/<id>` (no leading `/`). No image is drawn.
 - Step 2: each step shows `shot error  qa injected failure` in red; no `video` row.
 
 ## Regression
@@ -863,4 +872,5 @@ Start the web UI with DevTools Network open.
 - Redacting secrets from images or video (D25)
 - Disk-space limits or cleanup of evidence
 - `network` as a web/TUI override
+- Evidence route read error mid-stream (connection destroyed, or 500 `internal error` before headers): cannot be caused reliably from outside, covered by unit/integration tests only
 - Screenshot timeout (30 s) and step numbers of 1000 or more in a real run (covered by unit tests; TS-23 checks the route accepts `step-1000.png`)
