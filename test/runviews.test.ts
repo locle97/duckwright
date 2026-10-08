@@ -111,3 +111,62 @@ test("reduceTimeline unfollow stops following without touching selection or expa
   assert.equal(u.selected, v.selected);
   assert.deepEqual(u.expanded, v.expanded);
 });
+
+const shotEnd = (step: number, d: Decision, extra: Record<string, unknown>): RunEvent => ({
+  type: "step:end", at: 14, record: { step, decision: d, results: ["ok"], codes: [null], ...extra }, cost: 0, durationMs: 100,
+} as RunEvent);
+
+test("runviews_workdir_and_initial_evidence", () => {
+  const d = dec("g", [["goto", "u"]]);
+  let v: RunView = newRunView("r1", start());
+  assert.equal(v.workdir, "/w");
+  assert.equal(v.video, null);
+  v = reduceRunEvent(v, stepStart(1));
+  assert.equal(v.steps[0]!.screenshot, null);
+  assert.equal(v.steps[0]!.screenshotError, null);
+  void d;
+});
+
+test("runviews_step_screenshot", () => {
+  const d = dec("g", [["goto", "u"]]);
+  let v: RunView = newRunView("r1", start());
+  for (const e of [stepStart(1), decision(1, d), shotEnd(1, d, { screenshot: "screenshots/step-001.png", screenshotError: "boom" })]) v = reduceRunEvent(v, e);
+  assert.equal(v.steps[0]!.screenshot, "screenshots/step-001.png");
+  assert.equal(v.steps[0]!.screenshotError, "boom");
+});
+
+test("runviews_run_end_video", () => {
+  const v = reduceRunEvent(newRunView("r1", start()), { type: "run:end", at: 15, outcome: { ...OUTCOME, video: "video.webm" } });
+  assert.equal(v.video, "video.webm");
+});
+
+test("runviews_rejects_bad_evidence_refs", () => {
+  const d = dec("g", [["goto", "u"]]);
+  for (const bad of ["../history.json", "screenshots/step-01.png", "screenshots/step-001.png?x", "/etc/passwd", 5]) {
+    let v: RunView = newRunView("r1", start());
+    for (const e of [stepStart(1), decision(1, d), shotEnd(1, d, { screenshot: bad })]) v = reduceRunEvent(v, e);
+    assert.equal(v.steps[0]!.screenshot, null, String(bad));
+  }
+  let v: RunView = newRunView("r1", start());
+  for (const e of [stepStart(1), decision(1, d), shotEnd(1, d, { screenshotError: 5 })]) v = reduceRunEvent(v, e);
+  assert.equal(v.steps[0]!.screenshotError, null);
+  for (const bad of ["x.webm", "../video.webm"]) {
+    const r = reduceRunEvent(newRunView("r1", start()), { type: "run:end", at: 15, outcome: { ...OUTCOME, video: bad } });
+    assert.equal(r.video, null, bad);
+  }
+});
+
+test("fold_past_carries_evidence", () => {
+  const d = dec("g", [["goto", "u"]]);
+  const v = foldPast("p1", [
+    start(), stepStart(1), decision(1, d), shotEnd(1, d, { screenshot: "screenshots/step-001.png", screenshotError: "boom" }),
+    { type: "run:end", at: 15, outcome: { ...OUTCOME, video: "video.webm" } },
+  ]);
+  assert.equal(v.workdir, "/w");
+  assert.equal(v.video, "video.webm");
+  assert.equal(v.steps[0]!.screenshot, "screenshots/step-001.png");
+  assert.equal(v.steps[0]!.screenshotError, "boom");
+  const f = foldPast("p2", [{ type: "run:end", at: 15, outcome: { ...OUTCOME, video: "video.webm" } }]);
+  assert.equal(f.workdir, "");
+  assert.equal(f.video, "video.webm");
+});
