@@ -69,4 +69,20 @@ export class PlaywrightCLI {
     if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout);
     return universalNewlines(fs.readFileSync(path).toString("utf8"));
   }
+
+  async screenshot(path: string): Promise<void> {
+    const res = await this.run("screenshot", [`--filename=${path}`]);
+    if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout || `exit ${res.code}`);
+  }
+
+  async videoStart(path: string): Promise<void> {
+    const res = await this.run("video-start", [path]);
+    if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout || `exit ${res.code}`);
+  }
+
+  /** Runs without the abort signal, so the video is finalized even after an interrupt. */
+  async videoStop(): Promise<void> {
+    const res = await this.runner(["playwright-cli", `-s=${this.session}`, "video-stop"], null, 60);
+    if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout || `exit ${res.code}`);
+  }
 }

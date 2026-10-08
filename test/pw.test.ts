@@ -106,3 +106,42 @@ test("snapshot_uses_universal_newlines", async () => {
   const fake = writing(() => fs.writeFileSync(p, "- a\r\n- b\r- c"));
   assert.equal(await new PlaywrightCLI({ runner: fake }).snapshot(p), "- a\n- b\n- c");
 });
+
+test("screenshot_argv", async () => {
+  const fake = fakeRunner(ok());
+  await new PlaywrightCLI({ session: "t", runner: fake }).screenshot("/x/s.png");
+  assert.deepEqual(fake.calls[0].argv, ["playwright-cli", "-s=t", "screenshot", "--filename=/x/s.png"]);
+});
+
+test("video_start_argv", async () => {
+  const fake = fakeRunner(ok());
+  await new PlaywrightCLI({ session: "t", runner: fake }).videoStart("/x/video.webm");
+  assert.deepEqual(fake.calls[0].argv, ["playwright-cli", "-s=t", "video-start", "/x/video.webm"]);
+});
+
+test("video_stop_no_signal_60s", async () => {
+  const fake = fakeRunner(ok());
+  const ac = new AbortController();
+  await new PlaywrightCLI({ session: "t", runner: fake, signal: ac.signal }).videoStop();
+  assert.deepEqual(fake.calls[0].argv, ["playwright-cli", "-s=t", "video-stop"]);
+  assert.equal(fake.calls[0].timeoutSec, 60);
+  assert.equal(fake.calls[0].signal, undefined);
+});
+
+test("evidence_commands_throw_on_nonzero", async () => {
+  const cmds: Array<(p: PlaywrightCLI) => Promise<void>> = [
+    (p) => p.screenshot("/x/s.png"),
+    (p) => p.videoStart("/x/v.webm"),
+    (p) => p.videoStop(),
+  ];
+  for (const cmd of cmds) {
+    await assert.rejects(
+      cmd(new PlaywrightCLI({ runner: fakeRunner({ code: 1, stdout: "", stderr: "boom" }) })),
+      (e: Error) => e instanceof PlaywrightError && e.message === "boom",
+    );
+    await assert.rejects(
+      cmd(new PlaywrightCLI({ runner: fakeRunner({ code: 3, stdout: "", stderr: "" }) })),
+      (e: Error) => e instanceof PlaywrightError && e.message === "exit 3",
+    );
+  }
+});
