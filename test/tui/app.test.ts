@@ -937,3 +937,9 @@ test("app_replay_error_toast", async () => {
   await settle();
   assert.match(t.frame(), /no spec for run r1/);
 });
+
+test("app_detail_lists_jev_setting", async () => {
+  const t = mount(new FakeManager([snapshot(1, "First")]));
+  await settle();
+  assert.match(t.frame(), /jev +false/);
+});

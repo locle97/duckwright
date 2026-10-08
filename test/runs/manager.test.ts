@@ -98,7 +98,7 @@ test("manager_globals_layering", () => {
   const b = mgr.addTyped("b");
   mgr.setOverrides(b, { model: "haiku" });
   assert.deepEqual(mgr.globals(), {
-    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false }, overrides: {},
+    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false }, overrides: {},
   });
   events.length = 0;
   mgr.setGlobals({ model: "sonnet", headed: true });
@@ -875,4 +875,29 @@ test("globals_base_has_evidence", () => {
   assert.equal(setup().mgr.globals().base.video, false);
   assert.equal(setup().mgr.globals().base.screenshot, false);
   assert.equal(setup({ argv: ["--video"] }).mgr.globals().base.video, true);
+});
+
+test("jev override reaches run args", () => {
+  const { mgr } = setup();
+  const id = mgr.addTyped("a");
+  mgr.setGlobals({ jev: true });
+  assert.equal(mgr.effectiveArgs(id).jev, true);
+  assert.equal(mgr.list()[0].effective.jev, true);
+  assert.equal(mgr.list()[0].inherited.jev, true);
+  mgr.setOverrides(id, { jev: false });
+  assert.equal(mgr.effectiveArgs(id).jev, false);
+  assert.equal(mgr.list()[0].inherited.jev, true);
+  assert.equal(setup().mgr.globals().base.jev, false);
+  assert.equal(setup({ argv: ["--jev"] }).mgr.globals().base.jev, true);
+});
+
+test("jev on without key fails preflight", () => {
+  const msg = "TYPESAFE_API_KEY is not set (needed by --jev)";
+  const { mgr, events } = setup({ preflight: (a) => (a.jev ? msg : null) });
+  const id = mgr.addTyped("t");
+  mgr.setOverrides(id, { jev: true });
+  events.length = 0;
+  assert.deepEqual(mgr.start(id), { ok: false, reason: msg });
+  assert.equal(mgr.list()[0].error, msg);
+  assert.ok(events.some((e) => e.type === "toast" && e.level === "error" && e.message === msg));
 });

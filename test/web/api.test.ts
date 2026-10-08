@@ -243,3 +243,18 @@ test("parse_overrides_evidence", async () => {
   assert.equal(r.status, 400);
   assert.deepEqual(r.body, { ok: false, error: "video must be true or false" });
 });
+
+test("parseOverrides jev", async () => {
+  assert.deepEqual(parseOverrides({ jev: true }), { jev: true });
+  assert.equal(parseOverrides({ jev: "yes" }), "jev must be true or false");
+  const { ctx } = setup();
+  const r = await call(ctx, "PUT", "/api/globals", { jev: 1 });
+  assert.equal(r.status, 400);
+  assert.deepEqual(r.body, { ok: false, error: "jev must be true or false" });
+});
+
+test("GET /api/state carries inherited.jev", async () => {
+  const { ctx } = setup();
+  const s = (await call(ctx, "GET", "/api/state")).body as { tasks: { inherited: { jev: boolean } }[] };
+  assert.equal(typeof s.tasks[0].inherited.jev, "boolean");
+});
