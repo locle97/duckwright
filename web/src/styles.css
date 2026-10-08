@@ -242,3 +242,9 @@ kbd {
   .sidebar.open { transform: translateX(0); }
 }
 .net .tag { white-space: normal; word-break: break-all; }
+
+.thumb { max-width: 320px; border: 1px solid var(--border, #888); cursor: pointer; padding: 0; background: none; display: block; margin-top: 6px; }
+.thumb img { width: 100%; display: block; }
+.evidence-full { max-width: 100%; max-height: 80vh; }
+fieldset.evidence { border: 1px solid var(--border, #888); padding: 8px 12px; margin: 8px 0; }
+fieldset.evidence label { display: block; }

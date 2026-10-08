@@ -17,7 +17,8 @@ export type Dialog =
   | { kind: "edit"; draft: EditDraft }
   | { kind: "options"; taskId: TaskId | null }
   | { kind: "confirm"; confirm: Confirm }
-  | { kind: "help" };
+  | { kind: "help" }
+  | { kind: "image"; src: string; title: string };
 /** The sidebar's two tabs: the tasks of this session (and plans), and past runs not run again. */
 export type Tab = "tasks" | "history";
 /** What each tab keeps of its own while the other one is shown. */

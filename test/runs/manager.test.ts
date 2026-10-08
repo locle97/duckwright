@@ -98,7 +98,7 @@ test("manager_globals_layering", () => {
   const b = mgr.addTyped("b");
   mgr.setOverrides(b, { model: "haiku" });
   assert.deepEqual(mgr.globals(), {
-    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid" }, overrides: {},
+    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false }, overrides: {},
   });
   events.length = 0;
   mgr.setGlobals({ model: "sonnet", headed: true });
@@ -842,4 +842,37 @@ test("replaySpec resolves a relative workdir against cwd", async () => {
   children[0].emit("spawn");
   await p;
   assert.equal(calls[0].opts.cwd, dir);
+});
+
+test("evidence_overrides_reach_run_args", async () => {
+  const { mgr, fakes } = setup();
+  const a = mgr.addTyped("a");
+  const b = mgr.addTyped("b");
+  mgr.setGlobals({ video: true });
+  mgr.setOverrides(a, { screenshot: true });
+  await mgr.start(a);
+  await tick();
+  await mgr.start(b);
+  await tick();
+  assert.equal(fakes[0].spec.args.video, true);
+  assert.equal(fakes[0].spec.args.screenshot, true);
+  assert.equal(fakes[1].spec.args.screenshot, false);
+});
+
+test("snapshot_inherited_excludes_task_overrides", () => {
+  const { mgr } = setup();
+  const id = mgr.addTyped("a");
+  mgr.setGlobals({ video: true });
+  mgr.setOverrides(id, { video: false, screenshot: true });
+  const snap = mgr.list()[0];
+  assert.equal(snap.effective.video, false);
+  assert.equal(snap.effective.screenshot, true);
+  assert.equal(snap.inherited.video, true);
+  assert.equal(snap.inherited.screenshot, false);
+});
+
+test("globals_base_has_evidence", () => {
+  assert.equal(setup().mgr.globals().base.video, false);
+  assert.equal(setup().mgr.globals().base.screenshot, false);
+  assert.equal(setup({ argv: ["--video"] }).mgr.globals().base.video, true);
 });

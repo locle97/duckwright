@@ -5,6 +5,7 @@ import {
 } from "./actions.ts";
 import type { Dispatch } from "./actions.ts";
 import { clean } from "./clean.ts";
+import { evidenceSummary, videoUrl } from "./evidence.ts";
 import { planTally, selectedPlan, selectedTask } from "./store.ts";
 import type { WebState } from "./store.ts";
 import { Timeline } from "./Timeline.tsx";
@@ -63,6 +64,15 @@ function Outcome(p: { run: RunView }) {
   );
 }
 
+function VideoCard(p: { runId: string }) {
+  return (
+    <div className="card">
+      <b>Video</b>
+      <video controls preload="metadata" src={videoUrl(p.runId)} style={{ display: "block", maxWidth: "100%", marginTop: 6 }} />
+    </div>
+  );
+}
+
 function TaskView(p: { state: WebState; task: TaskSnapshot; dispatch: Dispatch }) {
   const { state: s, task, dispatch } = p;
   const run = task.runId !== null ? (s.runs[task.runId] ?? null) : null;
@@ -80,7 +90,7 @@ function TaskView(p: { state: WebState; task: TaskSnapshot; dispatch: Dispatch }
           <Tag tone={tag.tone}>{tag.label}</Tag>
         </div>
         <div className="muted">
-          {task.source.kind === "file" ? clean(task.source.path) : "typed task"} · {clean(e.model)} · max {e.maxSteps} steps · {e.headed ? "headed" : "headless"} · snapshot {e.snapshot}
+          {task.source.kind === "file" ? clean(task.source.path) : "typed task"} · {clean(e.model)} · max {e.maxSteps} steps · {e.headed ? "headed" : "headless"} · snapshot {e.snapshot}{evidenceSummary(e)}
         </div>
         <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: "8px 0 0", maxHeight: 160, overflow: "auto" }}>{clean(task.text, { multiline: true })}</pre>
         {task.error ? <p className="error">{clean(task.error)}</p> : null}
@@ -101,6 +111,7 @@ function TaskView(p: { state: WebState; task: TaskSnapshot; dispatch: Dispatch }
       {run ? <RunSummary run={run} now={s.now} /> : <p className="muted">Not run yet.</p>}
       {run ? <Timeline run={run} dispatch={dispatch} /> : null}
       {run?.outcome ? <Outcome run={run} /> : null}
+      {run?.outcome && run.video ? <VideoCard runId={run.runId} /> : null}
     </main>
   );
 }

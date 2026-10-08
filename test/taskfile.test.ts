@@ -357,3 +357,17 @@ test("front_matter_twofa_timeout", () => {
   w(tmp, "---\ntwofa-timeout: 2147484\n---\nlog in\n");
   assert.match(err(file), /twofa-timeout must be a whole number of at most 2147483, got "2147484"/);
 });
+
+test("evidence_keys_parsed", () => {
+  const s = loadTaskFile(w(tmpDir(), "---\nvideo: true\nscreenshot: false\n---\nGo\n")).settings;
+  assert.equal(s.video, true);
+  assert.equal(s.screenshot, false);
+});
+
+test("evidence_key_bad_value_and_duplicate", () => {
+  const p = w(tmpDir(), "---\nvideo: maybe\n---\nGo\n");
+  assert.equal(err(p), `${p}:2: video must be true or false, got "maybe"`);
+  const q = w(tmpDir(), "---\nscreenshot: true\nscreenshot: false\n---\nGo\n");
+  assert.match(err(q), /"screenshot" is set twice/);
+  assert.equal(settingValue("video", "true"), true);
+});

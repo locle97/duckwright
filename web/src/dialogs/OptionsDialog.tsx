@@ -5,10 +5,13 @@ import { checked } from "../actions.ts";
 import type { Dispatch } from "../actions.ts";
 import { api } from "../api.ts";
 import { clean } from "../clean.ts";
+import { draftToggle, evidenceBody } from "../evidence.ts";
 import type { WebState } from "../store.ts";
 import { Button, Modal } from "../ui.tsx";
 
-type Draft = { model: string; maxSteps: string; headed: string; snapshot: string };
+type Draft = {
+  model: string; maxSteps: string; headed: string; snapshot: string; video: boolean | null; screenshot: boolean | null;
+};
 
 /** Options for one task (`taskId`) or, with null, the global options. An empty field inherits. */
 export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispatch: Dispatch }) {
@@ -20,13 +23,15 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
   const [draft, setDraft] = useState<Draft>({
     model: overrides.model ?? "", maxSteps: overrides.maxSteps === undefined ? "" : String(overrides.maxSteps),
     headed: onOff(overrides.headed), snapshot: overrides.snapshot ?? "",
+    video: overrides.video ?? null, screenshot: overrides.screenshot ?? null,
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  if (!effective || (p.taskId !== null && !task)) return null;
+  const inherited = task ? task.inherited : g?.base;
+  if (!effective || !inherited || (p.taskId !== null && !task)) return null;
 
   const close = (): void => p.dispatch({ type: "dialog", value: null });
-  const set = (k: keyof Draft, v: string): void => {
+  const set = (k: "model" | "maxSteps" | "headed" | "snapshot", v: string): void => {
     setDraft({ ...draft, [k]: v });
     setError(null);
   };
@@ -40,6 +45,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
     }
     if (draft.headed !== "") o.headed = draft.headed === "on";
     if (draft.snapshot !== "") o.snapshot = draft.snapshot;
+    Object.assign(o, evidenceBody(draft));
     setBusy(true);
     const r = task ? await checked(p.dispatch, api.put(`/api/tasks/${task.id}/overrides`, o)) : await checked(p.dispatch, api.put("/api/globals", o));
     setBusy(false);
@@ -63,7 +69,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
       onClose={close}
       footer={
         <>
-          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "" })}>Reset all</Button>
+          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "", video: null, screenshot: null })}>Reset all</Button>
           <Button onClick={close}>Cancel</Button>
           <Button kind="green" disabled={busy} onClick={() => void save()}>Save</Button>
         </>
@@ -87,6 +93,16 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
           <option value="grep">grep</option>
         </select>
       </div>
+      <fieldset className="evidence">
+        <legend>Evidence</legend>
+        {(["video", "screenshot"] as const).map((k) => (
+          <label key={k} htmlFor={`opt-${k}`}>
+            <input type="checkbox" id={`opt-${k}`} checked={draft[k] ?? inherited[k]}
+              onChange={(e) => { setDraft({ ...draft, [k]: draftToggle(e.target.checked, inherited[k]) }); setError(null); }} />
+            {" "}{k === "video" ? "Video" : "Screenshot"}
+          </label>
+        ))}
+      </fieldset>
       <span className="hint">
         {task ? "Applies to this task's next run, above the global options." : "Applies to every task's next run, below a task's own options."}
       </span>

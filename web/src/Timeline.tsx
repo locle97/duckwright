@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Ref } from "react";
 
 import type { Phase } from "../../src/events.ts";
 import type { RunView, StepView } from "../../src/runviews.ts";
 import { clean } from "./clean.ts";
+import { screenshotUrl } from "./evidence.ts";
 import type { Action } from "./store.ts";
 import { Button, Tag } from "./ui.tsx";
 
@@ -26,10 +27,12 @@ function scroller(el: HTMLElement | null): HTMLElement | null {
 
 const ms = (n: number | null): string => (n === null ? "" : n < 1000 ? `${n}ms` : `${(n / 1000).toFixed(1)}s`);
 
-function StepCard(p: { step: StepView; open: boolean; selected: boolean; onToggle(): void; innerRef?: Ref<HTMLDivElement> }) {
+function StepCard(p: { runId: string; dispatch(a: Action): void; step: StepView; open: boolean; selected: boolean; onToggle(): void; innerRef?: Ref<HTMLDivElement> }) {
   const v = p.step;
   const cls = ["step", p.open ? "open" : "", p.selected ? "sel" : "", v.status === "warn" ? "warn" : "", v.status === "brain" ? "brain" : ""]
     .filter(Boolean).join(" ");
+  const [failed, setFailed] = useState(false);
+  const src = v.screenshot ? screenshotUrl(p.runId, v.screenshot) : null;
   const calls = v.network.slice(0, MAX_CALLS);
   return (
     <div className={cls} ref={p.innerRef}>
@@ -60,6 +63,14 @@ function StepCard(p: { step: StepView; open: boolean; selected: boolean; onToggl
             </div>
           ) : null}
           {v.networkErrors.map((m, i) => <div key={i} className="muted">{clean(m)}</div>)}
+          {src && !failed ? (
+            <button type="button" className="thumb" aria-label={`Open screenshot of step ${v.step}`}
+              onClick={() => p.dispatch({ type: "dialog", value: { kind: "image", src, title: `Screenshot: step ${v.step}` } })}>
+              <img loading="lazy" alt={`Screenshot after step ${v.step}`} src={src} onError={() => setFailed(true)} />
+            </button>
+          ) : null}
+          {src && failed ? <div className="muted">screenshot unavailable</div> : null}
+          {v.screenshotError ? <div className="muted">screenshot failed: {clean(v.screenshotError)}</div> : null}
         </div>
       ) : null}
     </div>
@@ -103,7 +114,7 @@ export function Timeline(p: { run: RunView; dispatch(a: Action): void }) {
         </Button>
       </div>
       {run.steps.map((step, i) => (
-        <StepCard key={step.step} step={step} open={run.expanded.includes(i)} selected={run.selected === i}
+        <StepCard key={step.step} runId={run.runId} dispatch={dispatch} step={step} open={run.expanded.includes(i)} selected={run.selected === i}
           onToggle={() => toggle(i)} innerRef={i === last ? lastRef : undefined} />
       ))}
     </section>

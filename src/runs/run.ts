@@ -11,6 +11,7 @@ import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
 import { ExportError, exportRun } from "../export.ts";
 import type { HistoryData } from "../export.ts";
+import type { Evidence } from "../evidence.ts";
 import type { AgentOptions, RunResult } from "../loop.ts";
 import { pageDir } from "../observe.ts";
 import { resolvePath } from "../paths.ts";
@@ -46,6 +47,7 @@ export const PROMPTS: PromptPaths = {
 
 export interface AgentLike {
   costUsd: number;
+  evidence?: Evidence;
   run(): Promise<RunResult>;
 }
 
@@ -77,7 +79,7 @@ export interface RunHandle {
 
 export function historyJson(
   task: string, success: boolean, answer: string, steps: number, costUsd: number,
-  history: StepRecord[], taskFile: string | null = null,
+  history: StepRecord[], taskFile: string | null = null, video: string | null = null,
 ): HistoryData {
   return {
     task,
@@ -86,6 +88,7 @@ export function historyJson(
     answer,
     steps,
     cost_usd: costUsd,
+    ...(video !== null ? { video } : {}),
     history: history.map((r) => ({
       step: r.step,
       evaluation_previous_goal: r.decision.evaluationPreviousGoal,
@@ -97,6 +100,8 @@ export function historyJson(
         code: i < r.codes.length ? r.codes[i] : null,
       })),
       results: [...r.results],
+      ...(r.screenshot ? { screenshot: r.screenshot } : {}),
+      ...(r.screenshotError ? { screenshot_error: r.screenshotError } : {}),
       ...(r.network ? { network: r.network } : {}),
       ...(r.networkErrors?.length ? { network_errors: [...r.networkErrors] } : {}),
       ...(r.requestOrigins?.some((o) => o !== null) ? { request_origins: [...r.requestOrigins] } : {}),
@@ -110,10 +115,13 @@ function writeHistory(file: string, data: HistoryData): void {
 
 const errorText = (e: unknown) => (e instanceof Error ? `error: ${e.name}: ${e.message}` : `error: ${String(e)}`);
 
-function failure(message: string, code: 1 | 130, steps: number, costUsd: number, historyPath: string | null): RunOutcome {
+function failure(
+  message: string, code: 1 | 130, steps: number, costUsd: number, historyPath: string | null,
+  warnings: string[] = [], video: string | null = null,
+): RunOutcome {
   return {
     status: code === 130 ? "stop" : "fail", exitCode: code, success: false,
-    answer: message, steps, costUsd, historyPath, export: { kind: "off" }, warnings: [], error: message,
+    answer: message, steps, costUsd, historyPath, export: { kind: "off" }, warnings, ...(video !== null ? { video } : {}), error: message,
   };
 }
 
@@ -169,7 +177,7 @@ async function execute(
     agent = deps.createAgent({
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
-      snapshotMode: args.snapshot, network: args.network,
+      snapshotMode: args.snapshot, network: args.network, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa,
     });
     events.emit({
@@ -190,21 +198,23 @@ async function execute(
     } else {
       message = errorText(e);
     }
+    const ev = agent?.evidence ?? { video: null, warnings: [] };
     let written: string | null = historyPath;
     try {
-      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile));
+      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video));
     } catch {
       written = null;
     }
-    outcome = failure(message, code, collected.length, cost, written);
+    outcome = failure(message, code, collected.length, cost, written, [...ev.warnings], ev.video);
   }
   events.emit({ type: "run:end", outcome });
   return outcome;
 
   // Write history.json and export; an export crash that is not an ExportError fails the run.
   async function finish(result: RunResult): Promise<RunOutcome> {
+    const ev = agent?.evidence ?? { video: null, warnings: [] };
     writeHistory(historyPath, historyJson(
-      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile,
+      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video,
     ));
     const warnings: string[] = [];
     let exported: ExportOutcome = { kind: "off" };
@@ -222,11 +232,12 @@ async function execute(
         else error = errorText(e);
       }
     }
+    warnings.push(...ev.warnings);
     const ok = result.success && error === null;
     return {
       status: ok ? "pass" : "fail", exitCode: ok ? 0 : 1, success: ok,
       answer: error ?? result.answer, steps: result.steps, costUsd: result.costUsd,
-      historyPath, export: exported, warnings, error,
+      historyPath, export: exported, warnings, ...(ev.video !== null ? { video: ev.video } : {}), error,
     };
   }
 }

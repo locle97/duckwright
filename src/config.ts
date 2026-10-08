@@ -81,6 +81,8 @@ export const DEFAULT_CONFIG = `# Global defaults for every run, read at startup 
 # session: duckwright
 # state: auth.json
 # network: true
+# video: false
+# screenshot: false
 # twofa-timeout: 300
 # snapshot: hybrid
 

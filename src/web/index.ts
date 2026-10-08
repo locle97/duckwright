@@ -26,6 +26,8 @@ export interface StartWebOptions {
   uiDir?: string;
   /** The folder `@` completion searches. Default: the process's current folder. */
   cwd?: string;
+  /** Where run folders live. Default: ./runs. */
+  runsDir?: string;
   /** Default: the system's browser opener. */
   open?: (url: string) => void;
 }
@@ -78,7 +80,7 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
     quit, runs: () => log.entries(), candidates: () => walk(nodeReadDir(o.cwd ?? process.cwd())),
   };
   try {
-    server = await startServer({ ctx, token, port: o.port, uiDir });
+    server = await startServer({ ctx, token, port: o.port, uiDir, runsDir: o.runsDir ?? path.resolve("runs") });
   } catch (e) {
     log.close();
     if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") throw new Error(`port ${o.port} is already in use`);

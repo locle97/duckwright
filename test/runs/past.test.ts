@@ -273,3 +273,22 @@ test("events_jsonl_accepts_twofa_events", () => {
   ].map((e) => JSON.stringify(e)).join("\n") + "\n";
   assert.equal(readEventsJsonl(text)?.length, 3);
 });
+
+test("events_from_history_carries_screenshot", () => {
+  const h = hist();
+  h.history[0].screenshot = "screenshots/step-001.png";
+  h.history[0].screenshot_error = "boom";
+  const end = eventsFromHistory(h, "w", 1).find((e) => e.type === "step:end");
+  assert.ok(end && end.type === "step:end");
+  assert.equal(end.record.screenshot, "screenshots/step-001.png");
+  assert.equal(end.record.screenshotError, "boom");
+});
+
+test("outcome_from_history_video", () => {
+  const ok = eventsFromHistory(hist({ video: "video.webm" }), "w", 1).at(-1);
+  assert.ok(ok && ok.type === "run:end");
+  assert.equal(ok.outcome.video, "video.webm");
+  const bad = eventsFromHistory(hist({ video: "../x.webm" }), "w", 1).at(-1);
+  assert.ok(bad && bad.type === "run:end");
+  assert.equal("video" in bad.outcome, false);
+});

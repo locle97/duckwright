@@ -5,7 +5,7 @@ import type { Key as InkKey } from "ink";
 import { cleanup, render } from "ink-testing-library";
 import { createElement as h } from "react";
 
-import type { RunOutcome } from "../../src/events.ts";
+import type { RunEvent, RunOutcome } from "../../src/events.ts";
 import { App, fromInk } from "../../src/tui/app.ts";
 import type { TuiFiles } from "../../src/tui/app.ts";
 import { AddBox } from "../../src/tui/addBox.ts";
@@ -272,6 +272,52 @@ test("app_end_banner", async () => {
   assert.match(f, /Answer: The price is 42/);
   assert.match(f, /History: runs\/x\/history\.json/);
   assert.match(f, /Test: runs\/x\/test\.spec\.ts/);
+});
+
+test("app_timeline_shows_screenshot_rows", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m, { columns: 120, rows: 40 });
+  await settle();
+  const d = decision("Look", [["click", "e1"]]);
+  const end = (step: number, extra: object): RunEvent => {
+    const e = ev.stepEnd(step, d, ["ok"]) as Extract<RunEvent, { type: "step:end" }>;
+    return { ...e, record: { ...e.record, ...extra } };
+  };
+  m.run(1, "r1", [
+    { ...ev.start(), workdir: "runs/x" } as RunEvent,
+    ev.step(1), ev.decision(1, d, 0), end(1, { screenshot: "screenshots/step-001.png" }),
+  ]);
+  await settle();
+  assert.match(t.frame(), /shot {2}runs\/x\/screenshots\/step-001\.png/);
+  m.run(1, "r1", [ev.step(2), ev.decision(2, d, 0), end(2, { screenshotError: "boom" })]);
+  await settle();
+  assert.match(t.frame(), /shot error {2}boom/);
+});
+
+test("app_end_banner_video", async () => {
+  const m = new FakeManager([snapshot(1, "First", { state: "running", runId: "r1", runCount: 1 })]);
+  const t = mount(m);
+  await settle();
+  m.run(1, "r1", [{ ...ev.start(), workdir: "runs/x" } as RunEvent, ev.end({ ...OUTCOME, steps: 0, video: "video.webm" })]);
+  m.update(1, { state: "passed" });
+  await settle();
+  const lines = t.frame().split("\n");
+  const h = lines.findIndex((l) => /History:/.test(l));
+  assert.match(lines[h + 1] ?? "", /video {2}runs\/x\/video\.webm/);
+});
+
+test("app_detail_lists_evidence_settings", async () => {
+  const t = mount(new FakeManager([snapshot(1, "First")]));
+  await settle();
+  assert.match(t.frame(), /video +false/);
+  assert.match(t.frame(), /screenshot +false/);
+});
+
+test("app_options_pane_shows_evidence_rows", async () => {
+  const t = mount(new FakeManager([snapshot(1, "First")]), { columns: 100, rows: 40 });
+  await settle();
+  const f = t.frame();
+  assert.match(f, /OPTIONS[\s\S]*video +false[\s\S]*screenshot +false/);
 });
 
 const NO_KEY: InkKey = {

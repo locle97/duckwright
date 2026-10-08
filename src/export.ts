@@ -68,6 +68,8 @@ export interface HistoryStep {
   network?: NetworkEntry[];
   network_errors?: string[];
   request_origins?: (string | null)[];
+  screenshot?: string;
+  screenshot_error?: string;
 }
 
 /** The shape of a run's history.json. */
@@ -78,6 +80,7 @@ export interface HistoryData {
   answer: string;
   steps: number;
   cost_usd: number;
+  video?: string;
   history: HistoryStep[];
 }
 

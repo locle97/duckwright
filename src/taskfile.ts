@@ -17,6 +17,8 @@ export type TaskSettings = Partial<{
   session: string;
   state: string;
   network: boolean;
+  video: boolean;
+  screenshot: boolean;
   twofaTimeout: number;
   snapshot: SnapshotMode;
   /** A shared setup file whose text is put before the task; resolved by loadTaskFile, never a run setting. */
@@ -35,6 +37,8 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   session: ["session", "str"],
   state: ["state", "path"],
   network: ["network", "bool"],
+  video: ["video", "bool"],
+  screenshot: ["screenshot", "bool"],
   "twofa-timeout": ["twofaTimeout", "int"],
   snapshot: ["snapshot", "snapshot"],
   setup: ["setup", "path"],
@@ -147,7 +151,7 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
  * Throws TaskFileError with the front-matter message, minus the file and line prefix.
  */
 export function settingValue(
-  key: "max-steps" | "model" | "headed" | "snapshot", raw: string,
+  key: "max-steps" | "model" | "headed" | "snapshot" | "video" | "screenshot", raw: string,
 ): string | number | boolean {
   try {
     if (!raw) throw new LineError(`"${key}" has no value`);

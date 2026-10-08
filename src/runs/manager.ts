@@ -25,8 +25,8 @@ export type PlanId = number;
 /** `planning`: the planner is splitting the plan; `ready`: its tasks are in the list; `failed`: planning failed or was cancelled. */
 export type PlanState = "planning" | "ready" | "failed";
 export type TaskState = "idle" | "running" | "paused" | "passed" | "failed" | "stopping" | "stopped";
-export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode }
-export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode }
+export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean }
+export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean }
 /** The options every task's next run starts from: `base` is the defaults and flags, `overrides` the edits on top. */
 export interface Globals { base: Effective; overrides: Overrides }
 export type TaskSource = { kind: "typed" } | { kind: "file"; path: string };
@@ -36,7 +36,7 @@ export type AddResult =
   | { ok: true; added: TaskId[]; duplicates: string[] }
   | { ok: false; errors: { mention: number; message: string }[] };
 export interface TaskSnapshot {
-  id: TaskId; text: string; name: string; source: TaskSource; state: TaskState; overrides: Overrides; effective: Effective;
+  id: TaskId; text: string; name: string; source: TaskSource; state: TaskState; overrides: Overrides; effective: Effective; inherited: Effective;
   error: string | null; runId: string | null; runCount: number;
   /** Set while the task's active run waits for a 2FA answer. */
   twofa: { kind: TwofaWait } | null;
@@ -168,7 +168,7 @@ export function taskName(text: string, max = 40): string {
 }
 
 function effectiveOf(a: RunArgs): Effective {
-  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot };
+  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot };
 }
 
 interface RunRecord {
@@ -842,15 +842,17 @@ export class RunManager implements ManagerLike {
     return task.planId === null ? undefined : this.#findPlan(task.planId);
   }
 
-  #argsFor(task: Task): RunArgs {
+  #argsFor(task: Task, own = true): RunArgs {
     const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, { ...this.#o.settings, ...task.fileSettings });
     if (parsed.kind !== "args") throw new Error("argv does not describe a run");
     const args = { ...parsed.args };
-    for (const o of [this.#globals, task.overrides]) {
+    for (const o of own ? [this.#globals, task.overrides] : [this.#globals]) {
       if (o.model !== undefined) args.model = o.model;
       if (o.maxSteps !== undefined) args.maxSteps = o.maxSteps;
       if (o.headed !== undefined) args.headed = o.headed;
       if (o.snapshot !== undefined) args.snapshot = o.snapshot;
+      if (o.video !== undefined) args.video = o.video;
+      if (o.screenshot !== undefined) args.screenshot = o.screenshot;
     }
     return args;
   }
@@ -875,6 +877,7 @@ export class RunManager implements ManagerLike {
       id: task.id, text: task.text, name: task.name, source: { ...task.source }, state: task.state,
       overrides: { ...task.overrides },
       effective: effectiveOf(a),
+      inherited: effectiveOf(this.#argsFor(task, false)),
       error: task.error, runId: latest ? latest.handle.id : (task.past?.id ?? null), runCount: task.runs.length,
       createdAt: task.createdAt,
       twofa: this.#activeRun(task)?.bridge.pending ?? null,

@@ -5,6 +5,8 @@ import { BrainError } from "./brain.ts";
 import type { DecideFn } from "./brain.ts";
 import { RunControl } from "./control.ts";
 import { RunEvents } from "./events.ts";
+import { startVideo, stopVideo, takeScreenshot } from "./evidence.ts";
+import type { Evidence } from "./evidence.ts";
 import { captureStep, clearRequests, currentOrigin, networkDir } from "./network.ts";
 import { observe, pageDir, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
@@ -54,6 +56,8 @@ export interface AgentOptions {
   control?: RunControl;
   network?: boolean;
   twofa?: TwoFactor;
+  video?: boolean;
+  screenshot?: boolean;
 }
 
 export class Agent {
@@ -71,6 +75,9 @@ export class Agent {
   readonly control: RunControl | undefined;
   readonly network: boolean;
   readonly twofa: TwoFactor | undefined;
+  readonly video: boolean;
+  readonly screenshot: boolean;
+  evidence: Evidence = { video: null, warnings: [] };
   private nextNetworkId = 1;
   private pendingNetworkErrors: string[] = [];
   // Updated as the run goes, so a caller can still read it after run() throws.
@@ -91,6 +98,8 @@ export class Agent {
     this.control = opts.control;
     this.network = opts.network ?? false;
     this.twofa = opts.twofa;
+    this.video = opts.video ?? false;
+    this.screenshot = opts.screenshot ?? false;
     const onStep = opts.onStep;
     if (onStep) this.events.subscribe((e) => { if (e.type === "step:end") onStep(e.record); });
   }
@@ -98,15 +107,31 @@ export class Agent {
   /** Removes the TOTP secret and every code handed out so far; identity when there is no 2FA. */
   private scrub = (text: string): string => (this.twofa ? this.twofa.scrubber.scrub(text) : text);
 
-  private record(history: StepRecord[], rec: StepRecord, cost: number, startedAt: number): void {
+  private async record(history: StepRecord[], rec: StepRecord, cost: number, startedAt: number): Promise<void> {
+    if (this.screenshot) {
+      const shot = await takeScreenshot(this.pw, this.workdir, rec.step, this.signal);
+      if ("rel" in shot) {
+        rec.screenshot = shot.rel;
+      } else {
+        const error = this.scrub(shot.error);
+        rec.screenshotError = error;
+        this.evidence.warnings.push(`screenshot failed at step ${rec.step}: ${error}`);
+      }
+    }
     history.push(rec);
     this.events.emit({ type: "step:end", record: rec, cost, durationMs: this.events.now() - startedAt });
   }
 
   async run(): Promise<RunResult> {
+    let videoStarted = false;
     try {
       const res = await this.pw.open(this.headed);
       if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout);
+      if (this.video) {
+        const warning = await startVideo(this.pw, this.workdir);
+        if (warning === null) videoStarted = true;
+        else this.evidence.warnings.push(this.scrub(warning));
+      }
       if (this.state) await this.pw.stateLoad(this.state);
       if (this.network) {
         const err = await clearRequests(this.pw);
@@ -114,6 +139,11 @@ export class Agent {
       }
       return await this.loop();
     } finally {
+      if (videoStarted) {
+        const stopped = await stopVideo(this.pw, this.workdir);
+        this.evidence.video = stopped.video;
+        if (stopped.warning !== null) this.evidence.warnings.push(this.scrub(stopped.warning));
+      }
       await this.pw.close();
     }
   }
@@ -150,7 +180,7 @@ export class Agent {
         failures += 1;
         this.events.emit({ type: "brain:error", step, message: e.message, cost: e.cost, failures });
         if (this.network) await clearRequests(this.pw);
-        this.record(history, {
+        await this.record(history, {
           step,
           decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [] },
           results: [`brain error: ${e.message}`],
@@ -201,7 +231,7 @@ export class Agent {
         rec.network = entries;
         if (errs.length) rec.networkErrors = errs;
       }
-      this.record(history, rec, cost, startedAt);
+      await this.record(history, rec, cost, startedAt);
       if (done !== null) return { success: done.success, answer: this.scrub(done.answer), steps, costUsd: this.costUsd, history };
     }
     return { success: false, answer: "max steps reached", steps, costUsd: this.costUsd, history };

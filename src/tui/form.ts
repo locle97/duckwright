@@ -3,7 +3,7 @@ import type { SnapshotMode } from "../observe.ts";
 import { settingValue, TaskFileError } from "../taskfile.ts";
 import type { KeyPress } from "./keypress.ts";
 
-export type FieldKey = "model" | "maxSteps" | "headed" | "snapshot";
+export type FieldKey = "model" | "maxSteps" | "headed" | "snapshot" | "video" | "screenshot";
 /** `effective` is the value ctrl+r restores; `raw` is the text being edited. */
 export interface Field {
   key: FieldKey; label: string; raw: string; overridden: boolean; error: string | null; effective: string;
@@ -13,11 +13,12 @@ export interface FormState { taskId: TaskId | null; fields: Field[]; focus: numb
 
 const FRONT_MATTER_KEY = {
   model: "model", maxSteps: "max-steps", headed: "headed", snapshot: "snapshot",
+  video: "video", screenshot: "screenshot",
 } as const;
 const LABELS: Record<FieldKey, string> = {
-  model: "model", maxSteps: "max steps", headed: "headed", snapshot: "snapshot mode",
+  model: "model", maxSteps: "max steps", headed: "headed", snapshot: "snapshot mode", video: "video", screenshot: "screenshot",
 };
-const ORDER: readonly FieldKey[] = ["model", "maxSteps", "headed", "snapshot"];
+const ORDER: readonly FieldKey[] = ["model", "maxSteps", "headed", "snapshot", "video", "screenshot"];
 export const FIELD_COUNT = ORDER.length;
 const SNAPSHOT_CYCLE: readonly SnapshotMode[] = ["hybrid", "full", "grep"];
 
@@ -58,7 +59,7 @@ export function formKey(f: FormState, k: KeyPress): FormState {
     return { ...f, fields: f.fields.map((x, i) => (i === f.focus ? reset : x)) };
   }
   const toggle = k.name === "left" || k.name === "right" || (k.name === null && !k.ctrl && !k.meta && k.input === " ");
-  if (cur.key === "headed") {
+  if (cur.key === "headed" || cur.key === "video" || cur.key === "screenshot") {
     return toggle ? edit(f, cur.raw === "true" ? "false" : "true") : f;
   }
   if (cur.key === "snapshot") {

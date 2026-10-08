@@ -19,10 +19,15 @@ export interface StepView {
   /** Calls captured by this step's actions; empty when capture was off, the step predates it, or the data was malformed. */
   network: NetworkEntry[];
   networkErrors: string[];
+  /** Run-folder-relative path of this step's screenshot, validated; null when absent or malformed. */
+  screenshot: string | null;
+  screenshotError: string | null;
 }
 
 export interface RunView {
   runId: string;
+  /** The run's working directory; "" when unknown. */
+  workdir: string;
   maxSteps: number;
   startedAt: number;
   steps: StepView[];
@@ -32,6 +37,8 @@ export interface RunView {
   cost: number;
   brainFailures: number;
   outcome: RunOutcome | null;
+  /** "video.webm" when the run recorded one. */
+  video: string | null;
   /** Index into `steps`. */
   selected: number;
   expanded: number[];
@@ -42,12 +49,15 @@ export interface RunView {
 
 export type TimelineOp = "move" | "page" | "first" | "last" | "toggle" | "expandAll" | "collapseAll" | "unfollow";
 
+const SHOT = /^screenshots\/step-\d{3,}\.png$/;
+const VIDEO = "video.webm";
+
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));
 
 /** The view of a run that has just started. */
 export function newRunView(runId: string, e: Extract<RunEvent, { type: "run:start" }>): RunView {
   return {
-    runId, maxSteps: e.maxSteps, startedAt: e.at, steps: [], control: "running",
+    runId, workdir: typeof e.workdir === "string" ? e.workdir : "", video: null, maxSteps: e.maxSteps, startedAt: e.at, steps: [], control: "running",
     pausedSince: null, pausedMs: 0, cost: 0, brainFailures: 0, outcome: null, selected: 0, expanded: [], follow: true,
   };
 }
@@ -103,7 +113,7 @@ export function reduceRunEvent(r: RunView, e: RunEvent): RunView {
       const previousLast = r.steps.length - 1;
       const view: StepView = {
         step: e.step, goal: "", evaluation: "", memory: null, actions: [], runningAction: null,
-        phase: null, status: "running", error: null, cost: null, durationMs: null, network: [], networkErrors: [],
+        phase: null, status: "running", error: null, cost: null, durationMs: null, network: [], networkErrors: [], screenshot: null, screenshotError: null,
       };
       return applyFollow({ ...r, steps: [...r.steps, view] }, previousLast);
     }
@@ -135,6 +145,8 @@ export function reduceRunEvent(r: RunView, e: RunEvent): RunView {
       return updateStep(r, e.record.step, (v) => ({
         ...v, durationMs: e.durationMs, runningAction: null, phase: null,
         network: entriesOf(e.record.network), networkErrors: stringsOf(e.record.networkErrors),
+        screenshot: typeof e.record.screenshot === "string" && SHOT.test(e.record.screenshot) ? e.record.screenshot : null,
+        screenshotError: typeof e.record.screenshotError === "string" ? e.record.screenshotError : null,
         status: v.status === "brain" ? "brain" : stepStatus(e.record.results, v.actions),
       }));
     case "twofa:wait":
@@ -147,7 +159,7 @@ export function reduceRunEvent(r: RunView, e: RunEvent): RunView {
       return { ...closePause(r, e.at), control: e.state };
     }
     case "run:end":
-      return { ...closePause(r, e.at), outcome: e.outcome };
+      return { ...closePause(r, e.at), outcome: e.outcome, video: e.outcome.video === VIDEO ? VIDEO : null };
   }
 }
 
@@ -193,7 +205,7 @@ export function foldPast(runId: string, events: RunEvent[]): RunView {
     let outcome: RunOutcome | null = null;
     for (const e of events) if (e.type === "run:end") outcome = e.outcome;
     view = {
-      runId, maxSteps: 0, startedAt: 0, steps: [], control: "running", pausedSince: null, pausedMs: 0,
+      runId, workdir: "", video: outcome?.video === VIDEO ? VIDEO : null, maxSteps: 0, startedAt: 0, steps: [], control: "running", pausedSince: null, pausedMs: 0,
       cost: 0, brainFailures: 0, outcome, selected: 0, expanded: [], follow: false,
     };
   }

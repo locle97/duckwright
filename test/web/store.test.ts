@@ -232,3 +232,10 @@ test("a new plan does not steal the selection on the History tab", () => {
   s = apply(s, mgr({ type: "plan:added", plan: planSnapshot(1, []) }));
   assert.deepEqual(s.selection, { kind: "task", id: 1 });
 });
+
+test("image_dialog_action", () => {
+  const value = { kind: "image" as const, src: "/api/runs/x/screenshots/step-001.png", title: "Screenshot: step 1" };
+  const s = reduce(initialState(), { type: "dialog", value });
+  assert.deepEqual(s.dialog, value);
+  assert.equal(reduce(s, { type: "dialog", value: null }).dialog, null);
+});

@@ -84,6 +84,7 @@ async function until(fn: () => boolean, ms = 2000): Promise<void> {
 }
 
 const TOKEN = "tok";
+const RUN = "20261008-034720-demo";
 let tmp: string;
 let manager: CountingManager;
 let server: RunningServer;
@@ -107,9 +108,15 @@ before(async () => {
   fs.writeFileSync(path.join(tmp, "secret.txt"), "SECRET");
   fs.writeFileSync(path.join(tmp, "ui", ".hidden"), "HIDDEN");
   fs.symlinkSync(path.join(tmp, "secret.txt"), path.join(tmp, "ui", "link.txt"));
+  const runDir = path.join(tmp, "runs", RUN);
+  fs.mkdirSync(path.join(runDir, "screenshots"), { recursive: true });
+  fs.writeFileSync(path.join(runDir, "screenshots", "step-001.png"), "PNGDATA");
+  fs.writeFileSync(path.join(runDir, "video.webm"), "0123456789");
+  fs.writeFileSync(path.join(runDir, "history.json"), "{}");
+  fs.symlinkSync(path.join(tmp, "secret.txt"), path.join(runDir, "screenshots", "step-002.png"));
   manager = new CountingManager([snapshot(1, "one")]);
   ctx = makeCtx(manager);
-  server = await startServer({ ctx, token: TOKEN, uiDir: path.join(tmp, "ui") });
+  server = await startServer({ ctx, token: TOKEN, uiDir: path.join(tmp, "ui"), runsDir: path.join(tmp, "runs") });
 });
 after(async () => {
   await server.close();
@@ -256,5 +263,107 @@ test("close with a manager event in flight does not crash and unsubscribes", { t
     stream.close();
   } finally {
     process.off("uncaughtException", onError);
+  }
+});
+
+test("server_evidence_png", async () => {
+  const r = await request(server.port, "GET", `/api/runs/${RUN}/screenshots/step-001.png`, { headers: authed });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers["content-type"], "image/png");
+  assert.equal(r.headers["content-length"], "7");
+  assert.equal(r.headers["cache-control"], "no-store");
+  assert.equal(r.headers["x-content-type-options"], "nosniff");
+  assert.equal(r.body, "PNGDATA");
+  const h = await request(server.port, "HEAD", `/api/runs/${RUN}/screenshots/step-001.png`, { headers: authed });
+  assert.equal(h.status, 200);
+  assert.equal(h.body, "");
+});
+
+test("server_evidence_video_ranges", async () => {
+  const url = `/api/runs/${RUN}/video.webm`;
+  const full = await request(server.port, "GET", url, { headers: authed });
+  assert.equal(full.status, 200);
+  assert.equal(full.headers["accept-ranges"], "bytes");
+  assert.equal(full.body, "0123456789");
+  const part = await request(server.port, "GET", url, { headers: { ...authed, range: "bytes=2-4" } });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers["content-range"], "bytes 2-4/10");
+  assert.equal(part.body, "234");
+  const bad = await request(server.port, "GET", url, { headers: { ...authed, range: "bytes=20-" } });
+  assert.equal(bad.status, 416);
+  assert.equal(bad.headers["content-range"], "bytes */10");
+  assert.equal(bad.body, "");
+  const multi = await request(server.port, "GET", url, { headers: { ...authed, range: "bytes=0-1,3-4" } });
+  assert.equal(multi.status, 200);
+  assert.equal(multi.body, "0123456789");
+});
+
+test("server_evidence_traversal_404", async () => {
+  for (const p of [
+    "/api/runs/../x",
+    `/api/runs/${RUN}/screenshots/..%2Fhistory.json`,
+    `/api/runs/${RUN}/history.json`,
+    `/api/runs/${RUN}/screenshots/step-002.png`,
+    `/api/runs/${RUN}/screenshots/step-009.png`,
+  ]) {
+    const r = await request(server.port, "GET", p, { headers: authed });
+    assert.equal(r.status, 404, p);
+    assert.equal(r.body, '{"ok":false,"error":"not found"}', p);
+  }
+});
+
+test("server_evidence_auth_and_method", async () => {
+  const u = await request(server.port, "GET", `/api/runs/${RUN}/video.webm`);
+  assert.equal(u.status, 401);
+  assert.equal(u.body, '{"ok":false,"error":"unauthorized"}');
+  const p = await request(server.port, "POST", `/api/runs/${RUN}/video.webm`, { headers: changing(), body: "{}" });
+  assert.equal(p.status, 405);
+  assert.equal(p.body, '{"ok":false,"error":"method not allowed"}');
+});
+
+test("server_evidence_abort_releases_file", { skip: process.platform !== "linux" }, async () => {
+  const BIG_RUN = "20261008-034721-big";
+  const bigDir = path.join(tmp, "runs", BIG_RUN);
+  try {
+    fs.mkdirSync(bigDir, { recursive: true });
+    const big = path.join(fs.realpathSync(tmp), "runs", BIG_RUN, "video.webm");
+    const fd = fs.openSync(big, "w");
+    try {
+      fs.ftruncateSync(fd, 64 * 1024 * 1024); // sparse: no disk used
+    } finally {
+      fs.closeSync(fd);
+    }
+    const openCount = (): number =>
+      fs.readdirSync("/proc/self/fd").filter((f) => {
+        try {
+          return fs.readlinkSync(`/proc/self/fd/${f}`) === big;
+        } catch {
+          return false;
+        }
+      }).length;
+    const seen = await new Promise<{ status: number | undefined; open: number }>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port: server.port, method: "GET", path: `/api/runs/${BIG_RUN}/video.webm`, headers: authed }, (res) => {
+        res.pause();
+        setTimeout(() => {
+          try {
+            const open = openCount();
+            res.destroy();
+            resolve({ status: res.statusCode, open });
+          } catch (e) {
+            reject(e);
+          }
+        }, 100);
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(seen.status, 200);
+    assert.equal(seen.open, 1, "file open while client stalled");
+    await until(() => openCount() === 0, 3000);
+    assert.equal(openCount(), 0);
+    const ok = await request(server.port, "GET", `/api/runs/${RUN}/video.webm`, { headers: authed });
+    assert.equal(ok.status, 200);
+  } finally {
+    fs.rmSync(bigDir, { recursive: true, force: true });
   }
 });

@@ -10,7 +10,7 @@ import type { AgentOptions, RunResult } from "../../src/loop.ts";
 import type { StepRecord } from "../../src/prompt.ts";
 import { AbortedError } from "../../src/proc.ts";
 import type { Human } from "../../src/twofa.ts";
-import { PROMPTS, startRun } from "../../src/runs/run.ts";
+import { PROMPTS, historyJson, startRun } from "../../src/runs/run.ts";
 import type { AgentLike, RunDeps, RunSpec } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
 
@@ -20,7 +20,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, twofaTimeout: 300, web: false, port: null, ...over,
+    session: "s-1", state: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, ...over,
   };
 }
 
@@ -329,4 +329,70 @@ test("run_with_an_invalid_env_secret_fails_the_run", async () => {
   const o = await startRun(spec, deps).done;
   assert.equal(o.status, "fail");
   assert.match(o.error ?? "", /not a valid TOTP secret/);
+});
+
+test("start_run_passes_evidence_options", async () => {
+  let seen: AgentOptions | null = null;
+  const { spec, deps } = setup(agentWith(async (opts) => { seen = opts; return result(true); }), { video: true, screenshot: true });
+  await startRun(spec, deps).done;
+  assert.ok(seen !== null);
+  const o = seen as AgentOptions;
+  assert.equal(o.video === true && o.screenshot === true, true);
+});
+
+test("history_json_evidence_keys", () => {
+  const h = historyJson("t", true, "a", 2, 0, [
+    { ...rec(), screenshot: "screenshots/step-001.png" },
+    { ...rec(), step: 2, screenshotError: "boom" },
+  ], null, "video.webm");
+  assert.equal(h.video, "video.webm");
+  assert.equal(h.history[0].screenshot, "screenshots/step-001.png");
+  assert.equal(h.history[1].screenshot_error, "boom");
+  assert.equal("screenshot" in h.history[1], false);
+});
+
+test("history_json_no_evidence_keys", () => {
+  const h = historyJson("t", true, "a", 1, 0, [rec()], null, null);
+  const s = JSON.stringify(h);
+  assert.equal(s.includes("video") || s.includes("screenshot"), false);
+});
+
+const EV = { video: "video.webm", warnings: ["screenshot failed at step 1: boom"] };
+
+test("run_pass_carries_evidence", async () => {
+  const { spec, deps } = setup((_o) => {
+    const agent: AgentLike = { costUsd: 0, evidence: EV, run: async () => result(true) };
+    return agent;
+  });
+  const h = startRun(spec, deps);
+  const o = await h.done;
+  assert.equal(o.status, "pass");
+  assert.equal(o.video, "video.webm");
+  assert.ok(o.warnings.includes(EV.warnings[0]));
+  assert.equal(readHistory(h.workdir).video, "video.webm");
+});
+
+test("run_fail_carries_evidence", async () => {
+  const { spec, deps } = setup((_o) => ({ costUsd: 0, evidence: EV, run: async () => result(false) }));
+  const o = await startRun(spec, deps).done;
+  assert.equal(o.status, "fail");
+  assert.equal(o.video, "video.webm");
+  assert.ok(o.warnings.includes(EV.warnings[0]));
+});
+
+test("run_interrupt_keeps_evidence", async () => {
+  const { spec, deps } = setup((_o) => ({ costUsd: 0, evidence: EV, run: async () => { throw new AbortedError(); } }));
+  const h = startRun(spec, deps);
+  const o = await h.done;
+  assert.equal(o.status, "stop");
+  assert.equal(o.exitCode, 130);
+  assert.equal(o.video, "video.webm");
+  assert.ok(o.warnings.includes(EV.warnings[0]));
+  assert.equal(readHistory(h.workdir).video, "video.webm");
+});
+
+test("run_without_evidence_has_no_video_key", async () => {
+  const { spec, deps } = setup(agentWith(async () => result(true)));
+  const o = await startRun(spec, deps).done;
+  assert.equal("video" in o, false);
 });
