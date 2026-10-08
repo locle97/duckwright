@@ -323,33 +323,47 @@ test("server_evidence_auth_and_method", async () => {
 
 test("server_evidence_abort_releases_file", { skip: process.platform !== "linux" }, async () => {
   const BIG_RUN = "20261008-034721-big";
-  fs.mkdirSync(path.join(tmp, "runs", BIG_RUN), { recursive: true });
-  const big = path.join(fs.realpathSync(tmp), "runs", BIG_RUN, "video.webm");
-  fs.writeFileSync(big, Buffer.alloc(64 * 1024 * 1024, 1));
-  const openCount = (): number =>
-    fs.readdirSync("/proc/self/fd").filter((fd) => {
-      try {
-        return fs.readlinkSync(`/proc/self/fd/${fd}`) === big;
-      } catch {
-        return false;
-      }
-    }).length;
-  await new Promise<void>((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port: server.port, method: "GET", path: `/api/runs/${BIG_RUN}/video.webm`, headers: authed }, (res) => {
-      res.pause();
-      assert.equal(res.statusCode, 200);
-      setTimeout(() => {
-        assert.equal(openCount(), 1, "file open while client stalled");
-        res.destroy();
-        resolve();
-      }, 100);
+  const bigDir = path.join(tmp, "runs", BIG_RUN);
+  try {
+    fs.mkdirSync(bigDir, { recursive: true });
+    const big = path.join(fs.realpathSync(tmp), "runs", BIG_RUN, "video.webm");
+    const fd = fs.openSync(big, "w");
+    try {
+      fs.ftruncateSync(fd, 64 * 1024 * 1024); // sparse: no disk used
+    } finally {
+      fs.closeSync(fd);
+    }
+    const openCount = (): number =>
+      fs.readdirSync("/proc/self/fd").filter((f) => {
+        try {
+          return fs.readlinkSync(`/proc/self/fd/${f}`) === big;
+        } catch {
+          return false;
+        }
+      }).length;
+    const seen = await new Promise<{ status: number | undefined; open: number }>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port: server.port, method: "GET", path: `/api/runs/${BIG_RUN}/video.webm`, headers: authed }, (res) => {
+        res.pause();
+        setTimeout(() => {
+          try {
+            const open = openCount();
+            res.destroy();
+            resolve({ status: res.statusCode, open });
+          } catch (e) {
+            reject(e);
+          }
+        }, 100);
+      });
+      req.on("error", reject);
+      req.end();
     });
-    req.on("error", () => {});
-    req.on("error", reject);
-    req.end();
-  });
-  await until(() => openCount() === 0, 3000);
-  assert.equal(openCount(), 0);
-  const ok = await request(server.port, "GET", `/api/runs/${RUN}/video.webm`, { headers: authed });
-  assert.equal(ok.status, 200);
+    assert.equal(seen.status, 200);
+    assert.equal(seen.open, 1, "file open while client stalled");
+    await until(() => openCount() === 0, 3000);
+    assert.equal(openCount(), 0);
+    const ok = await request(server.port, "GET", `/api/runs/${RUN}/video.webm`, { headers: authed });
+    assert.equal(ok.status, 200);
+  } finally {
+    fs.rmSync(bigDir, { recursive: true, force: true });
+  }
 });
