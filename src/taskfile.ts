@@ -9,6 +9,9 @@ import { compareCodePoints } from "./text.ts";
 import { THEME_NAMES } from "./tui/theme.ts";
 import { MAX_TWOFA_TIMEOUT_SEC } from "./twofa.ts";
 
+/** Accepted syntax of a Jev confidence threshold (plain decimal, no exponent or sign). */
+export const THRESHOLD_RE = /^\s*(?:\d+(?:\.\d*)?|\.\d+)\s*$/;
+
 export type TaskSettings = Partial<{
   maxSteps: number;
   model: string;
@@ -20,6 +23,8 @@ export type TaskSettings = Partial<{
   video: boolean;
   screenshot: boolean;
   twofaTimeout: number;
+  jev: boolean;
+  jevThreshold: number;
   snapshot: SnapshotMode;
   /** A shared setup file whose text is put before the task; resolved by loadTaskFile, never a run setting. */
   setup: string;

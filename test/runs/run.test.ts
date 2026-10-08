@@ -20,7 +20,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, ...over,
+    session: "s-1", state: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, ...over,
   };
 }
 
