@@ -133,6 +133,8 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
       if (!res.headersSent) sendJson(res, 500, { ok: false, error: "internal error" });
       else res.destroy();
     });
+    // Closing the response (client abort, seek) must release the file descriptor; pipe() alone would leak it.
+    res.on("close", () => stream.destroy());
     stream.pipe(res);
   }
 

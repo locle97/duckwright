@@ -320,3 +320,36 @@ test("server_evidence_auth_and_method", async () => {
   assert.equal(p.status, 405);
   assert.equal(p.body, '{"ok":false,"error":"method not allowed"}');
 });
+
+test("server_evidence_abort_releases_file", { skip: process.platform !== "linux" }, async () => {
+  const BIG_RUN = "20261008-034721-big";
+  fs.mkdirSync(path.join(tmp, "runs", BIG_RUN), { recursive: true });
+  const big = path.join(fs.realpathSync(tmp), "runs", BIG_RUN, "video.webm");
+  fs.writeFileSync(big, Buffer.alloc(64 * 1024 * 1024, 1));
+  const openCount = (): number =>
+    fs.readdirSync("/proc/self/fd").filter((fd) => {
+      try {
+        return fs.readlinkSync(`/proc/self/fd/${fd}`) === big;
+      } catch {
+        return false;
+      }
+    }).length;
+  await new Promise<void>((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port: server.port, method: "GET", path: `/api/runs/${BIG_RUN}/video.webm`, headers: authed }, (res) => {
+      res.pause();
+      assert.equal(res.statusCode, 200);
+      setTimeout(() => {
+        assert.equal(openCount(), 1, "file open while client stalled");
+        res.destroy();
+        resolve();
+      }, 100);
+    });
+    req.on("error", () => {});
+    req.on("error", reject);
+    req.end();
+  });
+  await until(() => openCount() === 0, 3000);
+  assert.equal(openCount(), 0);
+  const ok = await request(server.port, "GET", `/api/runs/${RUN}/video.webm`, { headers: authed });
+  assert.equal(ok.status, 200);
+});
