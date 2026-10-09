@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, mock, test } from "node:test";
 
 import { TaskFileError, expandTaskPaths, loadTaskFile, settingValue, taskPaths } from "../src/taskfile.ts";
+import { resolvePath } from "../src/paths.ts";
 import { ROOT, tmpDir } from "./helpers.ts";
 
 function w(dir: string, text: string | Buffer, name = "t.md"): string {
@@ -370,4 +371,22 @@ test("evidence_key_bad_value_and_duplicate", () => {
   const q = w(tmpDir(), "---\nscreenshot: true\nscreenshot: false\n---\nGo\n");
   assert.match(err(q), /"screenshot" is set twice/);
   assert.equal(settingValue("video", "true"), true);
+});
+
+test("taskfile_env_values", () => {
+  const tmp = tmpDir();
+  const env = (v: string) => loadTaskFile(w(path.join(tmp, "tasks"), `---\nenv: ${v}\n---\ntask\n`, "a.md")).settings.env;
+  assert.equal(env("staging"), "staging");
+  assert.equal(env("none"), "none");
+  assert.equal(env("../envs/eu.md"), resolvePath(path.join(tmp, "envs", "eu.md")));
+  assert.equal(env("sub/prod"), resolvePath(path.join(tmp, "tasks", "sub", "prod")));
+});
+
+test("taskfile_env_errors", () => {
+  const tmp = tmpDir();
+  const p = path.join(tmp, "t.md");
+  const msg = 'env must be an environment name (letters, digits, ".", "_", "-") or a path, got ".hidden"';
+  assert.equal(err(w(tmp, "---\nenv: .hidden\n---\ntask\n")), `${p}:2: ${msg}`);
+  assert.equal(err(w(tmp, "---\nenv:\n---\ntask\n")), `${p}:2: "env" has no value`);
+  assert.equal(err(w(tmp, "---\nenv: a\nenv: b\n---\ntask\n")), `${p}:3: "env" is set twice`);
 });

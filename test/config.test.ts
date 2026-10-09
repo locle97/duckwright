@@ -119,3 +119,17 @@ test("evidence_defaults_documented_and_loaded", () => {
   fs.writeFileSync(path.join(dir, "duckwright.conf"), "screenshot: true\n");
   assert.deepEqual(loadConfig(dir), { screenshot: true });
 });
+
+test("config_env_key", () => {
+  const tmp = tmpDir();
+  assert.deepEqual(loadConfig(conf(tmp, "env: staging\n")), { env: "staging" });
+  const dir = conf(tmp, "env: envs/qa.md\n");
+  assert.deepEqual(loadConfig(dir), { env: path.join(fs.realpathSync(dir), "envs", "qa.md") });
+  assert.throws(
+    () => loadConfig(conf(tmp, "env: a b\n")),
+    (e: unknown) => e instanceof TaskFileError
+      && e.message.endsWith(':1: env must be an environment name (letters, digits, ".", "_", "-") or a path, got "a b"'),
+  );
+  assert.ok(DEFAULT_CONFIG.includes("# snapshot: hybrid\n# env: staging\n"));
+  assert.ok(DEFAULT_CONFIG.includes("# Relative paths (skill, state, env) are resolved from the folder holding this file."));
+});

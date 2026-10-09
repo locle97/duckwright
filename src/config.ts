@@ -45,7 +45,7 @@ const CONFIG_KEYS: Readonly<Record<string, readonly [string, Kind]>> = {
 
 /**
  * Read `<dir>/duckwright.conf`; no file means no config. Relative paths in it (`skill`,
- * `state`) are resolved from the folder holding the file. Errors name the file and line.
+ * `state`, `env`) are resolved from the folder holding the file. Errors name the file and line.
  */
 export function loadConfig(dir: string = configDir()): GlobalConfig {
   const file = path.join(dir, CONFIG_NAME);
@@ -71,7 +71,7 @@ export function runSettings(config: GlobalConfig): TaskSettings {
 export const DEFAULT_CONFIG = `# Global defaults for every run, read at startup from ~/.config/duckwright/duckwright.conf (Windows: %APPDATA%\\duckwright\\duckwright.conf).
 # Order: built-in defaults < this file < a task file's front matter < command-line flags.
 # Same keys as a task file's front matter, plus the TUI and web options at the end.
-# Relative paths (skill, state) are resolved from the folder holding this file.
+# Relative paths (skill, state, env) are resolved from the folder holding this file.
 # allow-file-access is not allowed here; pass it on the command line.
 
 # model: sonnet
@@ -85,6 +85,7 @@ export const DEFAULT_CONFIG = `# Global defaults for every run, read at startup 
 # screenshot: false
 # twofa-timeout: 300
 # snapshot: hybrid
+# env: staging
 
 # max-parallel: 3
 # past: 20
