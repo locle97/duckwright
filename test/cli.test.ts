@@ -14,6 +14,7 @@ import type { AgentOptions, RunResult } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightError } from "../src/pw.ts";
+import { JevAuthError } from "../src/jev.ts";
 import { TwoFactorError } from "../src/twofa.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
@@ -117,6 +118,8 @@ test("playwright_error_history_shape", async () => {
     answer: "playwright error: snapshot died",
     steps: 1,
     cost_usd: 0,
+    jev_steps: 0,
+    claude_steps: 1,
     history: [{
       step: 1,
       evaluation_previous_goal: "ev",
@@ -124,6 +127,9 @@ test("playwright_error_history_shape", async () => {
       next_goal: "goal",
       actions: [{ cmd: "click", args: ["e1"], code: "await page.getByRole('button', { name: 'Go' }).click();" }],
       results: ["ok"],
+      cost_usd: 0,
+      source: "claude",
+      jev: null,
     }],
   });
   assert.ok(e.out.some((l) => l.startsWith("step 1 | ev | goal | click e1 → ok")));
@@ -1455,4 +1461,67 @@ test("web_outside_sigint_quits", { timeout: 5000 }, async () => {
   assert.equal(e.out[0], "duckwright web: http://127.0.0.1:4000/?t=abc");
   assert.equal(e.out[1], "Batch: 0 passed, 0 failed, 1 stopped  Cost: $0.0000");
   assert.ok(e.out[2].startsWith('stop  "do it"'));
+});
+
+const NOKEY = "TYPESAFE_API_KEY is not set (needed by --jev)";
+
+test("jev without key exits 2", async () => {
+  const e = env();
+  assert.equal(await main(["-p", "--jev", ...e.argv], e.deps()), 2);
+  assert.ok(e.err.join("\n").includes(NOKEY));
+  assert.deepEqual(runDirs(e.tmp), []);
+});
+
+test("jev blank key exits 2", async () => {
+  const e = env();
+  assert.equal(await main(["-p", "--jev", ...e.argv], e.deps({ env: { TYPESAFE_API_KEY: "  " } })), 2);
+  assert.ok(e.err.join("\n").includes(NOKEY));
+});
+
+test("jev without key in a batch", async () => {
+  const e = env();
+  const a = taskFile(e.tmp, "A\n", "tasks/a.md");
+  const b = taskFile(e.tmp, "---\njev: true\n---\nGo\n", "tasks/b.md");
+  assert.equal(await main([...e.argv.slice(1), "-f", a, b], e.deps()), 2);
+  assert.deepEqual(e.err, [`${b}: ${NOKEY}`]);
+  assert.deepEqual(runDirs(e.tmp), []);
+});
+
+test("jev without key at tui start", async () => {
+  const e = env();
+  const fake = fakeTui();
+  assert.equal(await main(["--jev", ...e.argv], e.deps({ isTTY: () => true, loadTui: fake.load })), 2);
+  assert.ok(e.err.join("\n").includes(NOKEY));
+  assert.equal(fake.loads, 0);
+});
+
+test("no jev, no key needed", async () => {
+  const e = env();
+  const ok = agentWith(async () => result(true));
+  assert.equal(await main(["-p", ...e.argv], e.deps({ createAgent: ok })), 0);
+});
+
+test("jev auth error exits 1 with history", async () => {
+  const e = env();
+  const createAgent = agentWith(async (opts) => {
+    opts.events!.emit({ type: "step:end", record: rec([], []), cost: 0, durationMs: 0 });
+    throw new JevAuthError();
+  });
+  assert.equal(await main(["-p", "--jev", ...e.argv], e.deps({ env: { TYPESAFE_API_KEY: "k" }, createAgent })), 1);
+  assert.ok(e.err.join("\n").includes("jev error: invalid TYPESAFE_API_KEY"));
+  assert.equal(history(e.tmp).history.length, 1);
+});
+
+test("jev steps line", async () => {
+  const e = env();
+  const jevRec = rec([], []);
+  jevRec.decision.source = "jev";
+  const createAgent = agentWith(async () => result(true, [jevRec]));
+  assert.equal(await main(["-p", "--jev", ...e.argv], e.deps({ env: { TYPESAFE_API_KEY: "k" }, createAgent })), 0);
+  const i = e.out.findIndex((l) => l.startsWith("Steps:"));
+  assert.equal(e.out[i + 1], "Jev steps: 1/1");
+
+  const e2 = env();
+  assert.equal(await main(["-p", ...e2.argv], e2.deps({ createAgent })), 0);
+  assert.ok(!e2.out.some((l) => l.startsWith("Jev steps:")));
 });

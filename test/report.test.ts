@@ -72,3 +72,12 @@ test("print_video_line", () => {
   ]);
   assert.equal(print(outcome()).out.some((l) => l.startsWith("Video:")), false);
 });
+
+test("printOutcome jev steps line", () => {
+  const r = print(outcome({ jevSteps: 3, steps: 5 }));
+  assert.equal(r.out[r.out.indexOf("Steps: 5  Cost: $0.0213") + 1], "Jev steps: 3/5");
+  assert.equal(print(outcome()).out.some((l) => l.startsWith("Jev steps")), false);
+  const e = print(outcome({ jevSteps: 3, error: "boom" }));
+  assert.deepEqual(e.out, []);
+  assert.deepEqual(e.err, ["boom"]);
+});

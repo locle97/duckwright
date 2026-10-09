@@ -25,8 +25,8 @@ export type PlanId = number;
 /** `planning`: the planner is splitting the plan; `ready`: its tasks are in the list; `failed`: planning failed or was cancelled. */
 export type PlanState = "planning" | "ready" | "failed";
 export type TaskState = "idle" | "running" | "paused" | "passed" | "failed" | "stopping" | "stopped";
-export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean }
-export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean }
+export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean; jev?: boolean }
+export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean; jev: boolean }
 /** The options every task's next run starts from: `base` is the defaults and flags, `overrides` the edits on top. */
 export interface Globals { base: Effective; overrides: Overrides }
 export type TaskSource = { kind: "typed" } | { kind: "file"; path: string };
@@ -168,7 +168,7 @@ export function taskName(text: string, max = 40): string {
 }
 
 function effectiveOf(a: RunArgs): Effective {
-  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot };
+  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot, jev: a.jev };
 }
 
 interface RunRecord {
@@ -853,6 +853,7 @@ export class RunManager implements ManagerLike {
       if (o.snapshot !== undefined) args.snapshot = o.snapshot;
       if (o.video !== undefined) args.video = o.video;
       if (o.screenshot !== undefined) args.screenshot = o.screenshot;
+      if (o.jev !== undefined) args.jev = o.jev;
     }
     return args;
   }

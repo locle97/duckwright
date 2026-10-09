@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { JevRecord } from "./brain.ts";
 import { checkRequestArgs, renderRequestExpect } from "./expectRequest.ts";
 import type { NetworkEntry } from "./network.ts";
 import { renderApiSpec } from "./exportApi.ts";
@@ -65,6 +66,9 @@ export interface HistoryStep {
   next_goal: string;
   actions: HistoryAction[];
   results: string[];
+  cost_usd?: number;
+  source?: "claude" | "jev";
+  jev?: JevRecord | null;
   network?: NetworkEntry[];
   network_errors?: string[];
   request_origins?: (string | null)[];
@@ -80,6 +84,8 @@ export interface HistoryData {
   answer: string;
   steps: number;
   cost_usd: number;
+  jev_steps?: number;
+  claude_steps?: number;
   video?: string;
   history: HistoryStep[];
 }

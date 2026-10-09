@@ -371,3 +371,24 @@ test("evidence_key_bad_value_and_duplicate", () => {
   assert.match(err(q), /"screenshot" is set twice/);
   assert.equal(settingValue("video", "true"), true);
 });
+
+test("jev keys", () => {
+  const s = loadTaskFile(w(tmpDir(), "---\njev: true\njev-threshold: 0.9\n---\nGo\n")).settings;
+  assert.deepEqual({ jev: s.jev, jevThreshold: s.jevThreshold }, { jev: true, jevThreshold: 0.9 });
+});
+
+test("jev-threshold invalid", () => {
+  for (const v of ["abc", "0", "1.5", "1e-1"]) {
+    const p = w(tmpDir(), `---\njev: true\njev-threshold: ${v}\n---\nGo\n`);
+    assert.equal(err(p), `${p}:3: jev-threshold must be a number greater than 0 and at most 1, got "${v}"`);
+  }
+});
+
+test("jev invalid bool", () => {
+  const p = w(tmpDir(), "---\njev: yes\n---\nGo\n");
+  assert.equal(err(p), `${p}:2: jev must be true or false, got "yes"`);
+});
+
+test("settingValue jev", () => {
+  assert.equal(settingValue("jev", "true"), true);
+});

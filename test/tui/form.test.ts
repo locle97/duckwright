@@ -6,7 +6,7 @@ import { formKey, formResult, openForm } from "../../src/tui/form.ts";
 import type { FormState } from "../../src/tui/form.ts";
 import { key } from "../../src/tui/keypress.ts";
 
-const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid", video: false, screenshot: false };
+const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false };
 
 function press(f: FormState, ...specs: string[]): FormState {
   return specs.reduce((s, spec) => formKey(s, key(spec)), f);
@@ -16,17 +16,17 @@ test("form_open_prefills_effective_and_overrides", () => {
   const f = openForm(7, EFF, { maxSteps: 5, headed: true });
   assert.equal(f.taskId, 7);
   assert.equal(f.focus, 0);
-  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot"]);
-  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode", "video", "screenshot"]);
-  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid", "false", "false"]);
-  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false, false, false]);
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "jev"]);
+  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode", "video", "screenshot", "jev"]);
+  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid", "false", "false", "false"]);
+  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false, false, false, false]);
   assert.ok(f.fields.every((x) => x.error === null));
 });
 
 test("form_evidence_fields", () => {
   let f = openForm(null, EFF, {});
-  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot"]);
-  assert.deepEqual(f.fields.slice(-2).map((x) => x.label), ["video", "screenshot"]);
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "jev"]);
+  assert.deepEqual(f.fields.slice(-3).map((x) => x.label), ["video", "screenshot", "jev"]);
   f = press(f, "down", "down", "down", "down");
   assert.equal(f.fields[4].key, "video");
   f = press(f, "x");
@@ -99,4 +99,21 @@ test("form_result_only_overridden", () => {
   f = press(f, "down", "down", "space", "down", "space");
   const r = formResult(f);
   assert.deepEqual(r, { ok: true, overrides: { model: "m2", headed: true, snapshot: "full" } });
+});
+
+test("form jev field", () => {
+  let f = openForm(null, { ...EFF, jev: false }, {});
+  const last = f.fields[f.fields.length - 1];
+  assert.equal(last.key, "jev");
+  assert.equal(last.label, "jev");
+  assert.equal(last.raw, "false");
+  f = press(f, "down", "down", "down", "down", "down", "down");
+  for (const [k, want] of [["space", "true"], ["space", "false"], ["right", "true"], ["left", "false"]]) {
+    f = press(f, k);
+    assert.equal(f.fields[6].raw, want);
+  }
+  f = press(f, "space");
+  assert.deepEqual(formResult(f), { ok: true, overrides: { jev: true } });
+  f = press(f, "ctrl+r");
+  assert.equal(f.fields[6].raw, "false");
 });

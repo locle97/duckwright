@@ -70,7 +70,7 @@ export function parseOverrides(raw: unknown): Overrides | string {
     if (typeof raw.headed !== "boolean") return "headed must be true or false";
     o.headed = raw.headed;
   }
-  for (const k of ["video", "screenshot"] as const) {
+  for (const k of ["video", "screenshot", "jev"] as const) {
     if (raw[k] === undefined) continue;
     if (typeof raw[k] !== "boolean") return `${k} must be true or false`;
     o[k] = raw[k] as boolean;

@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { CHECKS } from "./expect.ts";
+import type { Observation } from "./observe.ts";
 import { runProcess } from "./proc.ts";
 import type { Runner } from "./proc.ts";
 
@@ -114,15 +115,40 @@ export interface Action {
   args: string[];
 }
 
+export interface JevRecord {
+  action: string | null;
+  action_confidence: number | null;
+  target: string | null;
+  target_confidence: number | null;
+  routed: string;
+}
+
 export interface Decision {
   evaluationPreviousGoal: string;
   memory: string;
   nextGoal: string;
   actions: Action[];
+  source?: "claude" | "jev";
+  jev?: JevRecord | null;
+}
+
+export interface StepContext {
+  step: number;
+  task: string;
+  memory: string;
+  historyLines: string[];
+  nudged: boolean;
+  previousFailed: boolean;
+}
+
+export interface StepInput {
+  obs: Observation;
+  ctx: StepContext;
 }
 
 export class BrainError extends Error {
   cost: number;
+  jev: JevRecord | null = null;
 
   constructor(msg = "", cost = 0) {
     super(msg);
@@ -206,7 +232,7 @@ export class Brain {
   }
 
   /** grep=false runs this one call without tools, for a step whose snapshot is pasted. */
-  async decide(prompt: string, grep = true): Promise<[Decision, number]> {
+  async decide(prompt: string, grep = true, _step?: StepInput): Promise<[Decision, number]> {
     const res = this.snapshotDir === null || !grep
       ? await this.runner(this.argv(false), prompt, this.timeout, { signal: this.signal })
       : await this.runner(this.argv(), prompt, this.timeout, {
@@ -227,7 +253,7 @@ export class Brain {
       if (env.is_error) throw new BrainError(`claude error: ${env.result || "unknown"}`);
       const so = env.structured_output;
       if (so === undefined || so === null) throw new BrainError("missing structured_output");
-      return [parseDecision(so), cost];
+      return [{ ...parseDecision(so), source: "claude", jev: null }, cost];
     } catch (e) {
       if (e instanceof BrainError) e.cost = cost;
       throw e;

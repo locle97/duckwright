@@ -119,3 +119,13 @@ test("evidence_defaults_documented_and_loaded", () => {
   fs.writeFileSync(path.join(dir, "duckwright.conf"), "screenshot: true\n");
   assert.deepEqual(loadConfig(dir), { screenshot: true });
 });
+
+test("config accepts jev keys", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "duckwright.conf"), "jev: true\njev-threshold: 0.5\n");
+  assert.deepEqual(loadConfig(dir), { jev: true, jevThreshold: 0.5 });
+});
+
+test("default config lists jev", () => {
+  assert.ok(DEFAULT_CONFIG.includes("# snapshot: hybrid\n# jev: false\n# jev-threshold: 0.8\n"));
+});
