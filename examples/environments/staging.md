@@ -1,5 +1,6 @@
 <!-- Sample environment context. Copy to environments/staging.md and edit.
      Use it with: duckwright --env staging "<task>"
+     Delete this comment after copying.
      Keep it under 16 KB. Never put real passwords or tokens here. -->
 
 # Staging
