@@ -1,4 +1,5 @@
 import type { Action, WebState } from "./store.ts";
+import { envValue } from "./environment.ts";
 import { Button } from "./ui.tsx";
 
 /** The global options as chips; the value shown is the effective one (an override, else the default). */
@@ -22,6 +23,7 @@ export function OptionsStrip(p: { state: WebState; dispatch(a: Action): void }) 
       {chip("snapshot", eff.snapshot, o.snapshot !== undefined)}
       {chip("video", eff.video ? "on" : "off", o.video !== undefined)}
       {chip("screenshot", eff.screenshot ? "on" : "off", o.screenshot !== undefined)}
+      {chip("env", envValue(eff.env), o.env !== undefined)}
     </div>
   );
 }

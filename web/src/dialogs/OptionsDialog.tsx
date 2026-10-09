@@ -6,11 +6,12 @@ import type { Dispatch } from "../actions.ts";
 import { api } from "../api.ts";
 import { clean } from "../clean.ts";
 import { draftToggle, evidenceBody } from "../evidence.ts";
+import { envBody, envDraft, envOptions } from "../environment.ts";
 import type { WebState } from "../store.ts";
 import { Button, Modal } from "../ui.tsx";
 
 type Draft = {
-  model: string; maxSteps: string; headed: string; snapshot: string; video: boolean | null; screenshot: boolean | null;
+  model: string; maxSteps: string; headed: string; snapshot: string; video: boolean | null; screenshot: boolean | null; env: string;
 };
 
 /** Options for one task (`taskId`) or, with null, the global options. An empty field inherits. */
@@ -23,7 +24,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
   const [draft, setDraft] = useState<Draft>({
     model: overrides.model ?? "", maxSteps: overrides.maxSteps === undefined ? "" : String(overrides.maxSteps),
     headed: onOff(overrides.headed), snapshot: overrides.snapshot ?? "",
-    video: overrides.video ?? null, screenshot: overrides.screenshot ?? null,
+    video: overrides.video ?? null, screenshot: overrides.screenshot ?? null, env: envDraft(overrides),
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -46,6 +47,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
     if (draft.headed !== "") o.headed = draft.headed === "on";
     if (draft.snapshot !== "") o.snapshot = draft.snapshot;
     Object.assign(o, evidenceBody(draft));
+    Object.assign(o, envBody(draft.env));
     setBusy(true);
     const r = task ? await checked(p.dispatch, api.put(`/api/tasks/${task.id}/overrides`, o)) : await checked(p.dispatch, api.put("/api/globals", o));
     setBusy(false);
@@ -69,7 +71,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
       onClose={close}
       footer={
         <>
-          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "", video: null, screenshot: null })}>Reset all</Button>
+          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "", video: null, screenshot: null, env: "" })}>Reset all</Button>
           <Button onClick={close}>Cancel</Button>
           <Button kind="green" disabled={busy} onClick={() => void save()}>Save</Button>
         </>
@@ -91,6 +93,14 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
           <option value="hybrid">hybrid</option>
           <option value="full">full</option>
           <option value="grep">grep</option>
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor="opt-env">environment</label>
+        <select id="opt-env" value={draft.env} onChange={(e) => { setDraft({ ...draft, env: e.target.value }); setError(null); }}>
+          {envOptions(inherited.env, g?.environments ?? [], draft.env).map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
         </select>
       </div>
       <fieldset className="evidence">
