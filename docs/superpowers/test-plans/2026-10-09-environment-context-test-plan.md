@@ -126,10 +126,10 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 | Criterion | Contracts | Scenarios |
 | --- | --- | --- |
 | SC1 | C1, C2, C3, C7 | TS-1, TS-2, TS-3, TS-4, TS-5, TS-6, TS-7, TS-8, TS-9, TS-17, TS-51, TS-54 |
-| SC2 | C1, C4, C10 | TS-20, TS-21, TS-22, TS-23, TS-24, TS-25, TS-26, TS-27, TS-28, TS-29, TS-30, TS-31, TS-50, TS-56 |
+| SC2 | C1, C4, C10 | TS-20, TS-21, TS-22, TS-23, TS-24, TS-25, TS-26, TS-27, TS-28, TS-29, TS-30, TS-31, TS-34, TS-50, TS-55, TS-56 |
 | SC3 | C1, C2 | TS-10, TS-11, TS-12, TS-13, TS-14, TS-15, TS-16, TS-17, TS-18, TS-19, TS-38, TS-42, TS-48 |
 | SC4 | C9 | TS-32, TS-33, TS-54 |
-| SC5 | C5, C6 | TS-35, TS-36, TS-37, TS-38, TS-39, TS-40, TS-41, TS-42, TS-43, TS-44, TS-45, TS-46, TS-47, TS-48, TS-49 |
+| SC5 | C5, C6 | TS-35, TS-36, TS-37, TS-38, TS-39, TS-40, TS-41, TS-42, TS-43, TS-44, TS-45, TS-46, TS-47, TS-48, TS-49, TS-57 |
 | SC6 | C7, C8 | TS-51, TS-52, TS-53 |
 | All (build) | all | TS-0 |
 
@@ -138,9 +138,9 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 | C1 `--env` option | TS-1, TS-2, TS-5, TS-6, TS-7, TS-10, TS-11, TS-19, TS-22, TS-23, TS-24 |
 | C2 environment file | TS-1, TS-3, TS-4, TS-12 to TS-18, TS-38, TS-42, TS-48 |
 | C3 `<environment>` prompt section | TS-1, TS-3, TS-8, TS-9, TS-54 |
-| C4 task-file / config key | TS-20, TS-21, TS-24, TS-25, TS-26, TS-27, TS-28, TS-49 |
+| C4 task-file / config key | TS-20, TS-21, TS-24, TS-25, TS-26, TS-27, TS-28, TS-34, TS-49, TS-55 |
 | C5 web API overrides | TS-35, TS-36, TS-37, TS-38 |
-| C6 TUI / web picker and display | TS-39 to TS-48 |
+| C6 TUI / web picker and display | TS-39 to TS-48, TS-57 |
 | C7 system prompt wording | TS-51 |
 | C8 docs and example | TS-52, TS-53 |
 | C9 `history.json` `env` | TS-32, TS-33, TS-54 |
@@ -426,7 +426,11 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 1. Run `QA_SCRIPT=$QA_WORK/scripts/D $DW -p -f tasks/t-nope.md tasks/t-big.md tasks/t-plain.md; echo "exit=$?"`.
 
 **Expected:**
-- Stderr has both lines: `tasks/t-nope.md: environment file not found: /tmp/dw-env/environments/nope.md` and `tasks/t-big.md: environment file too large: /tmp/dw-env/qa-envs/big.md is 16385 bytes (limit 16384)` (the task-file prefix is written as the batch's existing preflight errors write it).
+- Stderr is exactly these two lines, in this order:
+  ```
+  tasks/t-nope.md: environment file not found: /tmp/dw-env/environments/nope.md
+  tasks/t-big.md: environment file too large: /tmp/dw-env/qa-envs/big.md is 16385 bytes (limit 16384)
+  ```
 - `exit=2`; `$QA_DIR` is empty; no `runs/`.
 
 ### TS-20: Config `env` applies when nothing else sets one
@@ -585,19 +589,23 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 - Step 2: `env: ../../qa-envs/crlf.md`.
 - Step 3: exit `0`; the section holds `QA-ENV-CRLF line1` / `line2`.
 
-### TS-31: Opening an existing planned folder with `--env` writes nothing (D23)
+### TS-31: Running an existing planned folder with `--env` uses it for the runs but writes nothing (D23)
 
 **Contract:** C10 · **Criteria:** SC2 · **Type:** CLI, File · **Priority:** P3
 
-**Preconditions:** TS-29 step 1 done (folder `tasks/qa-plan/` with `env: staging`), fixture server running.
+**Preconditions:** TS-29 step 1 done (folder `tasks/qa-plan/` with `env: staging` in both task files); `$QA_DIR` cleared (`rm -f $QA_DIR/*`); fixture server running.
 
 **Steps:**
-1. Run `md5sum tasks/qa-plan/*.md`.
-2. Run `QA_SCRIPT=$QA_WORK/scripts/D $DW plan tasks/qa-plan/ -p --env prod; echo "exit=$?"`.
-3. Run `md5sum tasks/qa-plan/*.md` again and `ls -d tasks/qa-plan*`.
+1. Run `md5sum tasks/qa-plan/*.md tasks/qa-plan/shared/setup.md tasks/qa-plan/plan.json`.
+2. Run `QA_SCRIPT=$QA_WORK/scripts/D $DW -p -f tasks/qa-plan/ --session qa-env --env prod; echo "exit=$?"`.
+3. Run `sec $QA_DIR/prompt-1.txt` and `sec $QA_DIR/prompt-2.txt`.
+4. Run the `md5sum` of step 1 again and `ls -d tasks/qa-plan*`.
 
 **Expected:**
-- The checksums in step 3 equal those of step 1; no `tasks/qa-plan-2/` is created.
+- Step 2: both tasks run; `exit=0`.
+- Step 3: both sections hold `QA-ENV-PROD` and not `QA-ENV-STAGING` (`--env` beats each file's `env:`).
+- Step 4: the checksums equal those of step 1; only `tasks/qa-plan` exists (no `tasks/qa-plan-2/`).
+- Note: `duckwright plan tasks/qa-plan/ -p` is not used, because `-p` refuses an already-planned folder (exit 2) and never reaches the D23 behavior.
 
 ### TS-32: `history.json` records the environment's name and path, never its text
 
@@ -629,6 +637,18 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 **Expected:**
 - `exit=1`; step 2 prints `[false,{"name":"staging","path":"/tmp/dw-env/environments/staging.md"}]`.
 
+### TS-34: An `env:` path that is not usable is a task-file error
+
+**Contract:** C4 · **Criteria:** SC2 · **Type:** CLI · **Priority:** P2
+
+**Preconditions:** reset; `printf -- '---\nenv: a\0/b.md\n---\nQA\n' > tasks/nul-env.md` (a null byte inside the path value on line 2).
+
+**Steps:**
+1. Run `$DW -p -f tasks/nul-env.md; echo "exit=$?"`.
+
+**Expected:**
+- Stderr has `<file>:2: env is not a usable path: embedded null byte`, where `<file>` names `tasks/nul-env.md`; `exit=2`; no `runs/`.
+
 ### TS-35: Web state lists environments and shows the base environment
 
 **Contract:** C5 · **Criteria:** SC5 · **Type:** API · **Priority:** P1
@@ -638,9 +658,11 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 **Steps:**
 1. Start `$DW --web --port 4173 --env prod`; set up `C`, `O`, `B`.
 2. Run `curl -s -H "$C" $B/api/state | jq -c '.globals.environments, .globals.base.env'`.
+3. Run `curl -s -N --max-time 3 -H "$C" $B/api/events | grep -m1 '^data:' | sed 's/^data: //' | jq -c '[.type, .globals.environments, .globals.base.env]'`.
 
 **Expected:**
-- `["cfg","prod","staging"]` (no `.hidden`, `notes`, `Upper`, `bad name`, `adir`, `none`), then `"prod"`.
+- Step 2: `["cfg","prod","staging"]` (no `.hidden`, `notes`, `Upper`, `bad name`, `adir`, `none`), then `"prod"`.
+- Step 3: the event stream's first event is the state snapshot: `["state",["cfg","prod","staging"],"prod"]`.
 
 ### TS-36: Web API saves global and per-task `env` overrides
 
@@ -649,18 +671,18 @@ Front-matter lines are shown separated by ` / `; line 1 is `---`.
 **Preconditions:** reset; fixture server running; web started as `QA_SCRIPT=$QA_WORK/scripts/D $DW --web --port 4173 --env prod`; one typed task added (id `$TID`).
 
 **Steps:**
-1. `curl -s -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":"staging"}' $B/api/globals`.
+1. `curl -s -w ' %{http_code}' -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":"staging"}' $B/api/globals`.
 2. `curl -s -H "$C" $B/api/state | jq -c --arg t "$TID" '[.globals.overrides.env, (.tasks[] | select((.id|tostring)==$t) | [.effective.env, .inherited.env])]'`.
-3. `curl -s -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":null}' $B/api/tasks/$TID/overrides`, then repeat step 2 adding `.overrides.env` of the task.
-4. `curl -s -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":"none"}' $B/api/globals`, then `curl -s -H "$C" $B/api/state | jq -c .globals.overrides.env`.
-5. `curl -s -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":"cfg"}' $B/api/globals`; `curl -s -X PUT -H "$C" -H "$O" -H "$J" -d '{}' $B/api/tasks/$TID/overrides`; `curl -s -X POST -H "$C" -H "$O" $B/api/tasks/$TID/start`; wait for the run to finish; `sec $QA_DIR/prompt-1.txt`.
+3. `curl -s -w ' %{http_code}' -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":null}' $B/api/tasks/$TID/overrides`, then repeat step 2 adding `.overrides.env` of the task.
+4. `curl -s -w ' %{http_code}' -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":"none"}' $B/api/globals`, then `curl -s -H "$C" $B/api/state | jq -c .globals.overrides.env`.
+5. `curl -s -w ' %{http_code}' -X PUT -H "$C" -H "$O" -H "$J" -d '{"env":"cfg"}' $B/api/globals`; `curl -s -w ' %{http_code}' -X PUT -H "$C" -H "$O" -H "$J" -d '{}' $B/api/tasks/$TID/overrides`; `curl -s -w ' %{http_code}' -X POST -H "$C" -H "$O" $B/api/tasks/$TID/start`; wait for the run to finish; `sec $QA_DIR/prompt-1.txt`.
 
 **Expected:**
-- Steps 1, 3, 4, 5 PUTs each return `200` `{"ok":true}`.
+- Every PUT in steps 1, 3, 4 and 5 prints `{"ok":true} 200`.
 - Step 2: `["staging",["staging","staging"]]`.
 - Step 3: the task's `overrides.env` is `null`, `effective.env` is `null`, `inherited.env` is `"staging"`.
 - Step 4: `null` (`"none"` is stored as `null`).
-- Step 5: start returns `200`; the run's prompt section holds `QA-ENV-CFG`.
+- Step 5: start prints `{"ok":true,"runId":"<run id>"} 200` (`runId` is a non-empty string); the run's prompt section holds `QA-ENV-CFG`.
 
 ### TS-37: Web API rejects bad `env` values
 
