@@ -8,6 +8,8 @@ export type FieldKey = "model" | "maxSteps" | "headed" | "snapshot" | "video" | 
 /** `effective` is the value ctrl+r restores; `raw` is the text being edited. */
 export interface Field {
   key: FieldKey; label: string; raw: string; overridden: boolean; error: string | null; effective: string;
+  /** The raw text when the form opened: the env cycle keeps it reachable. */
+  opened: string;
 }
 /** `taskId` null: the global options rather than one task's. */
 export interface FormState { taskId: TaskId | null; fields: Field[]; focus: number; environments: readonly string[] }
@@ -41,7 +43,7 @@ export function openForm(taskId: TaskId | null, effective: Effective, overrides:
     const eff = String(k === "env" ? effective.env ?? NONE : effective[k]);
     const overridden = overrides[k] !== undefined;
     const raw = overridden ? String(k === "env" ? overrides.env ?? NONE : overrides[k]) : eff;
-    return { key: k, label: LABELS[k], raw, overridden, error: overridden ? validate(k, raw) : null, effective: eff };
+    return { key: k, label: LABELS[k], raw, overridden, error: overridden ? validate(k, raw) : null, effective: eff, opened: raw };
   });
   return { taskId, fields, focus, environments };
 }
@@ -68,8 +70,16 @@ export function formKey(f: FormState, k: KeyPress): FormState {
   if (cur.key === "env") {
     if (!toggle) return f;
     const choices = [NONE, ...f.environments];
+    const listed = choices.includes(cur.effective);
     if (!choices.includes(cur.effective)) choices.unshift(cur.effective);
-    return edit(f, choices[(choices.indexOf(cur.raw) + 1) % choices.length]);
+    if (!choices.includes(cur.opened)) choices.unshift(cur.opened);
+    const next = choices[(choices.indexOf(cur.raw) + 1) % choices.length];
+    // An unlisted effective value (from a path) cannot be saved as a name: landing on it inherits.
+    if (next === cur.effective && !listed) {
+      const reset: Field = { ...cur, raw: cur.effective, overridden: false, error: null };
+      return { ...f, fields: f.fields.map((x, i) => (i === f.focus ? reset : x)) };
+    }
+    return edit(f, next);
   }
   if (cur.key === "snapshot") {
     if (!toggle) return f;

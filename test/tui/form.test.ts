@@ -104,7 +104,7 @@ test("form_result_only_overridden", () => {
 test("form_env_field_open", () => {
   const eff = { ...EFF, env: null };
   const last = (o: Parameters<typeof openForm>[2]) => openForm(null, eff, o, 0, ["qa", "staging"]).fields.at(-1);
-  assert.deepEqual(last({}), { key: "env", label: "environment", raw: "none", overridden: false, error: null, effective: "none" });
+  assert.deepEqual(last({}), { key: "env", label: "environment", raw: "none", overridden: false, error: null, effective: "none", opened: "none" });
   assert.deepEqual([last({ env: null })?.raw, last({ env: null })?.overridden], ["none", true]);
   assert.deepEqual([last({ env: "qa" })?.raw, last({ env: "qa" })?.overridden], ["qa", true]);
 });
@@ -120,13 +120,31 @@ test("form_env_cycles_and_resets", () => {
   assert.equal(raw(), "staging");
   f = press(f, "space");
   assert.equal(raw(), "eu");
-  f = press(f, "space", "x", "backspace");
-  assert.equal(raw(), "none");
+  f = press(f, "space");
+  f = press(f, "x");
+  assert.equal(raw(), "none", "typing is ignored");
+  f = press(f, "backspace");
+  assert.equal(raw(), "none", "backspace is ignored");
   assert.deepEqual(formResult(f), { ok: true, overrides: { env: null } });
   f = press(f, "right");
   assert.deepEqual(formResult(f), { ok: true, overrides: { env: "qa" } });
   f = press(f, "ctrl+r");
   assert.equal(raw(), "eu");
+  assert.equal(f.fields[6].overridden, false);
+  assert.deepEqual(formResult(f), { ok: true, overrides: {} });
+});
+
+test("form_env_cycle_keeps_unlisted_override", () => {
+  let f = openForm(null, { ...EFF, env: null }, { env: "eu" }, 6, ["qa"]);
+  const seen = [f.fields[6].raw];
+  for (let i = 0; i < 3; i++) { f = press(f, "space"); seen.push(f.fields[6].raw); }
+  assert.deepEqual(seen, ["eu", "none", "qa", "eu"]);
+});
+
+test("form_env_cycle_back_to_unlisted_effective_resets", () => {
+  let f = openForm(null, { ...EFF, env: "foo" }, {}, 6, ["qa"]);
+  f = press(f, "space", "space", "space");
+  assert.equal(f.fields[6].raw, "foo");
   assert.equal(f.fields[6].overridden, false);
   assert.deepEqual(formResult(f), { ok: true, overrides: {} });
 });
