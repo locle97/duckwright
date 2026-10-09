@@ -5,6 +5,7 @@ import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts"
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
+import { EnvError, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun } from "./export.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
@@ -145,13 +146,21 @@ async function planMain(deps: CliDeps, args: RunArgs): Promise<number> {
   return 0;
 }
 
-function preflight(deps: CliDeps, skill: string, state: string | null): string | null {
+function preflight(deps: CliDeps, skill: string, state: string | null, env: string | null = null): string | null {
   const { system, snapshotFull, snapshotGrep, snapshotHybrid } = deps.prompts;
   for (const p of [system, snapshotFull, snapshotGrep, snapshotHybrid]) {
     if (!isFile(p)) return `system prompt not found: ${p} (is the installation complete?)`;
   }
   if (!isFile(skill)) return `playwright-cli skill not found: ${skill}`;
   if (state && !isFile(state)) return `state file not found: ${state}`;
+  if (env) {
+    try {
+      loadEnvironment(env);
+    } catch (e) {
+      if (e instanceof EnvError) return e.message;
+      throw e;
+    }
+  }
   if (!deps.which("claude")) return "claude CLI not found on PATH (install Claude Code)";
   if (!deps.which("playwright-cli")) return "playwright-cli not found on PATH (npm i -g @playwright/cli@latest)";
   return null;
@@ -160,7 +169,7 @@ function preflight(deps: CliDeps, skill: string, state: string | null): string |
 const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : null);
 
 function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
-  return preflight(deps, args.skill, statePath(args));
+  return preflight(deps, args.skill, statePath(args), args.env);
 }
 
 function exportSpec(deps: CliDeps, run: string, out: string | null = null, api = false): string {

@@ -1456,3 +1456,91 @@ test("web_outside_sigint_quits", { timeout: 5000 }, async () => {
   assert.equal(e.out[1], "Batch: 0 passed, 0 failed, 1 stopped  Cost: $0.0000");
   assert.ok(e.out[2].startsWith('stop  "do it"'));
 });
+
+function envFile(tmp: string, name: string, text: string): string {
+  const p = path.join(tmp, "environments", name + ".md");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, text);
+  return p;
+}
+
+function recordEnvs(): [(string | null | undefined)[], (opts: AgentOptions) => AgentLike] {
+  const seen: (string | null | undefined)[] = [];
+  return [seen, agentWith(async (opts) => {
+    seen.push(opts.environment);
+    return result(true);
+  })];
+}
+
+test("cli_env_reaches_agent", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", "STAGING");
+  const [seen, createAgent] = recordEnvs();
+  assert.equal(await main(["-p", ...e.argv, "--env", "staging"], e.deps({ createAgent })), 0);
+  assert.deepEqual(seen, ["STAGING"]);
+  assert.equal(history(e.tmp).env.name, "staging");
+  fs.rmSync(path.join(e.tmp, "runs"), { recursive: true });
+  assert.equal(await main(["-p", ...e.argv], e.deps({ createAgent })), 0);
+  assert.equal(seen[1], null);
+  assert.equal("env" in history(e.tmp), false);
+});
+
+test("cli_env_preflight_errors", async () => {
+  const e = env();
+  const dir = path.join(e.tmp, "environments");
+  const p = (n: string) => path.join(dir, n + ".md");
+  envFile(e.tmp, "big", "x".repeat(16385));
+  envFile(e.tmp, "empty", "  \n");
+  fs.mkdirSync(p("dir"), { recursive: true });
+  const cases: [string, string][] = [
+    ["nope", `environment file not found: ${fs.realpathSync(dir)}/nope.md`],
+    ["big", `environment file too large: ${fs.realpathSync(dir)}/big.md is 16385 bytes (limit 16384)`],
+    ["empty", `environment file is empty: ${fs.realpathSync(dir)}/empty.md`],
+    ["dir", `environment file cannot be read: ${fs.realpathSync(dir)}/dir.md: not a file`],
+  ];
+  for (const [name, line] of cases) {
+    e.err.length = 0;
+    assert.equal(await main(["-p", ...e.argv, "--env", name], e.deps()), 2, name);
+    assert.deepEqual(e.err, [line], name);
+  }
+  e.err.length = 0;
+  assert.equal(await main(["-p", ...e.argv, "--env", ".x"], e.deps()), 2);
+  assert.ok(e.err[0].startsWith("usage: duckwright [-h]"));
+  assert.equal(
+    e.err[e.err.length - 1],
+    "duckwright: error: argument --env: invalid environment: '.x' (use a name of letters, digits, '.', '_' and '-', or a path to a .md file)",
+  );
+  assert.equal(fs.existsSync(path.join(e.tmp, "runs")), false);
+});
+
+test("cli_env_precedence_batch_and_none", async () => {
+  const e = env();
+  envFile(e.tmp, "cfg", "CFG");
+  envFile(e.tmp, "file", "FILE");
+  envFile(e.tmp, "cli", "CLI");
+  const a = taskFile(e.tmp, "---\nenv: file\n---\nA\n", "tasks/a.md");
+  const b = taskFile(e.tmp, "B\n", "tasks/b.md");
+  const loadConfig = () => ({ env: "cfg" });
+  const run = async (extra: string[], files = [a, b]) => {
+    const [seen, createAgent] = recordEnvs();
+    assert.equal(await main(["-p", "--skill", e.argv[2], ...extra, "-f", ...files], e.deps({ createAgent, loadConfig })), 0);
+    return seen;
+  };
+  assert.deepEqual(await run([]), ["FILE", "CFG"]);
+  assert.deepEqual(await run(["--env", "cli"]), ["CLI", "CLI"]);
+  assert.deepEqual(await run(["--env", "none"]), [null, null]);
+  const c = taskFile(e.tmp, "---\nenv: none\n---\nC\n", "tasks/c.md");
+  assert.deepEqual(await run([], [c]), [null]);
+});
+
+test("cli_env_batch_errors_prefixed", async () => {
+  const e = env();
+  const a = taskFile(e.tmp, "---\nenv: ma\n---\nA\n", "a.md");
+  const b = taskFile(e.tmp, "---\nenv: mb\n---\nB\n", "b.md");
+  assert.equal(await main(["-p", "--skill", e.argv[2], "-f", a, b], e.deps()), 2);
+  const dir = fs.realpathSync(path.join(e.tmp, "environments"));
+  assert.deepEqual(e.err, [
+    `a.md: environment file not found: ${dir}/ma.md`,
+    `b.md: environment file not found: ${dir}/mb.md`,
+  ]);
+});
