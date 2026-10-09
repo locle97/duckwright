@@ -98,7 +98,7 @@ test("manager_globals_layering", () => {
   const b = mgr.addTyped("b");
   mgr.setOverrides(b, { model: "haiku" });
   assert.deepEqual(mgr.globals(), {
-    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false }, overrides: {},
+    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: null }, overrides: {}, environments: [],
   });
   events.length = 0;
   mgr.setGlobals({ model: "sonnet", headed: true });
@@ -875,4 +875,71 @@ test("globals_base_has_evidence", () => {
   assert.equal(setup().mgr.globals().base.video, false);
   assert.equal(setup().mgr.globals().base.screenshot, false);
   assert.equal(setup({ argv: ["--video"] }).mgr.globals().base.video, true);
+});
+
+test("manager_globals_environments_and_env_label", () => {
+  const dir = tree({ "environments/qa.md": "q", "environments/staging.md": "s" });
+  const { mgr } = setup({ cwd: dir, argv: ["--env", "staging"] });
+  assert.deepEqual(mgr.globals(), {
+    base: { model: mgr.globals().base.model, maxSteps: mgr.globals().base.maxSteps, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: "staging" },
+    overrides: {},
+    environments: ["qa", "staging"],
+  });
+  fs.writeFileSync(path.join(dir, "environments", "zz.md"), "z");
+  assert.deepEqual(mgr.globals().environments, ["qa", "staging", "zz"]);
+});
+
+test("manager_env_overrides_effective_and_inherited", () => {
+  const dir = tree({ "f.md": "---\nenv: qa\n---\nbody" });
+  const { mgr } = setup({ cwd: dir });
+  mgr.add({ mentions: [`${dir}/f.md`], typed: null });
+  const id = mgr.list()[0].id;
+  assert.equal(mgr.list()[0].effective.env, "qa");
+  mgr.setGlobals({ env: "staging" });
+  assert.equal(mgr.list()[0].effective.env, "staging");
+  assert.equal(mgr.list()[0].inherited.env, "staging");
+  mgr.setOverrides(id, { env: null });
+  assert.equal(mgr.list()[0].effective.env, null);
+  assert.equal(mgr.list()[0].inherited.env, "staging");
+  mgr.setGlobals({});
+  mgr.setOverrides(id, {});
+  assert.equal(mgr.list()[0].effective.env, "qa");
+});
+
+test("manager_env_names_resolve_against_manager_cwd", () => {
+  const dir = tree({});
+  const seen: (string | null)[] = [];
+  const started: (string | null)[] = [];
+  const { mgr } = setup({
+    cwd: dir, preflight: (a: RunArgs) => { seen.push(a.env); return null; },
+  });
+  mgr.setGlobals({ env: "qa" });
+  const id = mgr.addTyped("t");
+  mgr.start(id);
+  started.push(mgr.effectiveArgs(id).env);
+  const want = resolvePath(path.join(dir, "environments", "qa.md"));
+  assert.deepEqual(seen, [want]);
+  assert.deepEqual(started, [want]);
+  assert.equal(mgr.list()[0].effective.env, "qa");
+
+  const abs = setup({ cwd: dir, argv: ["--env", "/abs/x.md"] });
+  assert.equal(abs.mgr.effectiveArgs(abs.mgr.addTyped("t")).env, "/abs/x.md");
+  const rel = setup({ cwd: dir, argv: ["--env", "sub/x.md"] });
+  assert.equal(rel.mgr.effectiveArgs(rel.mgr.addTyped("t")).env, resolvePath(path.join(dir, "sub", "x.md")));
+});
+
+test("manager_env_reaches_start_run", () => {
+  const dir = tree({});
+  const { mgr, fakes } = setup({ cwd: dir });
+  mgr.setGlobals({ env: "qa" });
+  mgr.start(mgr.addTyped("t"));
+  assert.equal(fakes[0].spec.args.env, resolvePath(path.join(dir, "environments", "qa.md")));
+});
+
+test("manager_env_preflight_failure_is_task_error", () => {
+  const { mgr, events } = setup({ preflight: () => "environment file not found: /x" });
+  const id = mgr.addTyped("t");
+  assert.deepEqual(mgr.start(id), { ok: false, reason: "environment file not found: /x" });
+  assert.equal(mgr.list()[0].error, "environment file not found: /x");
+  assert.ok(events.some((e) => e.type === "toast" && e.message === "environment file not found: /x"));
 });

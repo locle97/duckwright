@@ -22,7 +22,7 @@ const runStart = (): RunEvent => ({ type: "run:start", at: 1, task: "t", maxStep
 const stateMsg = (over: Partial<Extract<StreamMessage, { type: "state" }>> = {}): Action => ({
   type: "stream", now: 0,
   message: {
-    type: "state", tasks: [], plans: [], globals: { base: snapshot(0, "").effective, overrides: {} }, activeCount: 0,
+    type: "state", tasks: [], plans: [], globals: { base: snapshot(0, "").effective, overrides: {}, environments: [] }, activeCount: 0,
     maxParallel: 3, notices: [], theme: "auto", runs: [], ...over,
   },
 });

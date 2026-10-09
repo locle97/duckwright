@@ -15,8 +15,8 @@ function task(id: number, state: TaskState = "idle"): TaskSnapshot {
   const live = state === "running" || state === "paused" || state === "stopping";
   return {
     id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
-    effective: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false },
-    inherited: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false },
+    effective: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: null },
+    inherited: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: null },
     error: null, runId: live || state === "passed" ? `r${id}` : null, runCount: live ? 1 : 0, createdAt: 0, twofa: null, hasSpec: false,
   };
 }
@@ -119,7 +119,7 @@ test("keys_space_starts_return_shows_details", () => {
 });
 
 test("keys_h_l_switch_tasks_and_options", () => {
-  const globals = { base: task(1).effective, overrides: {} };
+  const globals = { base: task(1).effective, overrides: {}, environments: [] };
   const list = initialState(0, [task(1)], [], globals);
   for (const k of ["h", "l"]) {
     assert.deepEqual(press(list, k), [ui({ type: "focus", target: "options" })], `${k} from the tasks`);
@@ -490,7 +490,7 @@ test("keys_detail_tab_to_list", () => {
 });
 
 test("keys_global_options", () => {
-  const globals = { base: task(1).effective, overrides: { model: "opus" } };
+  const globals = { base: task(1).effective, overrides: { model: "opus" }, environments: [] };
   for (const s of [initialState(0, [task(1)], [], globals), initialState(0, [], [], globals), detailOf("running")]) {
     const g = s.globals === null ? reduce(s, { type: "manager", event: { type: "globals:updated", globals } }) : s;
     const cmds = press(g, "O");

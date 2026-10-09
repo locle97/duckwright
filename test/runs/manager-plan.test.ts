@@ -253,3 +253,25 @@ test("stop_all_cancels_planning", async () => {
   assert.equal(mgr.plans()[0]!.error, "cancelled");
   assert.deepEqual(mgr.plan(planFile), { ok: false, error: "quitting" });
 });
+
+test("plan_writes_env_from_global_override_else_argv", async () => {
+  const { mgr, dir } = setup({ argv: ["--model", "opus", "--env", "cfg"] });
+  const envLines = async (name: string): Promise<string[]> => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, "# QA plan\n");
+    const r = mgr.plan(f);
+    assert.ok(r.ok);
+    await settle();
+    const plan = mgr.plans().find((p) => p.id === r.id)!;
+    return plan.taskIds.map((id) => {
+      const t = mgr.list().find((x) => x.id === id)!;
+      const m = /^env:.*$/m.exec(fs.readFileSync((t.source as { path: string }).path, "utf8"));
+      return m ? m[0] : "";
+    });
+  };
+  assert.deepEqual(await envLines("a.md"), ["env: cfg", "env: cfg", "env: cfg"]);
+  mgr.setGlobals({ env: "qa" });
+  assert.deepEqual(await envLines("b.md"), ["env: qa", "env: qa", "env: qa"]);
+  mgr.setGlobals({ env: null });
+  assert.deepEqual(await envLines("c.md"), ["", "", ""]);
+});

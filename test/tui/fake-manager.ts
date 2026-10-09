@@ -10,8 +10,8 @@ import type {
 export function snapshot(id: TaskId, text: string, over: Partial<TaskSnapshot> = {}): TaskSnapshot {
   return {
     id, text, name: taskName(text), source: { kind: "typed" }, state: "idle", overrides: {},
-    effective: { model: "sonnet", maxSteps: 25, headed: false, snapshot: "hybrid", video: false, screenshot: false },
-    inherited: { model: "sonnet", maxSteps: 25, headed: false, snapshot: "hybrid", video: false, screenshot: false },
+    effective: { model: "sonnet", maxSteps: 25, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: null },
+    inherited: { model: "sonnet", maxSteps: 25, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: null },
     error: null, runId: null, runCount: 0, createdAt: 0,
     twofa: null, hasSpec: false, ...over,
   };
@@ -44,7 +44,7 @@ export class FakeManager implements ManagerLike {
   /** What add() returns; by default it adds the typed task and reports it. */
   addResult: AddResult | null = null;
   /** What globals() returns; setGlobals replaces its overrides. */
-  globalsValue: Globals = { base: snapshot(0, "").effective, overrides: {} };
+  globalsValue: Globals = { base: snapshot(0, "").effective, overrides: {}, environments: [] };
   /** Every setGlobals argument, in order. */
   globalsSaved: Overrides[] = [];
   /** Every answerTwoFactor call, in order (null = cancel). */
@@ -104,7 +104,7 @@ export class FakeManager implements ManagerLike {
   }
 
   globals(): Globals {
-    return { base: { ...this.globalsValue.base }, overrides: { ...this.globalsValue.overrides } };
+    return { base: { ...this.globalsValue.base }, overrides: { ...this.globalsValue.overrides }, environments: [] };
   }
 
   setGlobals(o: Overrides): void {

@@ -698,7 +698,7 @@ test("addbox_no_color_mentions", () => {
 
 test("app_global_options_pane_layout", async () => {
   const m = new FakeManager([snapshot(1, "First")]);
-  m.globalsValue = { base: snapshot(1, "x").effective, overrides: { model: "opus" } };
+  m.globalsValue = { base: snapshot(1, "x").effective, overrides: { model: "opus" }, environments: [] };
   const t = mount(m, { columns: 100, rows: 40 });
   await settle();
   const lines = t.frame().split("\n");
