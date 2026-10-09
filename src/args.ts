@@ -1,5 +1,6 @@
 // The command line, parsed the way the Python version's argparse parser did: a greedy
 // -f/--file, negatable booleans, mutually exclusive snapshot flags, and argparse's messages.
+import { ENV_NONE, isEnvName, isEnvPath } from "./environment.ts";
 import { API_SPEC_NAME, SPEC_NAME } from "./export.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { THEME_NAMES } from "./tui/theme.ts";
@@ -16,6 +17,8 @@ export interface RunArgs {
   skill: string;
   session: string;
   state: string | null;
+  /** An environment name or path; null when none (never "none"). */
+  env: string | null;
   allowFileAccess: boolean;
   network: boolean;
   video: boolean;
@@ -57,7 +60,7 @@ export type Parsed<T> = { kind: "args"; args: T } | { kind: "help"; text: string
 export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE ...]] [--plan PLAN]\n"
   + "                  [--max-steps MAX_STEPS] [--model MODEL]\n"
   + "                  [--headed | --no-headed] [--skill SKILL] [--session SESSION]\n"
-  + "                  [--state FILE] [--allow-file-access]\n"
+  + "                  [--state FILE] [--env ENV] [--allow-file-access]\n"
   + "                  [--network | --no-network]\n"
   + "                  [--video | --no-video] [--screenshot | --no-screenshot]\n"
   + "                  [--twofa-timeout SEC]\n"
@@ -97,6 +100,9 @@ options:
   --session SESSION
   --state FILE          storage state JSON (cookies, localStorage) loaded with
                         state-load before the task starts
+  --env ENV             environment context: the text of environments/ENV.md
+                        (or of the .md file at path ENV) is put into every
+                        step's prompt; none = no environment
   --allow-file-access   allow file:// URLs and UNRESTRICTED local file access
                         in the browser. A hijacked agent could read any file
                         you can (e.g. ~/.ssh) and leak it; only use with
@@ -199,7 +205,7 @@ const RUN_SPEC: OptionSpec = {
     "-h": "-h/--help", "--help": "-h/--help", "--version": "--version",
     "-f": "-f/--file", "--file": "-f/--file",
     "--max-steps": "--max-steps", "--model": "--model", "--skill": "--skill",
-    "--session": "--session", "--state": "--state",
+    "--session": "--session", "--state": "--state", "--env": "--env",
     "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
     "--twofa-timeout": "--twofa-timeout", "--network": "--network/--no-network", "--no-network": "--network/--no-network",
     "--video": "--video/--no-video", "--no-video": "--video/--no-video",
@@ -212,7 +218,7 @@ const RUN_SPEC: OptionSpec = {
   shortWithValue: ["-f"],
 };
 
-const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--max-parallel", "--past", "--theme", "--plan", "--twofa-timeout", "--port"];
+const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "--session", "--state", "--env", "--max-parallel", "--past", "--theme", "--plan", "--twofa-timeout", "--port"];
 
 // Python's int(): optional sign, digits with single underscores between them, spaces around.
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
@@ -224,7 +230,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
   };
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
-    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", network: true, video: false, screenshot: false,
+    session: "duckwright", state: null, env: null, allowFileAccess: false, snapshot: "hybrid", network: true, video: false, screenshot: false,
     print: false, maxParallel: null, web: false, port: null, plan: null, twofaTimeout: 300,
     ...settings,
   };
@@ -291,6 +297,11 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
         const n = Number.parseInt(v!.trim().replaceAll("_", ""), 10);
         if (n < 1 || n > 65535) fail("argument --port: must be between 1 and 65535");
         args.port = n;
+      } else if (name === "--env") {
+        if (!(v === ENV_NONE || isEnvPath(v!) || isEnvName(v!))) {
+          fail(`argument --env: invalid environment: '${v}' (use a name of letters, digits, '.', '_' and '-', or a path to a .md file)`);
+        }
+        args.env = v!;
       } else if (name === "--plan") args.plan = v!;
       else if (name === "--model") args.model = v!;
       else if (name === "--skill") args.skill = v!;
@@ -314,6 +325,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
       args.snapshot = SNAPSHOT_FLAGS[name];
     }
   }
+  if (args.env === ENV_NONE) args.env = null;
   if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);
   return { kind: "args", args };
 }
