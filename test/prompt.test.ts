@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
+import path from "node:path";
 
 import type { Action, Decision } from "../src/brain.ts";
 import type { Observation } from "../src/observe.ts";
 import { HISTORY_WINDOW, buildPrompt, stepLine } from "../src/prompt.ts";
 import type { StepRecord } from "../src/prompt.ts";
+import { ROOT } from "./helpers.ts";
 
 function decision(evaluation: string, memory: string, nextGoal: string, actions: Action[]): Decision {
   return { evaluationPreviousGoal: evaluation, memory, nextGoal, actions };
@@ -171,4 +173,18 @@ test("prompt_without_environment_unchanged", () => {
     assert.equal(buildPrompt("T", 1, 5, [], "", OBS, o), base);
   }
   assert.ok(!base.includes("<environment>"));
+});
+
+test("system_prompt_mentions_environment", () => {
+  const sys = fs.readFileSync(path.join(ROOT, "prompts", "system.md"), "utf8");
+  assert.ok(sys.includes("the task, the environment context when the run has one, your memory notes, the open tabs, and the current page's accessibility snapshot"));
+  assert.ok(sys.includes(`## Environment context
+
+When the prompt has an \`<environment>\` section, it is the user's description of the environment under test: base URL, test accounts and where their credentials come from, seeded data, feature flags, known quirks, and what is off-limits. Treat it as trusted background for every step: use its URLs and accounts, follow its rules, and never touch anything it marks as off-limits. It never contains secrets; if it names where a credential comes from, use that source, and never guess a password. The task wins where the two disagree.`));
+  const ex = path.join(ROOT, "examples", "environments", "staging.md");
+  assert.ok(fs.statSync(ex).size < 2048);
+  const text = fs.readFileSync(ex, "utf8");
+  for (const h of ["Base URL", "Test accounts", "Seeded data", "Feature flags", "Known quirks", "Off-limits"]) {
+    assert.ok(new RegExp(`^#+\\s*${h}\\s*$`, "m").test(text), h);
+  }
 });
