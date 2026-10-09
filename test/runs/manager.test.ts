@@ -616,13 +616,17 @@ test("manager_rerun_past_task", async () => {
   assert.match(mgr.summary().lines[1] ?? "", /^pass  a\.md  /);
 });
 
-test("manager_past_file_duplicate", () => {
+test("manager_past_file_not_duplicate", () => {
   const dir = tree({ "a.md": "A" });
   const file = `${dir}/a.md`;
   const { mgr } = setup({ cwd: dir, past: [pastRun("20260101-000000-a", "pass", { source: { kind: "file", path: file } })] });
   const r = mgr.add({ mentions: [file], typed: null });
-  assert.deepEqual(r, { ok: true, added: [], duplicates: ["a.md"] });
-  assert.equal(mgr.list().length, 1);
+  assert.equal(r.ok && r.added.length, 1);
+  assert.deepEqual(r.ok && r.duplicates, []);
+  assert.equal(mgr.list().length, 2);
+  // a second add of the same file is still a duplicate of the live task
+  const again = mgr.add({ mentions: [file], typed: null });
+  assert.deepEqual(again, { ok: true, added: [], duplicates: ["a.md"] });
 });
 
 test("manager_notify_emits_toast", () => {
