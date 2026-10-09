@@ -135,7 +135,7 @@ async function planMain(deps: CliDeps, args: RunArgs): Promise<number> {
     deps.stderr(`plan error: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
-  const loaded = writePlan(r.doc, plan);
+  const loaded = writePlan(r.doc, plan, "tasks", args.env);
   deps.stdout(`Plan: ${loaded.tasks.length} task${loaded.tasks.length === 1 ? "" : "s"} in ${loaded.folder}${path.sep}  Cost: $${fixed4(r.cost)}`);
   if (loaded.setupPath !== null) deps.stdout(`Shared setup: ${loaded.setupPath}`);
   for (const t of loaded.tasks) deps.stdout(`  ${t.path}`);

@@ -1544,3 +1544,13 @@ test("cli_env_batch_errors_prefixed", async () => {
     `b.md: environment file not found: ${dir}/mb.md`,
   ]);
 });
+
+test("cli_plan_writes_env", async () => {
+  const e = env();
+  fs.writeFileSync(path.join(e.tmp, "qa-plan.md"), "# plan");
+  const planner = async () => ({ doc: PLAN_DOC, cost: 0 });
+  assert.equal(await main(["plan", "qa-plan.md", "-p", "--env", "staging", "--skill", e.argv[2]], e.deps({ planner })), 0);
+  assert.ok(fs.readFileSync(path.join(e.tmp, "tasks", "qa-plan", "01-login-works.md"), "utf8").includes("\nenv: staging\n"));
+  assert.equal(await main(["plan", "qa-plan.md", "-p", "--skill", e.argv[2]], e.deps({ planner })), 0);
+  assert.ok(!fs.readFileSync(path.join(e.tmp, "tasks", "qa-plan-2", "01-login-works.md"), "utf8").includes("env:"));
+});
