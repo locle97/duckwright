@@ -44,17 +44,12 @@ export function historyLines(history: StepRecord[], window = HISTORY_WINDOW): st
 }
 
 /**
- * The goal Claude set at its latest step within the history window ("" when none). Jev steps
- * only echo their own move and failed steps carry no goal, so both are passed over.
+ * The goal Claude set at the previous step ("" when that step was Jev's, which only echoes its own
+ * move, or set no goal). An older goal would be stale, so none is looked for.
  */
-export function latestClaudeGoal(history: StepRecord[], window = HISTORY_WINDOW): string {
-  const shown = window > 0 ? history.slice(-window) : [];
-  for (let i = shown.length - 1; i >= 0; i--) {
-    const d = shown[i].decision;
-    if (d.source === "jev" || !d.nextGoal) continue;
-    return flat(d.nextGoal);
-  }
-  return "";
+export function latestClaudeGoal(history: StepRecord[]): string {
+  const d = history.at(-1)?.decision;
+  return d && d.source !== "jev" ? flat(d.nextGoal) : "";
 }
 
 function section(tag: string, body: string): string {

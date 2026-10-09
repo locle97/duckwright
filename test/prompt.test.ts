@@ -170,12 +170,12 @@ test("historyLines returns stepLines of the last window", () => {
   assert.deepEqual(historyLines([rec(1), rec(2), rec(3)], 0), ["(3 earlier steps omitted)"]);
 });
 
-test("latestClaudeGoal skips jev steps and steps without a goal", () => {
+test("latestClaudeGoal is the previous step's goal, empty after a jev step or without a goal", () => {
   const jev = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "jev: x", source: "jev" } });
   const failed = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "" } });
-  assert.equal(latestClaudeGoal([rec(1), rec(2), jev(3), failed(4)]), "goal2");
-  assert.equal(latestClaudeGoal([jev(1)]), "");
+  assert.equal(latestClaudeGoal([rec(1), rec(2)]), "goal2");
+  // An older Claude goal would be stale after a jev step.
+  assert.equal(latestClaudeGoal([rec(1), jev(2)]), "");
+  assert.equal(latestClaudeGoal([rec(1), failed(2)]), "");
   assert.equal(latestClaudeGoal([]), "");
-  // Only the history window counts.
-  assert.equal(latestClaudeGoal([rec(1), jev(2), jev(3)], 2), "");
 });

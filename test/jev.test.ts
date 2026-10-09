@@ -5,6 +5,7 @@ import {
   ACTION_OPTIONS,
   ACTION_QUESTION,
   HybridBrain,
+  MAX_TARGETS,
   JEV_URL,
   JevAuthError,
   JevClient,
@@ -368,8 +369,8 @@ test("HybridBrain accepted click with target", async () => {
   });
   assert.equal(cost, 0.001);
   const q = f.asks[0];
-  // No goal in the history, so the progress notes stand in for the whole task.
-  assert.deepEqual(q.state, { task: "M", memory: "M", history: ["step 1 | …"], tabs: "tabs", snapshot: SNAP });
+  // No goal from Claude, so Jev gets the whole task.
+  assert.deepEqual(q.state, { task: "T", memory: "M", history: ["step 1 | …"], tabs: "tabs", snapshot: SNAP });
   assert.equal(q.questions.action.question, `${ACTION_QUESTION}\n\nTask: T`);
   assert.equal(q.questions.action.type, "choice");
   assert.equal(q.questions.target.question, TARGET_QUESTION);
@@ -508,13 +509,16 @@ const DUP_SNAP = [
 ].join("\n");
 
 test("targetCandidates merges links to the same place and shows where links lead", () => {
-  assert.deepEqual(targetCandidates(DUP_SNAP, "https://x.test/"), [
-    { ref: "e2", refs: ["e2", "e3"], description: 'link "humor" -> /tag/humor/' },
-    { ref: "e4", refs: ["e4"], description: 'link "humor" -> /tag/other/' },
-    { ref: "e5", refs: ["e5"], description: 'button "Add"' },
-    { ref: "e6", refs: ["e6"], description: 'button "Add"' },
-    { ref: "e7", refs: ["e7"], description: 'link "Next" -> /page/2/' },
-  ]);
+  assert.deepEqual(
+    targetCandidates(DUP_SNAP, "https://x.test/").map((c) => [c.target.ref, c.description]),
+    [
+      ["e2", 'link "humor" -> /tag/humor/'],
+      ["e4", 'link "humor" -> /tag/other/'],
+      ["e5", 'button "Add"'],
+      ["e6", 'button "Add"'],
+      ["e7", 'link "Next" -> /page/2/'],
+    ],
+  );
   // extractTargets itself is unchanged: every ref, no urls.
   assert.deepEqual(extractTargets(DUP_SNAP, "https://x.test/").map((t) => t.ref), ["e2", "e3", "e4", "e5", "e6", "e7"]);
 });
@@ -526,17 +530,12 @@ test("targetCandidates shortens long urls", () => {
   assert.equal(c.description.length, 'link "L" -> '.length + 80);
 });
 
-test("currentFocus prefers ctx.goal, then Claude's latest goal from history, plus memory", () => {
-  assert.equal(currentFocus({ memory: "M", historyLines: [], goal: "G" }), "G\nM");
-  const lines = ["step 1 | ok | Old goal | click e1 → ok", "step 2 | ok | New goal | click e2 → ok"];
-  assert.equal(currentFocus({ memory: " M ", historyLines: lines }), "New goal\nM");
-  // Jev's own steps and failed steps (no goal) are skipped.
-  const jev = [...lines, 'step 3 |  | jev: click link "x" (0.90) | click e3 → ok', "step 4 |  |  | brain error: x"];
-  assert.equal(currentFocus({ memory: "", historyLines: jev }), "New goal");
-  // A Claude step whose text holds " | " is ambiguous: no goal rather than an older, stale one.
-  const odd = [...lines, "step 3 | a | b | c | click e3 → ok"];
-  assert.equal(currentFocus({ memory: "M", historyLines: odd }), "M");
-  assert.equal(currentFocus({ memory: "", historyLines: ["(3 earlier steps omitted)"] }), null);
+test("currentFocus is Claude's goal plus the progress notes, and null without a goal", () => {
+  assert.equal(currentFocus({ memory: " M ", goal: " G " }), "G\nM");
+  assert.equal(currentFocus({ memory: "", goal: "G" }), "G");
+  // No goal (the previous step was Jev's): the notes may be stale too, so the whole task is used.
+  assert.equal(currentFocus({ memory: "M" }), null);
+  assert.equal(currentFocus({ memory: "M", goal: "  " }), null);
 });
 
 test("HybridBrain asks about the current goal and merged candidates", async () => {
@@ -553,10 +552,19 @@ test("HybridBrain asks about the current goal and merged candidates", async () =
   assert.equal(d.nextGoal, 'jev: click link "humor" (0.90)');
 });
 
-test("HybridBrain falls back to the whole task when there is no goal or memory", async () => {
+test("HybridBrain falls back to the whole task when there is no goal", async () => {
   const f = fakes(ans("click", 0.9));
-  await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep({ memory: "", historyLines: [] }));
+  await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep({ memory: "M" }));
   assert.equal((f.asks[0].state as { task: string }).task, "T");
+});
+
+test("HybridBrain counts the target limit after merging same-destination links", async () => {
+  const snap = Array.from({ length: MAX_TARGETS + 1 }, (_, i) =>
+    `- link "Tag" [ref=e${i + 1}] [cursor=pointer]:\n  - /url: /tag/`).join("\n");
+  const f = fakes(ans("click", 0.9, "e1", 0.9));
+  const [d] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep({}, snap));
+  assert.equal(f.asks.length, 1);
+  assert.equal(d.source, "jev");
 });
 
 test("HybridBrain sends a target outside the list to claude", async () => {

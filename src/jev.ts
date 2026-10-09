@@ -121,9 +121,8 @@ function scanTargets(snapshot: string, pageUrl?: string | null): { target: Targe
 export const MAX_HREF_CHARS = 80;
 
 export interface Candidate {
-  /** The ref Jev is offered; it stands for every ref in `refs`. */
-  ref: string;
-  refs: string[];
+  target: Target;
+  /** What Jev reads for this target. */
   description: string;
 }
 
@@ -134,53 +133,29 @@ export interface Candidate {
  */
 export function targetCandidates(snapshot: string, pageUrl?: string | null): Candidate[] {
   const out: Candidate[] = [];
-  const byKey = new Map<string, Candidate>();
-  for (const { target: t, href } of scanTargets(snapshot, pageUrl)) {
-    let description = targetDescription(t);
-    if (t.role === "link" && href) {
-      const key = JSON.stringify([t.role, t.name, href]);
-      const same = byKey.get(key);
-      if (same) {
-        same.refs.push(t.ref);
-        continue;
-      }
-      const shown = href.length > MAX_HREF_CHARS ? href.slice(0, MAX_HREF_CHARS - 1) + "…" : href;
-      description += ` -> ${shown}`;
-      const c = { ref: t.ref, refs: [t.ref], description };
-      byKey.set(key, c);
-      out.push(c);
-      continue;
+  const seen = new Set<string>();
+  for (const { target, href } of scanTargets(snapshot, pageUrl)) {
+    let description = targetDescription(target);
+    if (target.role === "link" && href) {
+      const key = JSON.stringify([target.role, target.name, href]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      description += ` -> ${href.length > MAX_HREF_CHARS ? href.slice(0, MAX_HREF_CHARS - 1) + "…" : href}`;
     }
-    out.push({ ref: t.ref, refs: [t.ref], description });
+    out.push({ target, description });
   }
   return out;
 }
 
-const HISTORY_LINE_RE = /^step \d+ \| /;
-
 /**
- * What the agent is working on right now: Claude's latest goal (Jev's own steps only echo their
- * move, so they are skipped) and its progress notes. Null when there is neither.
+ * What Jev should work on now: Claude's latest goal and its progress notes. Null when there is no
+ * goal (the previous step was Jev's own, so goal and notes may be stale), then the whole task is used.
  * A whole multi-part task leaves Jev unsure which part it is on, spreading its vote over every
  * element the task names; the current goal plus progress pins down the part at hand.
  */
-export function currentFocus(ctx: { memory: string; historyLines: string[]; goal?: string }): string | null {
-  let goal = ctx.goal?.trim() ?? "";
-  if (!goal) {
-    for (let i = ctx.historyLines.length - 1; i >= 0; i--) {
-      const line = ctx.historyLines[i];
-      if (!HISTORY_LINE_RE.test(line)) continue;
-      const parts = line.split(" | ");
-      // Free text may itself hold " | ", so only a line that splits cleanly names its goal.
-      const g = parts.length === 4 ? parts[2].trim() : null;
-      if (g === "" || g?.startsWith("jev:")) continue;
-      if (g) goal = g;
-      break; // Claude's latest step; an older goal would be stale
-    }
-  }
-  const memory = ctx.memory.trim();
-  const focus = [goal, memory].filter((s) => s !== "").join("\n");
-  return focus === "" ? null : focus;
+export function currentFocus(ctx: { memory: string; goal?: string }): string | null {
+  const goal = ctx.goal?.trim() ?? "";
+  return goal === "" ? null : [goal, ctx.memory.trim()].filter((s) => s !== "").join("\n");
 }
 
 // ---- HTTP client ----
@@ -427,15 +402,14 @@ export class HybridBrain implements DecideFn {
 
     if (!step || step.ctx.step === 1 || step.ctx.nudged || step.ctx.previousFailed) return viaClaude(null, 0);
     const pageUrl = currentTabUrl(step.obs.tabs);
-    const targets = extractTargets(step.obs.snapshot, pageUrl);
-    if (targets.length === 0 || targets.length > MAX_TARGETS) return viaClaude(null, 0);
     const candidates = targetCandidates(step.obs.snapshot, pageUrl);
+    if (candidates.length === 0 || candidates.length > MAX_TARGETS) return viaClaude(null, 0);
 
     const { ctx, obs } = step;
     const criteria: Record<string, string> = {};
     for (const [id, o] of Object.entries(ACTION_OPTIONS)) criteria[id] = o.description;
     const targetCriteria: Record<string, string> = {};
-    for (const c of candidates) targetCriteria[c.ref] = c.description;
+    for (const c of candidates) targetCriteria[c.target.ref] = c.description;
 
     // Jev reads `state.task` as what to do now; the whole task still frames the action question.
     const task = currentFocus(ctx) ?? ctx.task;
@@ -469,7 +443,7 @@ export class HybridBrain implements DecideFn {
       target_confidence: t.confidence,
       routed: "accepted",
     };
-    const target = targets.find((x) => x.ref === t.choice);
+    const target = candidates.find((c) => c.target.ref === t.choice)?.target;
     if (a.choice === "needs_text" || a.choice === "done") {
       record.routed = a.choice;
     } else if (a.confidence < this.minConfidence || (opt.target && (!target || t.confidence < this.minConfidence))) {
