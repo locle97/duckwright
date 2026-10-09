@@ -10,6 +10,7 @@ export interface Field {
   key: FieldKey; label: string; raw: string; overridden: boolean; error: string | null; effective: string;
   /** The raw text when the form opened: the env cycle keeps it reachable. */
   opened: string;
+  openedOverridden: boolean;
 }
 /** `taskId` null: the global options rather than one task's. */
 export interface FormState { taskId: TaskId | null; fields: Field[]; focus: number; environments: readonly string[] }
@@ -43,7 +44,7 @@ export function openForm(taskId: TaskId | null, effective: Effective, overrides:
     const eff = String(k === "env" ? effective.env ?? NONE : effective[k]);
     const overridden = overrides[k] !== undefined;
     const raw = overridden ? String(k === "env" ? overrides.env ?? NONE : overrides[k]) : eff;
-    return { key: k, label: LABELS[k], raw, overridden, error: overridden ? validate(k, raw) : null, effective: eff, opened: raw };
+    return { key: k, label: LABELS[k], raw, overridden, error: overridden ? validate(k, raw) : null, effective: eff, opened: raw, openedOverridden: overridden };
   });
   return { taskId, fields, focus, environments };
 }
@@ -71,13 +72,16 @@ export function formKey(f: FormState, k: KeyPress): FormState {
     if (!toggle) return f;
     const choices = [NONE, ...f.environments];
     const listed = choices.includes(cur.effective);
-    if (!choices.includes(cur.effective)) choices.unshift(cur.effective);
+    if (!listed) choices.unshift(cur.effective);
     if (!choices.includes(cur.opened)) choices.unshift(cur.opened);
     const next = choices[(choices.indexOf(cur.raw) + 1) % choices.length];
-    // An unlisted effective value (from a path) cannot be saved as a name: landing on it inherits.
-    if (next === cur.effective && !listed) {
-      const reset: Field = { ...cur, raw: cur.effective, overridden: false, error: null };
-      return { ...f, fields: f.fields.map((x, i) => (i === f.focus ? reset : x)) };
+    // Landing back on the opened value restores the opened state. An unlisted effective value
+    // (from a path) cannot be saved as a name, so landing on it inherits unless it was an override.
+    if (next === cur.opened || (next === cur.effective && !listed)) {
+      const back: Field = next === cur.opened && cur.openedOverridden
+        ? { ...cur, raw: next, overridden: true, error: validate("env", next) }
+        : { ...cur, raw: next, overridden: false, error: null };
+      return { ...f, fields: f.fields.map((x, i) => (i === f.focus ? back : x)) };
     }
     return edit(f, next);
   }

@@ -104,7 +104,7 @@ test("form_result_only_overridden", () => {
 test("form_env_field_open", () => {
   const eff = { ...EFF, env: null };
   const last = (o: Parameters<typeof openForm>[2]) => openForm(null, eff, o, 0, ["qa", "staging"]).fields.at(-1);
-  assert.deepEqual(last({}), { key: "env", label: "environment", raw: "none", overridden: false, error: null, effective: "none", opened: "none" });
+  assert.deepEqual(last({}), { key: "env", label: "environment", raw: "none", overridden: false, error: null, effective: "none", opened: "none", openedOverridden: false });
   assert.deepEqual([last({ env: null })?.raw, last({ env: null })?.overridden], ["none", true]);
   assert.deepEqual([last({ env: "qa" })?.raw, last({ env: "qa" })?.overridden], ["qa", true]);
 });
@@ -147,4 +147,13 @@ test("form_env_cycle_back_to_unlisted_effective_resets", () => {
   assert.equal(f.fields[6].raw, "foo");
   assert.equal(f.fields[6].overridden, false);
   assert.deepEqual(formResult(f), { ok: true, overrides: {} });
+});
+
+test("form_env_cycle_keeps_task_override_when_unlisted", () => {
+  let f = openForm(1, { ...EFF, env: "eu" }, { env: "eu" }, 6, ["qa"]);
+  const seen = [f.fields[6].raw];
+  for (let i = 0; i < 3; i++) { f = press(f, "space"); seen.push(f.fields[6].raw); }
+  assert.deepEqual(seen, ["eu", "none", "qa", "eu"]);
+  assert.equal(f.fields[6].overridden, true);
+  assert.deepEqual(formResult(f), { ok: true, overrides: { env: "eu" } });
 });
