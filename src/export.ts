@@ -76,6 +76,7 @@ export interface HistoryStep {
 export interface HistoryData {
   task: string;
   task_file: string | null;
+  env?: { name: string; path: string };
   success: boolean;
   answer: string;
   steps: number;
