@@ -23,6 +23,7 @@ export function OptionsStrip(p: { state: WebState; dispatch(a: Action): void }) 
       {chip("snapshot", eff.snapshot, o.snapshot !== undefined)}
       {chip("video", eff.video ? "on" : "off", o.video !== undefined)}
       {chip("screenshot", eff.screenshot ? "on" : "off", o.screenshot !== undefined)}
+      {chip("jev", eff.jev ? "on" : "off", o.jev !== undefined)}
       {chip("env", envValue(eff.env), o.env !== undefined)}
     </div>
   );

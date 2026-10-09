@@ -43,7 +43,7 @@ test("decide_argv", async () => {
 
 test("decide_parses", async () => {
   const [d, cost] = await new Brain({ systemFiles: [], runner: fakeRunner(env()) }).decide("x");
-  assert.deepEqual(d, { evaluationPreviousGoal: "ok", memory: "m", nextGoal: "g", actions: [{ cmd: "click", args: ["e3"] }] });
+  assert.deepEqual(d, { evaluationPreviousGoal: "ok", memory: "m", nextGoal: "g", actions: [{ cmd: "click", args: ["e3"] }], source: "claude", jev: null });
   assert.equal(cost, 0.01);
 });
 
@@ -257,4 +257,23 @@ test("decide carries the abort signal", async () => {
 test("decide lets AbortedError through", async () => {
   const brain = new Brain({ systemFiles: [], runner: async () => { throw new AbortedError(); } });
   await assert.rejects(brain.decide("p"), (e: unknown) => e instanceof AbortedError);
+});
+
+test("decide ignores the step argument and tags source claude", async () => {
+  const a = fakeRunner(env());
+  const b = fakeRunner(env());
+  const step = {
+    obs: { tabs: "", snapshot: "", truncated: false, lines: 0, chars: 0 },
+    ctx: { step: 2, task: "t", memory: "", historyLines: [], nudged: false, previousFailed: false },
+  };
+  const [d] = await new Brain({ systemFiles: [], runner: a }).decide("p", true, step);
+  await new Brain({ systemFiles: [], runner: b }).decide("p", true);
+  assert.equal(d.source, "claude");
+  assert.equal(d.jev, null);
+  assert.deepEqual(a.calls[0].argv, b.calls[0].argv);
+  assert.equal(a.calls[0].stdin, b.calls[0].stdin);
+});
+
+test("BrainError has jev null by default", () => {
+  assert.equal(new BrainError("x", 1).jev, null);
 });

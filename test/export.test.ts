@@ -523,3 +523,14 @@ test("the_totp_helper_demands_the_env_secret", () => {
   assert.throws(() => new Function("createHmac", "process", "Date", `${TOTP_HELPER}\nreturn totp();`)(
     createHmac, { env: {} }, Date), /set DUCKWRIGHT_TOTP_SECRET to run this test/);
 });
+
+test("export accepts history with jev fields", () => {
+  const jevStep = {
+    ...step([["goto", ["https://example.com/form"], GOTO], ["click", ["e1"], CLICK]]),
+    cost_usd: 0.0000012, source: "jev",
+    jev: { action: "click", action_confidence: 0.93, target: "e1", target_confidence: 0.88, routed: "accepted" },
+  };
+  const plain = run([step([["goto", ["https://example.com/form"], GOTO], ["click", ["e1"], CLICK]])]);
+  const withJev = { ...run([jevStep]), jev_steps: 1, claude_steps: 0 } as HistoryData;
+  assert.equal(renderSpec(withJev).spec, renderSpec(plain).spec);
+});

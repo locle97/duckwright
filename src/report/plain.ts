@@ -19,6 +19,7 @@ export function printOutcome(o: RunOutcome, out: (l: string) => void, err: (l: s
   out(`Result: ${o.success ? "success" : "failure"}`);
   out(`Answer: ${o.answer}`);
   out(`Steps: ${o.steps}  Cost: $${fixed4(o.costUsd)}`);
+  if (o.jevSteps !== undefined) out(`Jev steps: ${o.jevSteps}/${o.steps}`);
   out(`History: ${o.historyPath}`);
   if (o.video && o.historyPath) out(`Video: ${path.join(path.dirname(o.historyPath), o.video)}`);
   for (const w of o.warnings) err(`warning: ${w}`);

@@ -10,6 +10,7 @@ import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
 import { EnvError, loadEnvironment } from "../environment.ts";
+import { HybridBrain, JevAuthError, JevClient } from "../jev.ts";
 import { ExportError, exportRun } from "../export.ts";
 import type { HistoryData } from "../export.ts";
 import type { Evidence } from "../evidence.ts";
@@ -83,6 +84,7 @@ export function historyJson(
   history: StepRecord[], taskFile: string | null = null, video: string | null = null,
   env: { name: string; path: string } | null = null,
 ): HistoryData {
+  const jevSteps = history.filter((r) => r.decision.source === "jev").length;
   return {
     task,
     task_file: taskFile,
@@ -91,6 +93,8 @@ export function historyJson(
     answer,
     steps,
     cost_usd: costUsd,
+    jev_steps: jevSteps,
+    claude_steps: history.length - jevSteps,
     ...(video !== null ? { video } : {}),
     history: history.map((r) => ({
       step: r.step,
@@ -103,6 +107,9 @@ export function historyJson(
         code: i < r.codes.length ? r.codes[i] : null,
       })),
       results: [...r.results],
+      cost_usd: r.costUsd ?? 0,
+      source: r.decision.source ?? "claude",
+      jev: r.decision.jev ?? null,
       ...(r.screenshot ? { screenshot: r.screenshot } : {}),
       ...(r.screenshotError ? { screenshot_error: r.screenshotError } : {}),
       ...(r.network ? { network: r.network } : {}),
@@ -167,12 +174,18 @@ async function execute(
     if (env) envRecord = { name: env.name, path: env.path };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
-    const brain = new Brain({
+    const claude = new Brain({
       systemFiles: [deps.prompts.system, modeMd, args.skill],
       model: args.model,
       snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
       signal,
     });
+    const brain = args.jev
+      ? new HybridBrain({
+        jev: new JevClient({ apiKey: ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim(), signal }),
+        claude, minConfidence: args.jevThreshold,
+      })
+      : claude;
     const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     const twofa = createTwoFactor({
       secret: (deps.env ?? process.env)[SECRET_ENV] ?? null,
@@ -203,6 +216,8 @@ async function execute(
       message = `playwright error: ${e.message}`;
     } else if (e instanceof EnvError) {
       message = e.message;
+    } else if (e instanceof JevAuthError) {
+      message = "jev error: invalid TYPESAFE_API_KEY";
     } else {
       message = errorText(e);
     }
@@ -245,7 +260,9 @@ async function execute(
     return {
       status: ok ? "pass" : "fail", exitCode: ok ? 0 : 1, success: ok,
       answer: error ?? result.answer, steps: result.steps, costUsd: result.costUsd,
-      historyPath, export: exported, warnings, ...(ev.video !== null ? { video: ev.video } : {}), error,
+      historyPath, export: exported, warnings, ...(ev.video !== null ? { video: ev.video } : {}),
+      ...(args.jev ? { jevSteps: result.history.filter((r) => r.decision.source === "jev").length } : {}),
+      error,
     };
   }
 }

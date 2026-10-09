@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "arena": {
+      "source": "michael-denyer/pstack-claude",
+      "sourceType": "github",
+      "skillPath": "plugins/pstack/skills/arena/SKILL.md",
+      "computedHash": "d3259862cde3e0d15b9fc7dfde15934d409656cee5ed230e219a9f39f7f3210d"
+    },
     "subagent-driven-development": {
       "source": "obra/superpowers",
       "sourceType": "github",

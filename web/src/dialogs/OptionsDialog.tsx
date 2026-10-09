@@ -11,7 +11,7 @@ import type { WebState } from "../store.ts";
 import { Button, Modal } from "../ui.tsx";
 
 type Draft = {
-  model: string; maxSteps: string; headed: string; snapshot: string; video: boolean | null; screenshot: boolean | null; env: string;
+  model: string; maxSteps: string; headed: string; snapshot: string; jev: string; video: boolean | null; screenshot: boolean | null; env: string;
 };
 
 /** Options for one task (`taskId`) or, with null, the global options. An empty field inherits. */
@@ -23,7 +23,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
   const onOff = (v: boolean | undefined): string => (v === undefined ? "" : v ? "on" : "off");
   const [draft, setDraft] = useState<Draft>({
     model: overrides.model ?? "", maxSteps: overrides.maxSteps === undefined ? "" : String(overrides.maxSteps),
-    headed: onOff(overrides.headed), snapshot: overrides.snapshot ?? "",
+    headed: onOff(overrides.headed), snapshot: overrides.snapshot ?? "", jev: onOff(overrides.jev),
     video: overrides.video ?? null, screenshot: overrides.screenshot ?? null, env: envDraft(overrides),
   });
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
   if (!effective || !inherited || (p.taskId !== null && !task)) return null;
 
   const close = (): void => p.dispatch({ type: "dialog", value: null });
-  const set = (k: "model" | "maxSteps" | "headed" | "snapshot", v: string): void => {
+  const set = (k: "model" | "maxSteps" | "headed" | "snapshot" | "jev", v: string): void => {
     setDraft({ ...draft, [k]: v });
     setError(null);
   };
@@ -46,6 +46,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
     }
     if (draft.headed !== "") o.headed = draft.headed === "on";
     if (draft.snapshot !== "") o.snapshot = draft.snapshot;
+    if (draft.jev !== "") o.jev = draft.jev === "on";
     Object.assign(o, evidenceBody(draft));
     Object.assign(o, envBody(draft.env));
     setBusy(true);
@@ -54,7 +55,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
     if (r.ok) close();
     else setError(r.error);
   };
-  const onOffSelect = (k: "headed", label: string, now: boolean) => (
+  const onOffSelect = (k: "headed" | "jev", label: string, now: boolean) => (
     <div className="field">
       <label htmlFor={`opt-${k}`}>{label}</label>
       <select id={`opt-${k}`} value={draft[k]} onChange={(e) => set(k, e.target.value)}>
@@ -71,7 +72,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
       onClose={close}
       footer={
         <>
-          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "", video: null, screenshot: null, env: "" })}>Reset all</Button>
+          <Button onClick={() => setDraft({ model: "", maxSteps: "", headed: "", snapshot: "", jev: "", video: null, screenshot: null, env: "" })}>Reset all</Button>
           <Button onClick={close}>Cancel</Button>
           <Button kind="green" disabled={busy} onClick={() => void save()}>Save</Button>
         </>
@@ -95,6 +96,7 @@ export function OptionsDialog(p: { state: WebState; taskId: TaskId | null; dispa
           <option value="grep">grep</option>
         </select>
       </div>
+      {onOffSelect("jev", "jev", effective.jev)}
       <div className="field">
         <label htmlFor="opt-env">environment</label>
         <select id="opt-env" value={draft.env} onChange={(e) => { setDraft({ ...draft, env: e.target.value }); setError(null); }}>

@@ -10,6 +10,9 @@ import type { AgentOptions, RunResult } from "../../src/loop.ts";
 import type { StepRecord } from "../../src/prompt.ts";
 import { AbortedError } from "../../src/proc.ts";
 import type { Human } from "../../src/twofa.ts";
+import { Brain } from "../../src/brain.ts";
+import type { JevRecord } from "../../src/brain.ts";
+import { HybridBrain, JevAuthError, JevClient } from "../../src/jev.ts";
 import { PROMPTS, historyJson, startRun } from "../../src/runs/run.ts";
 import type { AgentLike, RunDeps, RunSpec } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
@@ -20,7 +23,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, env: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, ...over,
+    session: "s-1", state: null, env: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, ...over,
   };
 }
 
@@ -40,10 +43,10 @@ function agentWith(run: (opts: AgentOptions, agent: AgentLike) => Promise<RunRes
   };
 }
 
-function setup(createAgent: RunDeps["createAgent"], over: Partial<RunArgs> = {}, signal = new AbortController().signal) {
+function setup(createAgent: RunDeps["createAgent"], over: Partial<RunArgs> = {}, signal = new AbortController().signal, env?: Record<string, string | undefined>) {
   const tmp = tmpDir();
   const spec: RunSpec = { task: "task", taskFile: null, args: args(over) };
-  const deps: RunDeps = { prompts: PROMPTS, signal, createAgent, runsDir: path.join(tmp, "runs") };
+  const deps: RunDeps = { prompts: PROMPTS, signal, createAgent, runsDir: path.join(tmp, "runs"), ...(env ? { env } : {}) };
   return { tmp, spec, deps };
 }
 
@@ -231,7 +234,7 @@ test("history_json_network_keys", async () => {
   const h = startRun(spec, deps);
   await h.done;
   const s = stepKeys(readHistory(h.workdir));
-  assert.deepEqual(Object.keys(s).slice(-3), ["results", "network", "network_errors"]);
+  assert.deepEqual(Object.keys(s).slice(-6), ["results", "cost_usd", "source", "jev", "network", "network_errors"]);
   assert.deepEqual(s.network, [NET]);
   assert.deepEqual(s.network_errors, ["requests: boom"]);
 });
@@ -455,4 +458,67 @@ test("run_start_env_failure_fails_run", async () => {
     assert.equal(created, 0);
     assert.ok(!("env" in readHistory(h.workdir)));
   });
+});
+
+const JEV_REC: JevRecord = { action: "click", action_confidence: 0.93, target: "e1236", target_confidence: 0.88, routed: "accepted" };
+
+test("startRun builds HybridBrain with --jev", async () => {
+  let seen: AgentOptions | null = null;
+  const a = setup(agentWith(async (opts) => { seen = opts; return result(true); }), { jev: true, jevThreshold: 0.9 }, undefined, { TYPESAFE_API_KEY: " k " });
+  await startRun(a.spec, a.deps).done;
+  const brain = (seen as unknown as AgentOptions).brain as unknown as HybridBrain;
+  assert.ok(brain instanceof HybridBrain);
+  assert.equal(brain.minConfidence, 0.9);
+  assert.equal((brain.jev as JevClient).apiKey, "k");
+  assert.ok(brain.claude instanceof Brain);
+
+  let seen2: AgentOptions | null = null;
+  const b = setup(agentWith(async (opts) => { seen2 = opts; return result(true); }), { jev: false });
+  await startRun(b.spec, b.deps).done;
+  assert.ok((seen2 as unknown as AgentOptions).brain instanceof Brain);
+});
+
+test("history json jev fields, non-jev run", () => {
+  const h = historyJson("t", true, "a", 1, 0, [rec()]);
+  assert.deepEqual(Object.keys(h.history[0]).slice(-4), ["results", "cost_usd", "source", "jev"]);
+  assert.equal(h.history[0].cost_usd, 0);
+  assert.equal(h.history[0].source, "claude");
+  assert.equal(h.history[0].jev, null);
+  const keys = Object.keys(h);
+  assert.deepEqual(keys.slice(keys.indexOf("cost_usd"), keys.indexOf("cost_usd") + 3), ["cost_usd", "jev_steps", "claude_steps"]);
+  assert.equal(h.jev_steps, 0);
+  assert.equal(h.claude_steps, 1);
+});
+
+test("history json jev fields, jev run", () => {
+  const d = (source: "jev" | "claude", jev: JevRecord | null) =>
+    ({ ...rec().decision, source, jev });
+  const h = historyJson("t", true, "a", 3, 0.5, [
+    { ...rec(), decision: d("jev", JEV_REC), costUsd: 0.0000012 },
+    { ...rec(), step: 2, decision: d("claude", null), costUsd: 0.5 },
+    { ...rec(), step: 3, decision: d("claude", { ...JEV_REC, action: null, routed: "error: jev http 500" }), costUsd: 0 },
+  ]);
+  assert.equal(h.jev_steps, 1);
+  assert.equal(h.claude_steps, 2);
+  assert.equal(h.history[0].cost_usd, 0.0000012);
+  assert.equal(h.history[0].source, "jev");
+  assert.deepEqual(h.history[0].jev, JEV_REC);
+  assert.equal(h.history[2].jev?.routed, "error: jev http 500");
+});
+
+test("jev auth error maps to message", async () => {
+  const { spec, deps } = setup(agentWith(async (opts) => { step(opts, rec()); throw new JevAuthError(); }), { jev: true }, undefined, { TYPESAFE_API_KEY: "k" });
+  const h = startRun(spec, deps);
+  const o = await h.done;
+  assert.equal(o.error, "jev error: invalid TYPESAFE_API_KEY");
+  assert.equal(o.exitCode, 1);
+  assert.equal(readHistory(h.workdir).history.length, 1);
+});
+
+test("outcome jevSteps only with --jev", async () => {
+  const jr: StepRecord = { ...rec(), decision: { ...rec().decision, source: "jev", jev: JEV_REC } };
+  const a = setup(agentWith(async () => result(true, [jr])), { jev: true }, undefined, { TYPESAFE_API_KEY: "k" });
+  assert.equal((await startRun(a.spec, a.deps).done).jevSteps, 1);
+  const b = setup(agentWith(async () => result(true, [jr])));
+  assert.equal("jevSteps" in (await startRun(b.spec, b.deps).done), false);
 });

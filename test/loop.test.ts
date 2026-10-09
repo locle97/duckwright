@@ -4,13 +4,15 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { BrainError } from "../src/brain.ts";
-import type { Decision } from "../src/brain.ts";
+import type { Decision, StepInput } from "../src/brain.ts";
 import { RunControl } from "../src/control.ts";
 import { RunEvents } from "../src/events.ts";
 import type { RunEvent } from "../src/events.ts";
+import { JevAuthError, JevError, HybridBrain } from "../src/jev.ts";
 import { Agent } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { ProcResult } from "../src/proc.ts";
+import { historyLines } from "../src/prompt.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../src/pw.ts";
 import { createTwoFactor } from "../src/twofa.ts";
@@ -71,15 +73,17 @@ class SizedPW extends FakePW {
 class FakeBrain {
   prompts: string[] = [];
   greps: boolean[] = [];
+  steps: (StepInput | undefined)[] = [];
   script: (Decision | Error)[];
 
   constructor(script: (Decision | Error)[]) {
     this.script = script;
   }
 
-  async decide(prompt: string, grep = true): Promise<[Decision, number]> {
+  async decide(prompt: string, grep = true, step?: StepInput): Promise<[Decision, number]> {
     this.prompts.push(prompt);
     this.greps.push(grep);
+    this.steps.push(step);
     const item = this.script[Math.min(this.prompts.length - 1, this.script.length - 1)];
     if (item instanceof Error) throw item;
     return [item, 0.5];
@@ -765,4 +769,97 @@ test("agent_environment_in_every_step_prompt", async () => {
   const without = new FakeBrain(script);
   await agent(new FakePW(), without, { maxSteps: 3 }).run();
   assert.ok(without.prompts.every((p) => !p.includes("<environment>")));
+});
+
+test("decide receives StepInput", async () => {
+  const pw = new FakePW();
+  const brain = new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]);
+  const r = await agent(pw, brain).run();
+  const [s1, s2] = brain.steps;
+  assert.equal(s1!.ctx.step, 1);
+  assert.equal(s1!.ctx.task, "t");
+  assert.equal(s1!.ctx.memory, "");
+  assert.deepEqual(s1!.ctx.historyLines, []);
+  assert.equal(s1!.ctx.nudged, false);
+  assert.equal(s1!.ctx.previousFailed, false);
+  assert.equal(s1!.obs.snapshot, "- page");
+  assert.deepEqual(s2!.ctx.historyLines, historyLines(r.history.slice(0, 1)));
+  assert.equal(s2!.ctx.memory, "m");
+});
+
+test("StepInput is scrubbed", async () => {
+  class LeakPW extends FakePW {
+    override async snapshot(_p: string): Promise<string> {
+      return `- button "${TF_SECRET}" [ref=e1]`;
+    }
+  }
+  const leakyDec = dec([["hover", ["e1"]]], `memo ${TF_SECRET}`);
+  const brain = new FakeBrain([leakyDec, dec([["done", ["success", "ok"]]])]);
+  const secretTask = `do ${TF_SECRET}`;
+  await agent(new LeakPW({ runStdout: `tab ${TF_SECRET}` }), brain, { twofa: twofa(), task: secretTask }).run();
+  for (const s of brain.steps) {
+    const blob = JSON.stringify([s!.ctx.task, s!.ctx.memory, s!.ctx.historyLines, s!.obs.tabs, s!.obs.snapshot]);
+    assert.ok(!blob.includes(TF_SECRET), "no secret");
+  }
+  assert.match(brain.steps[1]!.obs.snapshot, /^- button ".+" \[ref=e1\]$/);
+  assert.notEqual(brain.steps[1]!.obs.snapshot, `- button "${TF_SECRET}" [ref=e1]`);
+});
+
+test("nudged flag", async () => {
+  const brain = new FakeBrain([dec([["hover", ["e1"]]])]);
+  await agent(new FakePW(), brain, { maxSteps: 4 }).run();
+  assert.deepEqual(brain.steps.map((s) => s!.ctx.nudged), [false, false, false, true]);
+});
+
+test("previousFailed flag", async () => {
+  const failing = new FakeBrain([dec([["bogus", []]]), dec([["hover", ["e1"]]])]);
+  await agent(new FakePW(), failing, { maxSteps: 2 }).run();
+  assert.equal(failing.steps[1]!.ctx.previousFailed, true);
+  const brainErr = new FakeBrain([new BrainError("x"), dec([["hover", ["e1"]]])]);
+  await agent(new FakePW(), brainErr, { maxSteps: 2 }).run();
+  assert.equal(brainErr.steps[1]!.ctx.previousFailed, true);
+  const ok = new FakeBrain([dec([["hover", ["e1"]]]), dec([["hover", ["e1"]]])]);
+  await agent(new FakePW(), ok, { maxSteps: 2 }).run();
+  assert.equal(ok.steps[1]!.ctx.previousFailed, false);
+});
+
+test("costUsd on records", async () => {
+  const brain = new FakeBrain([new BrainError("x", 0.25), dec([["done", ["success", "ok"]]])]);
+  const r = await agent(new FakePW(), brain).run();
+  assert.equal(r.history[0].costUsd, 0.25);
+  assert.equal(r.history[0].decision.source, "claude");
+  assert.equal(r.history[0].decision.jev, null);
+  assert.equal(r.history[1].costUsd, 0.5);
+});
+
+test("brain error record carries jev", async () => {
+  const e = new BrainError("x");
+  e.jev = { action: "click", action_confidence: 0.5, target: "e1", target_confidence: 0.4, routed: "low_confidence" };
+  const r = await agent(new FakePW(), new FakeBrain([e, dec([["done", ["success", "ok"]]])])).run();
+  assert.deepEqual(r.history[0].decision.jev, e.jev);
+});
+
+test("JevError does not count as a failure", async () => {
+  let asked = 0;
+  const claude = new FakeBrain([dec([["click", ["e1"]]]), dec([["done", ["success", "ok"]]])]);
+  const brain = new HybridBrain({
+    jev: { ask: async () => { asked += 1; throw new JevError("jev http 500", 0); } },
+    claude,
+  });
+  class BtnPW extends FakePW {
+    override async snapshot(_p: string): Promise<string> {
+      return '- button "B" [ref=e1]';
+    }
+  }
+  const r = await new Agent({ task: "t", pw: new BtnPW(), brain, workdir: tmpDir(), maxFailures: 1 }).run();
+  assert.equal(r.success, true);
+  assert.equal(r.answer, "ok");
+  assert.equal(asked, 1);
+  assert.ok(r.history.every((h) => !h.results.some((x) => x.startsWith("brain error:"))));
+});
+
+test("JevAuthError stops the run", async () => {
+  const pw = new FakePW();
+  await assert.rejects(agent(pw, new FakeBrain([new JevAuthError()])).run(), JevAuthError);
+  assert.equal(pw.closed, 1);
 });

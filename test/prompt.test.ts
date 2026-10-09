@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { Action, Decision } from "../src/brain.ts";
 import type { Observation } from "../src/observe.ts";
-import { HISTORY_WINDOW, buildPrompt, stepLine } from "../src/prompt.ts";
+import { HISTORY_WINDOW, buildPrompt, historyLines, latestClaudeGoal, stepLine } from "../src/prompt.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { ROOT } from "./helpers.ts";
 
@@ -187,4 +187,24 @@ When the prompt has an \`<environment>\` section, it is the user's description o
   for (const h of ["Base URL", "Test accounts", "Seeded data", "Feature flags", "Known quirks", "Off-limits"]) {
     assert.ok(new RegExp(`^#+\\s*${h}\\s*$`, "m").test(text), h);
   }
+});
+
+test("historyLines returns stepLines of the last window", () => {
+  const recs = Array.from({ length: 17 }, (_, i) => rec(i + 1));
+  const lines = historyLines(recs);
+  assert.equal(lines.length, 16);
+  assert.equal(lines[0], "(2 earlier steps omitted)");
+  assert.deepEqual(lines.slice(1), recs.slice(2).map(stepLine));
+  assert.deepEqual(historyLines([]), []);
+  assert.deepEqual(historyLines([rec(1), rec(2), rec(3)], 0), ["(3 earlier steps omitted)"]);
+});
+
+test("latestClaudeGoal is the previous step's goal, empty after a jev step or without a goal", () => {
+  const jev = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "jev: x", source: "jev" } });
+  const failed = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "" } });
+  assert.equal(latestClaudeGoal([rec(1), rec(2)]), "goal2");
+  // An older Claude goal would be stale after a jev step.
+  assert.equal(latestClaudeGoal([rec(1), jev(2)]), "");
+  assert.equal(latestClaudeGoal([rec(1), failed(2)]), "");
+  assert.equal(latestClaudeGoal([]), "");
 });

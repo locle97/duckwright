@@ -941,8 +941,14 @@ test("app_replay_error_toast", async () => {
 test("options_pane_and_detail_show_environment", async () => {
   const m = new FakeManager([snapshot(1, "First")]);
   m.globalsValue = { base: { ...snapshot(1, "x").effective, env: "staging" }, overrides: {}, environments: ["staging"] };
-  const t = mount(m, { columns: 100, rows: 40 });
+  const t = mount(m, { columns: 100, rows: 48 });
   await settle();
   assert.match(t.frame(), /environment +staging/, "the options pane row");
   assert.match(t.frame(), /environment +none/, "the idle task detail row");
+});
+
+test("app_detail_lists_jev_setting", async () => {
+  const t = mount(new FakeManager([snapshot(1, "First")]));
+  await settle();
+  assert.match(t.frame(), /jev +false/);
 });

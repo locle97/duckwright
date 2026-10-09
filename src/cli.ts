@@ -169,7 +169,10 @@ function preflight(deps: CliDeps, skill: string, state: string | null, env: stri
 const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : null);
 
 function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
-  return preflight(deps, args.skill, statePath(args), args.env);
+  const err = preflight(deps, args.skill, statePath(args), args.env);
+  if (err) return err;
+  if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
+  return null;
 }
 
 function exportSpec(deps: CliDeps, run: string, out: string | null = null, api = false): string {

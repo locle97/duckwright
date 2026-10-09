@@ -18,6 +18,7 @@ export interface StepRecord {
   requestOrigins?: (string | null)[];
   screenshot?: string;
   screenshotError?: string;
+  costUsd?: number;
 }
 
 /** One history line: `step N | evaluation | next goal | cmd args → result; ...`. */
@@ -32,6 +33,23 @@ export function stepLine(rec: StepRecord): string {
     }).join("; ")
     : results.join("; ");
   return `step ${rec.step} | ${flat(d.evaluationPreviousGoal)} | ${flat(d.nextGoal)} | ${acts}`;
+}
+
+export function historyLines(history: StepRecord[], window = HISTORY_WINDOW): string[] {
+  const shown = window > 0 ? history.slice(-window) : [];
+  const omitted = history.length - shown.length;
+  const lines = shown.map(stepLine);
+  if (omitted) lines.unshift(`(${omitted} earlier steps omitted)`);
+  return lines;
+}
+
+/**
+ * The goal Claude set at the previous step ("" when that step was Jev's, which only echoes its own
+ * move, or set no goal). An older goal would be stale, so none is looked for.
+ */
+export function latestClaudeGoal(history: StepRecord[]): string {
+  const d = history.at(-1)?.decision;
+  return d && d.source !== "jev" ? flat(d.nextGoal) : "";
 }
 
 function section(tag: string, body: string): string {
@@ -54,10 +72,7 @@ export function buildPrompt(
   obs: Observation,
   { window = HISTORY_WINDOW, nudge = null, paste = true, environment = null }: PromptOptions = {},
 ): string {
-  const shown = window > 0 ? history.slice(-window) : [];
-  const omitted = history.length - shown.length;
-  const lines = shown.map(stepLine);
-  if (omitted) lines.unshift(`(${omitted} earlier steps omitted)`);
+  const lines = historyLines(history, window);
   const parts = [
     `Step ${step}/${maxSteps}`,
     section("task", task),

@@ -17,6 +17,7 @@ test("defaults", () => {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", env: null,
     print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
+    jev: false, jevThreshold: 0.8,
   });
 });
 
@@ -31,7 +32,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep", env: null,
-    print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
+    print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8,
   });
 });
 
@@ -370,4 +371,64 @@ test("args_env_usage_and_help", () => {
     + "                        (or of the .md file at path ENV) is put into every\n"
     + "                        step's prompt; none = no environment\n",
   ));
+});
+
+test("jev defaults", () => {
+  const a = parse("t");
+  assert.equal(a.jev, false);
+  assert.equal(a.jevThreshold, 0.8);
+});
+
+test("jev and no-jev, later wins", () => {
+  assert.equal(parse("--jev", "t").jev, true);
+  assert.equal(parse("--jev", "--no-jev", "t").jev, false);
+  assert.equal(parse("--no-jev", "--jev", "t").jev, true);
+  assert.equal(args(parseRunArgs(["--no-jev", "t"], "/skill.md", { jev: true })).jev, false);
+  assert.equal(args(parseRunArgs(["t"], "/skill.md", { jev: true })).jev, true);
+});
+
+test("jev-threshold values", () => {
+  assert.equal(parse("--jev-threshold", "0.9", "t").jevThreshold, 0.9);
+  assert.equal(parse("--jev-threshold=1", "t").jevThreshold, 1);
+  assert.equal(parse("--jev-threshold", ".5", "t").jevThreshold, 0.5);
+  assert.equal(parse("--jev-threshold", " 0.7 ", "t").jevThreshold, 0.7);
+  const a = parse("--jev-threshold", "0.6", "t");
+  assert.equal(a.jev, false);
+  assert.equal(a.jevThreshold, 0.6);
+  assert.equal(args(parseRunArgs(["t"], "/skill.md", { jevThreshold: 0.5 })).jevThreshold, 0.5);
+});
+
+test("jev-threshold invalid float", () => {
+  for (const v of ["abc", "1e-1", "nan", "inf", "-0.5"]) {
+    assert.throws(() => parse("--jev-threshold", v, "t"), usage(`argument --jev-threshold: invalid float value: '${v}'`));
+  }
+});
+
+test("jev-threshold out of range", () => {
+  for (const v of ["0", "0.0", "1.5"]) {
+    assert.throws(() => parse("--jev-threshold", v, "t"), usage("argument --jev-threshold: must be greater than 0 and at most 1"));
+  }
+});
+
+test("jev-threshold missing value", () => {
+  assert.throws(() => parse("--jev-threshold"), usage("argument --jev-threshold: expected one argument"));
+});
+
+test("jev explicit argument", () => {
+  assert.throws(() => parse("--jev=x", "t"), usage("argument --jev/--no-jev: ignored explicit argument 'x'"));
+});
+
+test("usage and help mention jev", () => {
+  assert.ok(RUN_USAGE.includes("[--twofa-timeout SEC]\n                  [--jev | --no-jev] [--jev-threshold FLOAT]\n"));
+  const block = "                        most 2147483)\n"
+    + "  --jev, --no-jev       cheaper brain: TypeSafe's Jev picks the command and\n"
+    + "                        element on steps it is sure of, Claude decides the\n"
+    + "                        rest. Needs TYPESAFE_API_KEY. Sends the task, page\n"
+    + "                        snapshots and history to TypeSafe (default off)\n"
+    + "  --jev-threshold FLOAT\n"
+    + "                        with --jev: the confidence Jev needs for its choice\n"
+    + "                        to be used, greater than 0 and at most 1 (default\n"
+    + "                        0.8)\n"
+    + "  --snapshot-hybrid ";
+  assert.ok(RUN_HELP.includes(block));
 });

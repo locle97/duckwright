@@ -26,8 +26,8 @@ export type PlanId = number;
 /** `planning`: the planner is splitting the plan; `ready`: its tasks are in the list; `failed`: planning failed or was cancelled. */
 export type PlanState = "planning" | "ready" | "failed";
 export type TaskState = "idle" | "running" | "paused" | "passed" | "failed" | "stopping" | "stopped";
-export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean; env?: string | null }
-export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean; env: string | null }
+export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean; jev?: boolean; env?: string | null }
+export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean; jev: boolean; env: string | null }
 /** The options every task's next run starts from: `base` is the defaults and flags, `overrides` the edits on top. */
 export interface Globals { base: Effective; overrides: Overrides; environments: string[] }
 export type TaskSource = { kind: "typed" } | { kind: "file"; path: string };
@@ -169,7 +169,7 @@ export function taskName(text: string, max = 40): string {
 }
 
 function effectiveOf(a: RunArgs): Effective {
-  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot, env: envLabel(a.env) };
+  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot, jev: a.jev, env: envLabel(a.env) };
 }
 
 interface RunRecord {
@@ -306,7 +306,8 @@ export class RunManager implements ManagerLike {
       }
     });
     if (errors.length > 0) return { ok: false, errors };
-    const seen = new Set(this.#tasks.flatMap((t) => (t.source.kind === "file" ? [resolvePath(t.source.path)] : [])));
+    // Past runs are history, separate from tasks: they never block adding the same file again.
+    const seen = new Set(this.#tasks.flatMap((t) => (t.source.kind === "file" && !t.past ? [resolvePath(t.source.path)] : [])));
     const added: TaskId[] = [];
     const duplicates: string[] = [];
     for (const { path: p, tf } of files) {
@@ -866,6 +867,7 @@ export class RunManager implements ManagerLike {
       if (o.snapshot !== undefined) args.snapshot = o.snapshot;
       if (o.video !== undefined) args.video = o.video;
       if (o.screenshot !== undefined) args.screenshot = o.screenshot;
+      if (o.jev !== undefined) args.jev = o.jev;
       if (o.env !== undefined) args.env = o.env === ENV_NONE ? null : o.env;
     }
     if (args.env !== null && (isEnvName(args.env) || isEnvPath(args.env))) args.env = resolveEnv(args.env, this.#cwd()).path;

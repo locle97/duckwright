@@ -98,7 +98,7 @@ test("manager_globals_layering", () => {
   const b = mgr.addTyped("b");
   mgr.setOverrides(b, { model: "haiku" });
   assert.deepEqual(mgr.globals(), {
-    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: null }, overrides: {}, environments: [],
+    base: { model: "opus", maxSteps: 9, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false, env: null }, overrides: {}, environments: [],
   });
   events.length = 0;
   mgr.setGlobals({ model: "sonnet", headed: true });
@@ -616,13 +616,17 @@ test("manager_rerun_past_task", async () => {
   assert.match(mgr.summary().lines[1] ?? "", /^pass  a\.md  /);
 });
 
-test("manager_past_file_duplicate", () => {
+test("manager_past_file_not_duplicate", () => {
   const dir = tree({ "a.md": "A" });
   const file = `${dir}/a.md`;
   const { mgr } = setup({ cwd: dir, past: [pastRun("20260101-000000-a", "pass", { source: { kind: "file", path: file } })] });
   const r = mgr.add({ mentions: [file], typed: null });
-  assert.deepEqual(r, { ok: true, added: [], duplicates: ["a.md"] });
-  assert.equal(mgr.list().length, 1);
+  assert.equal(r.ok && r.added.length, 1);
+  assert.deepEqual(r.ok && r.duplicates, []);
+  assert.equal(mgr.list().length, 2);
+  // a second add of the same file is still a duplicate of the live task
+  const again = mgr.add({ mentions: [file], typed: null });
+  assert.deepEqual(again, { ok: true, added: [], duplicates: ["a.md"] });
 });
 
 test("manager_notify_emits_toast", () => {
@@ -881,7 +885,7 @@ test("manager_globals_environments_and_env_label", () => {
   const dir = tree({ "environments/qa.md": "q", "environments/staging.md": "s" });
   const { mgr } = setup({ cwd: dir, argv: ["--env", "staging"] });
   assert.deepEqual(mgr.globals(), {
-    base: { model: mgr.globals().base.model, maxSteps: mgr.globals().base.maxSteps, headed: false, snapshot: "hybrid", video: false, screenshot: false, env: "staging" },
+    base: { model: mgr.globals().base.model, maxSteps: mgr.globals().base.maxSteps, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false, env: "staging" },
     overrides: {},
     environments: ["qa", "staging"],
   });
@@ -951,4 +955,29 @@ test("manager_bad_env_override_does_not_throw_in_snapshot", () => {
   mgr.setOverrides(id, { env: ".bad" });
   assert.doesNotThrow(() => mgr.list());
   assert.equal(mgr.effectiveArgs(id).env, ".bad");
+});
+
+test("jev override reaches run args", () => {
+  const { mgr } = setup();
+  const id = mgr.addTyped("a");
+  mgr.setGlobals({ jev: true });
+  assert.equal(mgr.effectiveArgs(id).jev, true);
+  assert.equal(mgr.list()[0].effective.jev, true);
+  assert.equal(mgr.list()[0].inherited.jev, true);
+  mgr.setOverrides(id, { jev: false });
+  assert.equal(mgr.effectiveArgs(id).jev, false);
+  assert.equal(mgr.list()[0].inherited.jev, true);
+  assert.equal(setup().mgr.globals().base.jev, false);
+  assert.equal(setup({ argv: ["--jev"] }).mgr.globals().base.jev, true);
+});
+
+test("jev on without key fails preflight", () => {
+  const msg = "TYPESAFE_API_KEY is not set (needed by --jev)";
+  const { mgr, events } = setup({ preflight: (a) => (a.jev ? msg : null) });
+  const id = mgr.addTyped("t");
+  mgr.setOverrides(id, { jev: true });
+  events.length = 0;
+  assert.deepEqual(mgr.start(id), { ok: false, reason: msg });
+  assert.equal(mgr.list()[0].error, msg);
+  assert.ok(events.some((e) => e.type === "toast" && e.level === "error" && e.message === msg));
 });

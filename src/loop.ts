@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { execute } from "./actions.ts";
 import { BrainError } from "./brain.ts";
-import type { DecideFn } from "./brain.ts";
+import type { DecideFn, StepInput } from "./brain.ts";
 import { RunControl } from "./control.ts";
 import { RunEvents } from "./events.ts";
 import { startVideo, stopVideo, takeScreenshot } from "./evidence.ts";
@@ -11,7 +11,7 @@ import { captureStep, clearRequests, currentOrigin, networkDir } from "./network
 import { observe, pageDir, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { AbortedError } from "./proc.ts";
-import { buildPrompt } from "./prompt.ts";
+import { buildPrompt, historyLines, latestClaudeGoal } from "./prompt.ts";
 import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RequestCallContext } from "./request.ts";
@@ -173,8 +173,21 @@ export class Agent {
       this.events.emit({ type: "phase", step, phase: "thinking" });
       let decision;
       let cost;
+      const previousFailed = (history.at(-1)?.results ?? []).some((r) => r.startsWith("error:") || r.startsWith("brain error:"));
+      const stepInput: StepInput = {
+        obs: { ...obs, tabs: this.scrub(obs.tabs), snapshot: this.scrub(obs.snapshot) },
+        ctx: {
+          step,
+          task: this.scrub(this.task),
+          memory: this.scrub(memory),
+          historyLines: historyLines(history).map(this.scrub),
+          goal: this.scrub(latestClaudeGoal(history)),
+          nudged: nudge !== null,
+          previousFailed,
+        },
+      };
       try {
-        [decision, cost] = await this.brain.decide(prompt, !paste);
+        [decision, cost] = await this.brain.decide(prompt, !paste, stepInput);
       } catch (e) {
         if (!(e instanceof BrainError)) throw e;
         this.costUsd += e.cost;
@@ -185,9 +198,10 @@ export class Agent {
         if (this.network) await clearRequests(this.pw);
         await this.record(history, {
           step,
-          decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [] },
+          decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [], source: "claude", jev: e.jev },
           results: [`brain error: ${e.message}`],
           codes: [],
+          costUsd: e.cost,
         }, e.cost, startedAt);
         if (failures >= this.maxFailures) {
           return {
@@ -219,6 +233,7 @@ export class Agent {
       }, requestCtx, callCtx, this.twofa ?? null);
       const rec: StepRecord = {
         step, decision, results: results.map(this.scrub), codes: codes.map((c) => (c === null ? null : this.scrub(c))),
+        costUsd: cost,
       };
       if (origins.some((o) => o !== null)) rec.requestOrigins = origins;
       if (this.network) {
