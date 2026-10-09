@@ -1538,7 +1538,7 @@ test("cli_env_batch_errors_prefixed", async () => {
   const a = taskFile(e.tmp, "---\nenv: ma\n---\nA\n", "a.md");
   const b = taskFile(e.tmp, "---\nenv: mb\n---\nB\n", "b.md");
   assert.equal(await main(["-p", "--skill", e.argv[2], "-f", a, b], e.deps()), 2);
-  const dir = fs.realpathSync(path.join(e.tmp, "environments"));
+  const dir = path.join(fs.realpathSync(e.tmp), "environments");
   assert.deepEqual(e.err, [
     `a.md: environment file not found: ${dir}/ma.md`,
     `b.md: environment file not found: ${dir}/mb.md`,
