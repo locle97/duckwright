@@ -84,6 +84,11 @@ function linksToCurrentPage(lines: string[], i: number, pageUrl: string): boolea
 
 /** Clickable elements of a snapshot, in order, with their refs. Links back to `pageUrl` are left out. */
 export function extractTargets(snapshot: string, pageUrl?: string | null): Target[] {
+  return scanTargets(snapshot, pageUrl).map((x) => x.target);
+}
+
+/** extractTargets, plus each target's link url as the snapshot writes it ("" when it has none). */
+function scanTargets(snapshot: string, pageUrl?: string | null): { target: Target; href: string }[] {
   const out: Target[] = [];
   const seen = new Set<string>();
   const lines = snapshot.split("\n");
@@ -108,7 +113,74 @@ export function extractTargets(snapshot: string, pageUrl?: string | null): Targe
   }
   // An unnamed link (a cover image) to the same place as a named one only splits Jev's vote.
   const named = new Set(out.flatMap((t, k) => (t.name !== "" && hrefs[k] ? [hrefs[k]] : [])));
-  return out.filter((t, k) => !(t.name === "" && t.role === "link" && hrefs[k] && named.has(hrefs[k])));
+  return out.flatMap((t, k) =>
+    t.name === "" && t.role === "link" && hrefs[k] && named.has(hrefs[k]) ? [] : [{ target: t, href: hrefs[k] }]
+  );
+}
+
+export const MAX_HREF_CHARS = 80;
+
+export interface Candidate {
+  /** The ref Jev is offered; it stands for every ref in `refs`. */
+  ref: string;
+  refs: string[];
+  description: string;
+}
+
+/**
+ * The target list offered to Jev. Links with the same role, name and url lead to the same place
+ * (a tag in a sidebar and under every item), so they become one candidate instead of splitting Jev's
+ * vote; each link also shows where it leads, which tells look-alike labels apart.
+ */
+export function targetCandidates(snapshot: string, pageUrl?: string | null): Candidate[] {
+  const out: Candidate[] = [];
+  const byKey = new Map<string, Candidate>();
+  for (const { target: t, href } of scanTargets(snapshot, pageUrl)) {
+    let description = targetDescription(t);
+    if (t.role === "link" && href) {
+      const key = JSON.stringify([t.role, t.name, href]);
+      const same = byKey.get(key);
+      if (same) {
+        same.refs.push(t.ref);
+        continue;
+      }
+      const shown = href.length > MAX_HREF_CHARS ? href.slice(0, MAX_HREF_CHARS - 1) + "…" : href;
+      description += ` -> ${shown}`;
+      const c = { ref: t.ref, refs: [t.ref], description };
+      byKey.set(key, c);
+      out.push(c);
+      continue;
+    }
+    out.push({ ref: t.ref, refs: [t.ref], description });
+  }
+  return out;
+}
+
+const HISTORY_LINE_RE = /^step \d+ \| /;
+
+/**
+ * What the agent is working on right now: Claude's latest goal (Jev's own steps only echo their
+ * move, so they are skipped) and its progress notes. Null when there is neither.
+ * A whole multi-part task leaves Jev unsure which part it is on, spreading its vote over every
+ * element the task names; the current goal plus progress pins down the part at hand.
+ */
+export function currentFocus(ctx: { memory: string; historyLines: string[]; goal?: string }): string | null {
+  let goal = ctx.goal?.trim() ?? "";
+  if (!goal) {
+    for (let i = ctx.historyLines.length - 1; i >= 0; i--) {
+      const line = ctx.historyLines[i];
+      if (!HISTORY_LINE_RE.test(line)) continue;
+      const parts = line.split(" | ");
+      // Free text may itself hold " | ", so only a line that splits cleanly names its goal.
+      const g = parts.length === 4 ? parts[2].trim() : null;
+      if (g === "" || g?.startsWith("jev:")) continue;
+      if (g) goal = g;
+      break; // Claude's latest step; an older goal would be stale
+    }
+  }
+  const memory = ctx.memory.trim();
+  const focus = [goal, memory].filter((s) => s !== "").join("\n");
+  return focus === "" ? null : focus;
 }
 
 // ---- HTTP client ----
@@ -354,20 +426,24 @@ export class HybridBrain implements DecideFn {
     };
 
     if (!step || step.ctx.step === 1 || step.ctx.nudged || step.ctx.previousFailed) return viaClaude(null, 0);
-    const targets = extractTargets(step.obs.snapshot, currentTabUrl(step.obs.tabs));
+    const pageUrl = currentTabUrl(step.obs.tabs);
+    const targets = extractTargets(step.obs.snapshot, pageUrl);
     if (targets.length === 0 || targets.length > MAX_TARGETS) return viaClaude(null, 0);
+    const candidates = targetCandidates(step.obs.snapshot, pageUrl);
 
     const { ctx, obs } = step;
     const criteria: Record<string, string> = {};
     for (const [id, o] of Object.entries(ACTION_OPTIONS)) criteria[id] = o.description;
     const targetCriteria: Record<string, string> = {};
-    for (const t of targets) targetCriteria[t.ref] = targetDescription(t);
+    for (const c of candidates) targetCriteria[c.ref] = c.description;
 
+    // Jev reads `state.task` as what to do now; the whole task still frames the action question.
+    const task = currentFocus(ctx) ?? ctx.task;
     let answers: Record<string, JevAnswer>;
     let jevCost: number;
     try {
       [answers, jevCost] = await this.jev.ask(
-        { task: ctx.task, memory: ctx.memory, history: ctx.historyLines, tabs: obs.tabs, snapshot: obs.snapshot },
+        { task, memory: ctx.memory, history: ctx.historyLines, tabs: obs.tabs, snapshot: obs.snapshot },
         {
           action: { type: "choice", question: `${ACTION_QUESTION}\n\nTask: ${ctx.task}`, criteria },
           target: { type: "choice", question: TARGET_QUESTION, criteria: targetCriteria },

@@ -43,6 +43,20 @@ export function historyLines(history: StepRecord[], window = HISTORY_WINDOW): st
   return lines;
 }
 
+/**
+ * The goal Claude set at its latest step within the history window ("" when none). Jev steps
+ * only echo their own move and failed steps carry no goal, so both are passed over.
+ */
+export function latestClaudeGoal(history: StepRecord[], window = HISTORY_WINDOW): string {
+  const shown = window > 0 ? history.slice(-window) : [];
+  for (let i = shown.length - 1; i >= 0; i--) {
+    const d = shown[i].decision;
+    if (d.source === "jev" || !d.nextGoal) continue;
+    return flat(d.nextGoal);
+  }
+  return "";
+}
+
 function section(tag: string, body: string): string {
   return `<${tag}>\n${body}\n</${tag}>`;
 }

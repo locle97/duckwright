@@ -137,6 +137,8 @@ export interface StepContext {
   task: string;
   memory: string;
   historyLines: string[];
+  /** Claude's latest next_goal (see latestClaudeGoal); when absent, read from historyLines. */
+  goal?: string;
   nudged: boolean;
   previousFailed: boolean;
 }

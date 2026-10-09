@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import type { Action, Decision } from "../src/brain.ts";
 import type { Observation } from "../src/observe.ts";
-import { HISTORY_WINDOW, buildPrompt, historyLines, stepLine } from "../src/prompt.ts";
+import { HISTORY_WINDOW, buildPrompt, historyLines, latestClaudeGoal, stepLine } from "../src/prompt.ts";
 import type { StepRecord } from "../src/prompt.ts";
 
 function decision(evaluation: string, memory: string, nextGoal: string, actions: Action[]): Decision {
@@ -168,4 +168,14 @@ test("historyLines returns stepLines of the last window", () => {
   assert.deepEqual(lines.slice(1), recs.slice(2).map(stepLine));
   assert.deepEqual(historyLines([]), []);
   assert.deepEqual(historyLines([rec(1), rec(2), rec(3)], 0), ["(3 earlier steps omitted)"]);
+});
+
+test("latestClaudeGoal skips jev steps and steps without a goal", () => {
+  const jev = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "jev: x", source: "jev" } });
+  const failed = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "" } });
+  assert.equal(latestClaudeGoal([rec(1), rec(2), jev(3), failed(4)]), "goal2");
+  assert.equal(latestClaudeGoal([jev(1)]), "");
+  assert.equal(latestClaudeGoal([]), "");
+  // Only the history window counts.
+  assert.equal(latestClaudeGoal([rec(1), jev(2), jev(3)], 2), "");
 });
