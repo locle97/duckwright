@@ -305,7 +305,8 @@ export class RunManager implements ManagerLike {
       }
     });
     if (errors.length > 0) return { ok: false, errors };
-    const seen = new Set(this.#tasks.flatMap((t) => (t.source.kind === "file" ? [resolvePath(t.source.path)] : [])));
+    // Past runs are history, separate from tasks: they never block adding the same file again.
+    const seen = new Set(this.#tasks.flatMap((t) => (t.source.kind === "file" && !t.past ? [resolvePath(t.source.path)] : [])));
     const added: TaskId[] = [];
     const duplicates: string[] = [];
     for (const { path: p, tf } of files) {
