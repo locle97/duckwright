@@ -937,3 +937,12 @@ test("app_replay_error_toast", async () => {
   await settle();
   assert.match(t.frame(), /no spec for run r1/);
 });
+
+test("options_pane_and_detail_show_environment", async () => {
+  const m = new FakeManager([snapshot(1, "First")]);
+  m.globalsValue = { base: { ...snapshot(1, "x").effective, env: "staging" }, overrides: {}, environments: ["staging"] };
+  const t = mount(m, { columns: 100, rows: 40 });
+  await settle();
+  assert.match(t.frame(), /environment +staging/, "the options pane row");
+  assert.match(t.frame(), /environment +none/, "the idle task detail row");
+});

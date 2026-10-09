@@ -89,7 +89,7 @@ const SHARED: Binding[] = [
   { match: char("s"), when: (c) => c.t?.state === "running" || c.t?.state === "paused", run: manager("stop"), hint: { key: "s", label: "stop" }, footer: true },
   {
     match: char("o"), when: (c) => hasTask(c) && !isLive(c.t),
-    run: (c) => (c.t ? [ui({ type: "form", next: openForm(c.t.id, c.t.effective, c.t.overrides) })] : []),
+    run: (c) => (c.t ? [ui({ type: "form", next: openForm(c.t.id, c.t.effective, c.t.overrides, 0, c.s.globals?.environments ?? []) })] : []),
     hint: { key: "o", label: "options" }, footer: true,
   },
   {
@@ -104,7 +104,7 @@ const SHARED: Binding[] = [
   },
   {
     match: char("O"), when: (c) => c.s.globals !== null,
-    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides) })] : []),
+    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides, 0, c.s.globals.environments) })] : []),
     hint: { key: "O", label: "global options" }, footer: false,
   },
   {
@@ -186,7 +186,7 @@ const OPTIONS: Binding[] = [
   { match: anyOf(named("down"), char("j")), when: () => true, run: () => [ui({ type: "optionsMove", delta: 1 })], hint: { key: "↑↓ j/k", label: "move" }, footer: true },
   {
     match: anyOf(named("return"), char("O")), when: (c) => c.s.globals !== null,
-    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides, c.s.optionsSelected) })] : []),
+    run: (c) => (c.s.globals ? [ui({ type: "form", next: openForm(null, c.s.globals.base, c.s.globals.overrides, c.s.optionsSelected, c.s.globals.environments) })] : []),
     hint: { key: "⏎", label: "edit" }, footer: true,
   },
   { match: anyOf(char("h", "l"), named("escape"), named("tab")), when: () => true, run: () => [ui({ type: "focus", target: "list" })], hint: { key: "h/l", label: "tasks" }, footer: true },

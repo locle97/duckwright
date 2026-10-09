@@ -1,28 +1,31 @@
 import type { Effective, Overrides, TaskId } from "../runs/manager.ts";
+import { isEnvName } from "../environment.ts";
 import type { SnapshotMode } from "../observe.ts";
 import { settingValue, TaskFileError } from "../taskfile.ts";
 import type { KeyPress } from "./keypress.ts";
 
-export type FieldKey = "model" | "maxSteps" | "headed" | "snapshot" | "video" | "screenshot";
+export type FieldKey = "model" | "maxSteps" | "headed" | "snapshot" | "video" | "screenshot" | "env";
 /** `effective` is the value ctrl+r restores; `raw` is the text being edited. */
 export interface Field {
   key: FieldKey; label: string; raw: string; overridden: boolean; error: string | null; effective: string;
 }
 /** `taskId` null: the global options rather than one task's. */
-export interface FormState { taskId: TaskId | null; fields: Field[]; focus: number }
+export interface FormState { taskId: TaskId | null; fields: Field[]; focus: number; environments: readonly string[] }
 
 const FRONT_MATTER_KEY = {
   model: "model", maxSteps: "max-steps", headed: "headed", snapshot: "snapshot",
   video: "video", screenshot: "screenshot",
 } as const;
+const NONE = "none";
 const LABELS: Record<FieldKey, string> = {
-  model: "model", maxSteps: "max steps", headed: "headed", snapshot: "snapshot mode", video: "video", screenshot: "screenshot",
+  model: "model", maxSteps: "max steps", headed: "headed", snapshot: "snapshot mode", video: "video", screenshot: "screenshot", env: "environment",
 };
-const ORDER: readonly FieldKey[] = ["model", "maxSteps", "headed", "snapshot", "video", "screenshot"];
+const ORDER: readonly FieldKey[] = ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "env"];
 export const FIELD_COUNT = ORDER.length;
 const SNAPSHOT_CYCLE: readonly SnapshotMode[] = ["hybrid", "full", "grep"];
 
 function validate(key: FieldKey, raw: string): string | null {
+  if (key === "env") return raw === NONE || isEnvName(raw) ? null : "environment must be a name or none";
   try {
     settingValue(FRONT_MATTER_KEY[key], raw);
     return null;
@@ -33,14 +36,14 @@ function validate(key: FieldKey, raw: string): string | null {
 }
 
 /** `focus`: the field the form starts on. */
-export function openForm(taskId: TaskId | null, effective: Effective, overrides: Overrides, focus = 0): FormState {
+export function openForm(taskId: TaskId | null, effective: Effective, overrides: Overrides, focus = 0, environments: readonly string[] = []): FormState {
   const fields = ORDER.map((k): Field => {
-    const eff = String(effective[k]);
+    const eff = String(k === "env" ? effective.env ?? NONE : effective[k]);
     const overridden = overrides[k] !== undefined;
-    const raw = overridden ? String(overrides[k]) : eff;
+    const raw = overridden ? String(k === "env" ? overrides.env ?? NONE : overrides[k]) : eff;
     return { key: k, label: LABELS[k], raw, overridden, error: overridden ? validate(k, raw) : null, effective: eff };
   });
-  return { taskId, fields, focus };
+  return { taskId, fields, focus, environments };
 }
 
 function edit(f: FormState, raw: string): FormState {
@@ -62,6 +65,12 @@ export function formKey(f: FormState, k: KeyPress): FormState {
   if (cur.key === "headed" || cur.key === "video" || cur.key === "screenshot") {
     return toggle ? edit(f, cur.raw === "true" ? "false" : "true") : f;
   }
+  if (cur.key === "env") {
+    if (!toggle) return f;
+    const choices = [NONE, ...f.environments];
+    if (!choices.includes(cur.effective)) choices.unshift(cur.effective);
+    return edit(f, choices[(choices.indexOf(cur.raw) + 1) % choices.length]);
+  }
   if (cur.key === "snapshot") {
     if (!toggle) return f;
     const i = SNAPSHOT_CYCLE.indexOf(cur.raw as SnapshotMode);
@@ -74,9 +83,10 @@ export function formKey(f: FormState, k: KeyPress): FormState {
 
 export function formResult(f: FormState): { ok: true; overrides: Overrides } | { ok: false } {
   if (f.fields.some((x) => x.error !== null)) return { ok: false };
-  const overrides: Record<string, string | number | boolean> = {};
+  const overrides: Record<string, string | number | boolean | null> = {};
   for (const x of f.fields) {
-    if (x.overridden) overrides[x.key] = settingValue(FRONT_MATTER_KEY[x.key], x.raw);
+    if (!x.overridden) continue;
+    overrides[x.key] = x.key === "env" ? (x.raw === NONE ? null : x.raw) : settingValue(FRONT_MATTER_KEY[x.key], x.raw);
   }
   return { ok: true, overrides: overrides as Overrides };
 }

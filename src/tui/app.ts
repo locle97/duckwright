@@ -302,7 +302,7 @@ function Workspace(p: AppProps): ReactElement {
     : s.mode === "form" && s.form !== null && s.form.taskId !== null ? h(FormView, { key: "form", form: s.form, title: "Settings", ...area })
     : s.mode === "form" && s.form !== null && oh === 0 ? h(FormView, { key: "form", form: s.form, title: "Global options", ...area })
     : s.mode === "options" && s.globals !== null && oh === 0 ? h(FormView, {
-      key: "form", form: openForm(null, s.globals.base, s.globals.overrides, s.optionsSelected), title: "Global options", note: "⏎ edit", ...area,
+      key: "form", form: openForm(null, s.globals.base, s.globals.overrides, s.optionsSelected, s.globals.environments), title: "Global options", note: "⏎ edit", ...area,
     })
     : null;
   // The editor stays drawn under its discard question.

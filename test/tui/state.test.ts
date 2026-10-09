@@ -303,7 +303,7 @@ test("state_escape_restores_previous_focus", () => {
   assert.equal(s.mode, "help");
   s = reduce(s, { type: "escape" });
   assert.equal(s.mode, "detail");
-  const form = { taskId: 1, fields: [], focus: 0 };
+  const form = { taskId: 1, fields: [], focus: 0, environments: [] };
   s = reduce(s, { type: "form", next: form });
   assert.equal(s.mode, "form");
   assert.equal(s.form, form);
@@ -612,9 +612,9 @@ test("state_globals", () => {
   assert.equal(editingGlobals(s), false);
   s = reduce(s, { type: "manager", event: { type: "globals:updated", globals: { base, overrides: { maxSteps: 3 }, environments: [] } } });
   assert.deepEqual(s.globals?.overrides, { maxSteps: 3 });
-  s = reduce(s, { type: "form", next: { taskId: null, fields: [], focus: 0 } });
+  s = reduce(s, { type: "form", next: { taskId: null, fields: [], focus: 0, environments: [] } });
   assert.equal(editingGlobals(s), true);
-  s = reduce(s, { type: "form", next: { taskId: 1, fields: [], focus: 0 } });
+  s = reduce(s, { type: "form", next: { taskId: 1, fields: [], focus: 0, environments: [] } });
   assert.equal(editingGlobals(s), false, "a task's form is not the globals");
 });
 
@@ -626,7 +626,7 @@ test("state_options_focus", () => {
   s = reduce(s, { type: "optionsMove", delta: -1 });
   assert.equal(s.optionsSelected, 0, "clamped at the first field");
   s = reduce(s, { type: "optionsMove", delta: 9 });
-  assert.equal(s.optionsSelected, 5, "clamped at the last field");
+  assert.equal(s.optionsSelected, 6, "clamped at the last field");
   s = reduce(s, { type: "escape" });
   assert.deepEqual([s.focus, s.mode], ["list", "list"]);
 });
