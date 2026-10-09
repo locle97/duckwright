@@ -1,5 +1,6 @@
 // The HTTP API as a route table: each route validates its input and makes one ManagerLike call.
 // No HTTP in here, so it runs against a fake manager.
+import { ENV_NONE, isEnvName } from "../environment.ts";
 import type { RunEvent } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
 import type { EditTarget, Globals, ManagerLike, Overrides, PlanSnapshot, TaskId, TaskSnapshot } from "../runs/manager.ts";
@@ -78,6 +79,11 @@ export function parseOverrides(raw: unknown): Overrides | string {
   if (raw.snapshot !== undefined) {
     if (typeof raw.snapshot !== "string" || !SNAPSHOTS.includes(raw.snapshot)) return "snapshot must be hybrid, full or grep";
     o.snapshot = raw.snapshot as SnapshotMode;
+  }
+  if (raw.env !== undefined) {
+    if (raw.env === null || raw.env === ENV_NONE) o.env = null;
+    else if (typeof raw.env === "string" && isEnvName(raw.env)) o.env = raw.env;
+    else return "env must be an environment name or null";
   }
   return o;
 }

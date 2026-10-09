@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { CandidateIndex } from "../../src/tui/candidates.ts";
+import type { Globals } from "../../src/runs/manager.ts";
 import { handleApi, parseOverrides, snapshotOf } from "../../src/web/api.ts";
 import type { ApiContext, ApiResponse } from "../../src/web/api.ts";
 import { FakeManager, planSnapshot, snapshot } from "../tui/fake-manager.ts";
@@ -242,4 +243,26 @@ test("parse_overrides_evidence", async () => {
   const r = await call(ctx, "PUT", "/api/globals", { video: 1 });
   assert.equal(r.status, 400);
   assert.deepEqual(r.body, { ok: false, error: "video must be true or false" });
+});
+
+test("parse_overrides_env", () => {
+  assert.deepEqual(parseOverrides({ env: "staging" }), { env: "staging" });
+  assert.deepEqual(parseOverrides({ env: null }), { env: null });
+  assert.deepEqual(parseOverrides({ env: "none" }), { env: null });
+  assert.deepEqual(parseOverrides({}), {});
+  for (const bad of [3, "a/b.md", "x.md", ".x", ""]) {
+    assert.equal(parseOverrides({ env: bad }), "env must be an environment name or null");
+  }
+});
+
+test("put_globals_env_round_trip", async () => {
+  const { m, ctx } = setup();
+  m.globalsValue = { ...m.globalsValue, environments: ["qa", "staging"] };
+  assert.deepEqual(await call(ctx, "PUT", "/api/globals", { env: "qa" }), { status: 200, body: { ok: true } });
+  assert.deepEqual(m.globalsSaved, [{ env: "qa" }]);
+  const r = await call(ctx, "PUT", "/api/tasks/1/overrides", { env: "a/b" });
+  assert.equal(r.status, 400);
+  assert.deepEqual(r.body, { ok: false, error: "env must be an environment name or null" });
+  const s = await call(ctx, "GET", "/api/state");
+  assert.deepEqual((s.body as { globals: Globals }).globals.environments, ["qa", "staging"]);
 });

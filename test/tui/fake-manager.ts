@@ -104,7 +104,7 @@ export class FakeManager implements ManagerLike {
   }
 
   globals(): Globals {
-    return { base: { ...this.globalsValue.base }, overrides: { ...this.globalsValue.overrides }, environments: [] };
+    return { base: { ...this.globalsValue.base }, overrides: { ...this.globalsValue.overrides }, environments: [...this.globalsValue.environments] };
   }
 
   setGlobals(o: Overrides): void {

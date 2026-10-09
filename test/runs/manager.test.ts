@@ -943,3 +943,12 @@ test("manager_env_preflight_failure_is_task_error", () => {
   assert.equal(mgr.list()[0].error, "environment file not found: /x");
   assert.ok(events.some((e) => e.type === "toast" && e.message === "environment file not found: /x"));
 });
+
+test("manager_bad_env_override_does_not_throw_in_snapshot", () => {
+  const dir = tree({});
+  const { mgr } = setup({ cwd: dir });
+  const id = mgr.addTyped("t");
+  mgr.setOverrides(id, { env: ".bad" });
+  assert.doesNotThrow(() => mgr.list());
+  assert.equal(mgr.effectiveArgs(id).env, ".bad");
+});

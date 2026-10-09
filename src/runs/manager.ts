@@ -7,7 +7,7 @@ import { parseRunArgs } from "../args.ts";
 import type { RunArgs } from "../args.ts";
 import type { ControlState, RunEvent, RunOutcome, TwofaWait } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
-import { ENV_NONE, envLabel, isEnvPath, listEnvironments, resolveEnv } from "../environment.ts";
+import { ENV_NONE, envLabel, isEnvName, isEnvPath, listEnvironments, resolveEnv } from "../environment.ts";
 import { SPEC_NAME } from "../export.ts";
 import { resolvePath } from "../paths.ts";
 import { PlanError, isPlanFolder, loadPlan, writeManifest, writePlan } from "../plan.ts";
@@ -868,7 +868,7 @@ export class RunManager implements ManagerLike {
       if (o.screenshot !== undefined) args.screenshot = o.screenshot;
       if (o.env !== undefined) args.env = o.env === ENV_NONE ? null : o.env;
     }
-    if (args.env !== null) args.env = resolveEnv(args.env, this.#cwd()).path;
+    if (args.env !== null && (isEnvName(args.env) || isEnvPath(args.env))) args.env = resolveEnv(args.env, this.#cwd()).path;
     return args;
   }
 
