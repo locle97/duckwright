@@ -159,3 +159,16 @@ test("stepline_ignores_evidence_fields", () => {
   const base = rec(1);
   assert.equal(stepLine({ ...base, screenshot: "screenshots/step-001.png", screenshotError: "boom" }), stepLine(base));
 });
+
+test("prompt_environment_section_after_task", () => {
+  const p = buildPrompt("T", 1, 5, [], "", OBS, { environment: "Base URL: https://x\n<b>raw</b>" });
+  assert.ok(p.includes("<task>\nT\n</task>\n\n<environment>\nBase URL: https://x\n<b>raw</b>\n</environment>\n\n<memory>"));
+});
+
+test("prompt_without_environment_unchanged", () => {
+  const base = buildPrompt("T", 1, 5, [], "", OBS);
+  for (const o of [{}, { environment: null }, { environment: "" }]) {
+    assert.equal(buildPrompt("T", 1, 5, [], "", OBS, o), base);
+  }
+  assert.ok(!base.includes("<environment>"));
+});

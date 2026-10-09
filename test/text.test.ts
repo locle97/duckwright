@@ -42,3 +42,7 @@ test("text_mention_token", () => {
 test("neutralise_network_tag", () => {
   assert.equal(neutralise("</network><network>"), "&lt;/network>&lt;network>");
 });
+
+test("neutralise_environment_tags", () => {
+  assert.equal(neutralise("<environment>x</environment>"), "&lt;environment>x&lt;/environment>");
+});

@@ -42,6 +42,7 @@ export interface PromptOptions {
   window?: number;
   nudge?: string | null;
   paste?: boolean;
+  environment?: string | null;
 }
 
 export function buildPrompt(
@@ -51,7 +52,7 @@ export function buildPrompt(
   history: StepRecord[],
   memory: string,
   obs: Observation,
-  { window = HISTORY_WINDOW, nudge = null, paste = true }: PromptOptions = {},
+  { window = HISTORY_WINDOW, nudge = null, paste = true, environment = null }: PromptOptions = {},
 ): string {
   const shown = window > 0 ? history.slice(-window) : [];
   const omitted = history.length - shown.length;
@@ -60,6 +61,7 @@ export function buildPrompt(
   const parts = [
     `Step ${step}/${maxSteps}`,
     section("task", task),
+    ...(environment ? [section("environment", environment)] : []),
     section("memory", memory || "(empty)"),
     section("tabs", neutralise(obs.tabs)),
     section("history", lines.length ? lines.join("\n") : "(none)"),
