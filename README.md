@@ -612,7 +612,7 @@ Node runs the TypeScript sources directly, so tests and `node src/bin.ts` need n
 duckwright -p -f benchmark_tasks                 # --snapshot-hybrid (default)
 duckwright -p -f benchmark_tasks --snapshot-full # always paste the snapshot
 duckwright -p -f benchmark_tasks --snapshot-grep # always grep the snapshot
-duckwright -p -f benchmark_tasks --jev           # Jev picks the simple steps (see 09-the-internet-jev-clicks.md)
+duckwright -p -f benchmark_tasks --jev           # Jev picks the simple steps (see 09-quotes-jev-clicks.md)
 ```
 
 The `Batch:` summary line gives each run's total cost, and every task line its own cost. Each file's front-matter comments give the expected answer. The tasks range from a small to-do app to a long checkout flow and a Wikipedia article far larger than the 40k-character `--snapshot-full` limit. They read public sites, so an answer can drift if a site changes. Model costs also vary from run to run, so compare more than one run of each.
