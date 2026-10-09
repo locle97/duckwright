@@ -10,6 +10,8 @@ export interface Target {
   ref: string;
   role: string;
   name: string;
+  /** Visible text of the item the element sits in (price, stock, ...), when the snapshot has any. */
+  context?: string;
 }
 
 export const TARGET_ROLES = ["link", "button", "checkbox", "radio", "tab", "menuitem", "option"] as const;
@@ -17,11 +19,77 @@ export const MAX_TARGETS = 255;
 
 const LINE_RE = /^\s*- (\w+)(?: "((?:[^"\\]|\\.)*)")?((?: \[[^\]]*\])*):?\s*$/;
 
-/** Clickable elements of a snapshot, in order, with their refs. */
-export function extractTargets(snapshot: string): Target[] {
+const CONTAINER_ROLES = new Set(["listitem", "article", "row", "treeitem", "group", "figure"]);
+const INLINE_TEXT_RE = /^\s*- (?:text|\w+(?: "(?:[^"\\]|\\.)*")?(?: \[[^\]]*\])*): (.+)$/;
+export const MAX_CONTEXT_CHARS = 100;
+const MAX_CLIMB = 4;
+
+const indentOf = (line: string): number => line.length - line.trimStart().length;
+const roleOf = (line: string): string => /^\s*- (\w+)/.exec(line)?.[1] ?? "";
+
+/** Inline text of the lines nested under `lines[i]`, skipping nested containers and the lines in `skip`. */
+function textUnder(lines: string[], i: number, skip?: { from: number; to: number }): string {
+  const base = indentOf(lines[i]);
+  const parts: string[] = [];
+  let nested = -1; // indent of the nested container being skipped
+  for (let j = i + 1; j < lines.length && (lines[j].trim() === "" || indentOf(lines[j]) > base); j++) {
+    if (skip && j >= skip.from && j < skip.to) continue;
+    const ind = indentOf(lines[j]);
+    if (nested >= 0 && ind > nested) continue;
+    nested = CONTAINER_ROLES.has(roleOf(lines[j])) ? ind : -1;
+    if (nested >= 0) continue;
+    const text = INLINE_TEXT_RE.exec(lines[j])?.[1]?.replace(/[^\p{L}\p{N}\p{Sc}\p{P} ]/gu, "").trim();
+    if (text && !text.startsWith("/") && !parts.includes(text)) parts.push(text);
+  }
+  return parts.join(" · ");
+}
+
+function subtreeEnd(lines: string[], i: number): number {
+  const base = indentOf(lines[i]);
+  let j = i + 1;
+  while (j < lines.length && (lines[j].trim() === "" || indentOf(lines[j]) > base)) j++;
+  return j;
+}
+
+/** Text shown in the item that holds the element on line `i`, so options with alike names can be told apart. */
+function contextOf(lines: string[], i: number): string {
+  let indent = indentOf(lines[i]);
+  for (let j = i - 1, climbed = 0; j >= 0 && climbed < MAX_CLIMB; j--) {
+    if (lines[j].trim() === "" || indentOf(lines[j]) >= indent) continue;
+    indent = indentOf(lines[j]);
+    climbed++;
+    if (!CONTAINER_ROLES.has(roleOf(lines[j]))) continue;
+    const text = textUnder(lines, j, { from: i, to: subtreeEnd(lines, i) });
+    return text.length > MAX_CONTEXT_CHARS ? text.slice(0, MAX_CONTEXT_CHARS - 1) + "…" : text;
+  }
+  return "";
+}
+
+/** URL of the current tab in `playwright-cli tab-list` output, or null. */
+export function currentTabUrl(tabs: string): string | null {
+  const line = tabs.split("\n").find((l) => l.includes("(current)"));
+  return line ? (/\]\((\S+)\)\s*$/.exec(line)?.[1] ?? null) : null;
+}
+
+/** Whether the link on line `i` points at the page the browser is already on. */
+function linksToCurrentPage(lines: string[], i: number, pageUrl: string): boolean {
+  const href = /^\s*- \/url: (.+)$/.exec(lines[i + 1] ?? "")?.[1]?.trim();
+  if (!href) return false;
+  try {
+    return new URL(href, pageUrl).href === new URL(pageUrl).href;
+  } catch {
+    return false;
+  }
+}
+
+/** Clickable elements of a snapshot, in order, with their refs. Links back to `pageUrl` are left out. */
+export function extractTargets(snapshot: string, pageUrl?: string | null): Target[] {
   const out: Target[] = [];
   const seen = new Set<string>();
-  for (const line of snapshot.split("\n")) {
+  const lines = snapshot.split("\n");
+  const hrefs: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const m = LINE_RE.exec(line);
     if (!m) continue;
     const role = m[1];
@@ -29,12 +97,18 @@ export function extractTargets(snapshot: string): Target[] {
     const attrs = m[3] ?? "";
     const ref = /\[ref=([^\]]+)\]/.exec(attrs)?.[1];
     if (!ref || seen.has(ref)) continue;
-    const name = (m[2] ?? "").replace(/\\(["\\])/g, "$1");
+    let name = (m[2] ?? "").replace(/\\(["\\])/g, "$1");
     if (name === "" && !attrs.includes("[cursor=pointer]")) continue;
+    if (pageUrl && role === "link" && linksToCurrentPage(lines, i, pageUrl)) continue;
+    if (name === "") name = textUnder(lines, i); // e.g. a link whose label is a nested <strong>
     seen.add(ref);
-    out.push({ ref, role, name });
+    const context = contextOf(lines, i);
+    out.push(context ? { ref, role, name, context } : { ref, role, name });
+    hrefs.push(/^\s*- \/url: (.+)$/.exec(lines[i + 1] ?? "")?.[1]?.trim() ?? "");
   }
-  return out;
+  // An unnamed link (a cover image) to the same place as a named one only splits Jev's vote.
+  const named = new Set(out.flatMap((t, k) => (t.name !== "" && hrefs[k] ? [hrefs[k]] : [])));
+  return out.filter((t, k) => !(t.name === "" && t.role === "link" && hrefs[k] && named.has(hrefs[k])));
 }
 
 // ---- HTTP client ----
@@ -243,13 +317,15 @@ export const ACTION_OPTIONS: Readonly<
     cmd: null, args: [], target: false,
   },
   done: {
-    description: "The task is complete or cannot be completed, and it is time to report the result.",
+    description:
+      "Every part of the task has already been carried out on pages already visited, including opening any page the task says to open, and nothing is left to click. Or the task cannot be completed.",
     cmd: null, args: [], target: false,
   },
 };
 
 export function targetDescription(t: Target): string {
-  return t.name === "" ? `${t.role} (no name)` : `${t.role} "${t.name}"`;
+  const base = t.name === "" ? `${t.role} (no name)` : `${t.role} "${t.name}"`;
+  return t.context ? `${base} (${t.context})` : base;
 }
 
 export class HybridBrain implements DecideFn {
@@ -278,7 +354,7 @@ export class HybridBrain implements DecideFn {
     };
 
     if (!step || step.ctx.step === 1 || step.ctx.nudged || step.ctx.previousFailed) return viaClaude(null, 0);
-    const targets = extractTargets(step.obs.snapshot);
+    const targets = extractTargets(step.obs.snapshot, currentTabUrl(step.obs.tabs));
     if (targets.length === 0 || targets.length > MAX_TARGETS) return viaClaude(null, 0);
 
     const { ctx, obs } = step;
@@ -293,7 +369,7 @@ export class HybridBrain implements DecideFn {
       [answers, jevCost] = await this.jev.ask(
         { task: ctx.task, memory: ctx.memory, history: ctx.historyLines, tabs: obs.tabs, snapshot: obs.snapshot },
         {
-          action: { type: "choice", question: ACTION_QUESTION, criteria },
+          action: { type: "choice", question: `${ACTION_QUESTION}\n\nTask: ${ctx.task}`, criteria },
           target: { type: "choice", question: TARGET_QUESTION, criteria: targetCriteria },
         },
       );

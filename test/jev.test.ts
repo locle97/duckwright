@@ -10,7 +10,9 @@ import {
   JevClient,
   JevError,
   TARGET_QUESTION,
+  currentTabUrl,
   extractTargets,
+  targetDescription,
 } from "../src/jev.ts";
 import type { JevAnswer, JevQuestion, JevTransport } from "../src/jev.ts";
 import { BrainError } from "../src/brain.ts";
@@ -35,6 +37,63 @@ test("extractTargets keeps only target roles in order", () => {
 test("extractTargets unnamed kept only with cursor pointer", () => {
   const snap = ["- button [ref=e6] [cursor=pointer]", "- button [ref=e7]", '- link "" [ref=e8]'].join("\n");
   assert.deepEqual(extractTargets(snap), [{ ref: "e6", role: "button", name: "" }]);
+});
+
+test("extractTargets adds the text of the enclosing item as context", () => {
+  const snap = [
+    "- list [ref=e1]:",
+    "  - listitem [ref=e2]:",
+    '    - link "Book A ..." [ref=e3] [cursor=pointer]:',
+    "      - /url: a.html",
+    "    - paragraph [ref=e4]: £56.88",
+    "    - text: In stock",
+    "  - listitem [ref=e5]:",
+    '    - link "Book B ..." [ref=e6] [cursor=pointer]:',
+    "    - paragraph [ref=e7]: £23.21",
+    '- link "Home" [ref=e8] [cursor=pointer]',
+  ].join("\n");
+  assert.deepEqual(extractTargets(snap), [
+    { ref: "e3", role: "link", name: "Book A ...", context: "£56.88 · In stock" },
+    { ref: "e6", role: "link", name: "Book B ...", context: "£23.21" },
+    { ref: "e8", role: "link", name: "Home" },
+  ]);
+});
+
+test("extractTargets drops links to the current page", () => {
+  const snap = [
+    '- link "Travel" [ref=e1] [cursor=pointer]:',
+    "  - /url: index.html",
+    '- link "Mystery" [ref=e2] [cursor=pointer]:',
+    "  - /url: ../mystery_3/index.html",
+  ].join("\n");
+  const url = "https://x.test/books/travel_2/index.html";
+  assert.deepEqual(extractTargets(snap, url).map((t) => t.ref), ["e2"]);
+  assert.deepEqual(extractTargets(snap).map((t) => t.ref), ["e1", "e2"]);
+});
+
+test("extractTargets drops an unnamed link that duplicates a named link's url", () => {
+  const snap = [
+    "- link [ref=e1] [cursor=pointer]:",
+    "  - /url: a.html",
+    '- link "Book A" [ref=e2] [cursor=pointer]:',
+    "  - /url: a.html",
+    "- link [ref=e3] [cursor=pointer]:",
+    "  - /url: b.html",
+  ].join("\n");
+  assert.deepEqual(extractTargets(snap).map((t) => t.ref), ["e2", "e3"]);
+});
+
+test("currentTabUrl reads the current tab", () => {
+  const tabs = "- 0: [Other](https://a.test/)\n- 1: (current) [T | S](https://b.test/p/index.html)";
+  assert.equal(currentTabUrl(tabs), "https://b.test/p/index.html");
+  assert.equal(currentTabUrl("tabs"), null);
+});
+
+test("targetDescription includes the item context", () => {
+  assert.equal(
+    targetDescription({ ref: "e3", role: "link", name: "Book A", context: "£5" }),
+    'link "Book A" (£5)',
+  );
 });
 
 test("extractTargets drops duplicate refs", () => {
@@ -308,7 +367,7 @@ test("HybridBrain accepted click with target", async () => {
   assert.equal(cost, 0.001);
   const q = f.asks[0];
   assert.deepEqual(q.state, { task: "T", memory: "M", history: ["step 1 | …"], tabs: "tabs", snapshot: SNAP });
-  assert.equal(q.questions.action.question, ACTION_QUESTION);
+  assert.equal(q.questions.action.question, `${ACTION_QUESTION}\n\nTask: T`);
   assert.equal(q.questions.action.type, "choice");
   assert.equal(q.questions.target.question, TARGET_QUESTION);
   assert.deepEqual(Object.keys(q.questions.action.criteria), [
