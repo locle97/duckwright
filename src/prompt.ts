@@ -43,6 +43,15 @@ export function historyLines(history: StepRecord[], window = HISTORY_WINDOW): st
   return lines;
 }
 
+/**
+ * The goal Claude set at the previous step ("" when that step was Jev's, which only echoes its own
+ * move, or set no goal). An older goal would be stale, so none is looked for.
+ */
+export function latestClaudeGoal(history: StepRecord[]): string {
+  const d = history.at(-1)?.decision;
+  return d && d.source !== "jev" ? flat(d.nextGoal) : "";
+}
+
 function section(tag: string, body: string): string {
   return `<${tag}>\n${body}\n</${tag}>`;
 }

@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import type { Action, Decision } from "../src/brain.ts";
 import type { Observation } from "../src/observe.ts";
-import { HISTORY_WINDOW, buildPrompt, historyLines, stepLine } from "../src/prompt.ts";
+import { HISTORY_WINDOW, buildPrompt, historyLines, latestClaudeGoal, stepLine } from "../src/prompt.ts";
 import type { StepRecord } from "../src/prompt.ts";
 
 function decision(evaluation: string, memory: string, nextGoal: string, actions: Action[]): Decision {
@@ -168,4 +168,14 @@ test("historyLines returns stepLines of the last window", () => {
   assert.deepEqual(lines.slice(1), recs.slice(2).map(stepLine));
   assert.deepEqual(historyLines([]), []);
   assert.deepEqual(historyLines([rec(1), rec(2), rec(3)], 0), ["(3 earlier steps omitted)"]);
+});
+
+test("latestClaudeGoal is the previous step's goal, empty after a jev step or without a goal", () => {
+  const jev = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "jev: x", source: "jev" } });
+  const failed = (n: number): StepRecord => ({ ...rec(n), decision: { ...rec(n).decision, nextGoal: "" } });
+  assert.equal(latestClaudeGoal([rec(1), rec(2)]), "goal2");
+  // An older Claude goal would be stale after a jev step.
+  assert.equal(latestClaudeGoal([rec(1), jev(2)]), "");
+  assert.equal(latestClaudeGoal([rec(1), failed(2)]), "");
+  assert.equal(latestClaudeGoal([]), "");
 });

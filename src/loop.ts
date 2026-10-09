@@ -11,7 +11,7 @@ import { captureStep, clearRequests, currentOrigin, networkDir } from "./network
 import { observe, pageDir, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { AbortedError } from "./proc.ts";
-import { buildPrompt, historyLines } from "./prompt.ts";
+import { buildPrompt, historyLines, latestClaudeGoal } from "./prompt.ts";
 import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RequestCallContext } from "./request.ts";
@@ -178,6 +178,7 @@ export class Agent {
           task: this.scrub(this.task),
           memory: this.scrub(memory),
           historyLines: historyLines(history).map(this.scrub),
+          goal: this.scrub(latestClaudeGoal(history)),
           nudged: nudge !== null,
           previousFailed,
         },
