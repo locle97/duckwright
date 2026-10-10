@@ -596,7 +596,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Reliability and cost**
 
-- [ ] **Replay mode**: re-run the recorded code first and call the agent only when a step breaks, so a changed locator heals itself.
+- [X] **Replay mode**: re-run the recorded code first and call the agent only when a step breaks, so a changed locator heals itself.
 - [ ] **Cost budget**: a `--max-cost` limit that stops the run once spend exceeds it, alongside `--max-steps`.
 - [ ] **Wait for the page to settle**: wait for network and DOM activity to go quiet before each snapshot, so the agent never acts on a half-loaded page.
 - [x] **Jev backend (`--jev`)**: a cheaper brain using [TypeSafe's Jev](https://typesafe.ai/) model. Jev returns typed choices with calibrated confidence but no free text, so it picked the command and the element ref each step, and anything that needs text (URLs, form input, the final answer) or had low confidence went to Claude. Savings not benchmarked yet.
@@ -609,14 +609,14 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Authentication**
 
-- [ ] **Two-factor verification**: get past 2FA prompts during a run. TOTP codes are generated from a secret supplied by the user, or typed by the user when there is none (never recorded in `history.json`). SMS and email codes, and passkeys, pause the run and ask the user for the code or approval.
+- [X] **Two-factor verification**: get past 2FA prompts during a run. TOTP codes are generated from a secret supplied by the user, or typed by the user when there is none (never recorded in `history.json`). SMS and email codes, and passkeys, pause the run and ask the user for the code or approval.
 
 **Network and API testing**
 
 - [x] **Network capture**: record the requests the page makes during each step (method, URL, status, and request and response bodies, via `playwright-cli requests`) into `history.json` and per-request files under `network/`, with secrets and auth headers redacted. The agent sees a short summary of the API calls its last actions triggered.
 - [x] **API assertions**: an `expect-request` action, so the agent can check that a step called the expected endpoint with the expected status or response field. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - [x] **API test export**: `duckwright export --api runs/<id>` turns the captured calls into a `@playwright/test` spec that uses the `request` fixture, so the backend flow can be tested without the UI.
-- [ ] **API steps in the loop**: a `request` action that lets the agent call an endpoint it has already seen on the site directly (same origin, current session cookies), for example to set up test data faster than through the UI.
+- [X] **API steps in the loop**: a `request` action that lets the agent call an endpoint it has already seen on the site directly (same origin, current session cookies), for example to set up test data faster than through the UI.
 
 **Experience**
 
