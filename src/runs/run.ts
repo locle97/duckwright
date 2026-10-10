@@ -9,6 +9,8 @@ import { Brain } from "../brain.ts";
 import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
+import { LoginError } from "../auth.ts";
+import type { AuthBroker } from "../auth.ts";
 import { EnvError, loadEnvironment } from "../environment.ts";
 import { HybridBrain, JevAuthError, JevClient, fetchTransport } from "../jev.ts";
 import type { JevTransport } from "../jev.ts";
@@ -80,6 +82,8 @@ export interface RunDeps {
   runner?: Runner;
   /** The inner Jev transport (default `fetchTransport`); a test seam. */
   jevTransport?: JevTransport;
+  /** Shared login broker; without it no auto-login is attempted. */
+  auth?: AuthBroker;
 }
 
 export interface RunHandle {
@@ -209,6 +213,8 @@ export function makeBrain(
   });
 }
 
+class LoginFailure extends Error {}
+
 async function execute(
   spec: RunSpec, deps: RunDeps, workdir: string, events: RunEvents, control: RunControl, signal: AbortSignal,
 ): Promise<RunOutcome> {
@@ -219,6 +225,7 @@ async function execute(
   let outcome: RunOutcome;
   let envRecord: { name: string; path: string } | null = null;
   let stateRecord: { path: string; source: "file" | "login" } | null = null;
+  let loginState: string | null = null;
   // Let the caller subscribe before anything is emitted.
   await Promise.resolve();
   try {
@@ -233,6 +240,23 @@ async function execute(
       timeoutSec: args.twofaTimeout,
       signal, events,
     });
+    if (!statePath && env?.login && deps.auth) {
+      const login = env.login;
+      try {
+        const got = await deps.auth.ensure({
+          env: { name: env.name, login, text: env.text },
+          signal, headed: args.headed,
+          run: { args, deps, makeBrain: (wd) => makeBrain(args, deps, wd, signal, null) },
+        });
+        loginState = got.path;
+        stateRecord = { path: statePathForHistory(got.path, resolvePath(process.cwd())), source: "login" };
+      } catch (e) {
+        if (e instanceof LoginError) throw new LoginFailure(`login failed: ${env.name}: ${e.message}`);
+        throw e;
+      }
+      const pass = ((deps.env ?? process.env)[login.passwordEnv] ?? "").trim();
+      if (pass !== "") twofa.scrubber.addSecret(pass);
+    }
     const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
     let log: DebugLog | null = null;
     if (args.debug) {
@@ -246,7 +270,7 @@ async function execute(
     const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     agent = deps.createAgent({
       task, pw, brain, workdir,
-      maxSteps: args.maxSteps, headed: args.headed, state: statePath,
+      maxSteps: args.maxSteps, headed: args.headed, state: statePath ?? loginState,
       snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa, environment: env?.text ?? null,
     });
@@ -265,7 +289,7 @@ async function execute(
       code = 130;
     } else if (e instanceof PlaywrightError) {
       message = `playwright error: ${e.message}`;
-    } else if (e instanceof EnvError) {
+    } else if (e instanceof EnvError || e instanceof LoginFailure) {
       message = e.message;
     } else if (e instanceof JevAuthError) {
       message = "jev error: invalid TYPESAFE_API_KEY";

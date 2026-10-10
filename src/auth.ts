@@ -276,18 +276,20 @@ export class AuthBroker {
       timeoutSec: run.args.twofaTimeout, signal: opts.signal, events, scrubber,
     });
     const step = makeStep(scrubber);
-    const agent = run.deps.createAgent({
-      task: `${login.task}\n\n${AGENT_PARAGRAPH}`,
-      pw, brain: run.makeBrain(workdir), workdir,
-      maxSteps: run.args.maxSteps, headed: opts.headed, snapshotMode: run.args.snapshot,
-      signal: opts.signal, twofa, events, environment: opts.env.text ?? null,
-      fillValues: { "{{username}}": creds.username, "{{password}}": creds.password },
-      beforeClose: () => finishLogin(pw, login.check, tmp, path.join(workdir, "check-snapshot.yml"), step),
-    });
+    let cost = 0;
     try {
+      const agent = run.deps.createAgent({
+        task: `${login.task}\n\n${AGENT_PARAGRAPH}`,
+        pw, brain: run.makeBrain(workdir), workdir,
+        maxSteps: run.args.maxSteps, headed: opts.headed, snapshotMode: run.args.snapshot,
+        signal: opts.signal, twofa, events, environment: opts.env.text ?? null,
+        fillValues: { "{{username}}": creds.username, "{{password}}": creds.password },
+        beforeClose: () => finishLogin(pw, login.check, tmp, path.join(workdir, "check-snapshot.yml"), step),
+      });
       let result;
       try {
         result = await agent.run();
+        cost = agent.costUsd;
       } catch (e) {
         if (e instanceof AbortedError) throw e;
         if (e instanceof PlaywrightError) throw new LoginError(scrubber.scrub(`playwright error: ${e.message}`));
@@ -301,7 +303,7 @@ export class AuthBroker {
       throw e;
     }
     fs.rmSync(workdir, { recursive: true, force: true });
-    return agent.costUsd;
+    return cost;
   }
 
   async #scriptLogin(
