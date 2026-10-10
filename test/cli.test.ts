@@ -18,6 +18,8 @@ import { JevAuthError } from "../src/jev.ts";
 import { TwoFactorError } from "../src/twofa.ts";
 import { TaskFileError } from "../src/taskfile.ts";
 import type { Human } from "../src/twofa.ts";
+import { LoginError } from "../src/auth.ts";
+import type { AuthBroker, EnsureOptions, EnsureResult } from "../src/auth.ts";
 import { tmpDir } from "./helpers.ts";
 
 const cwd = process.cwd();
@@ -1850,4 +1852,191 @@ test("explore_after_double_dash_is_a_task_and_never_uses_tui", async () => {
   const loadTui = async (): Promise<TuiModule> => { loaded = true; throw new Error("no"); };
   assert.equal(await main(t.argv, t.deps({ isTTY: () => true, loadTui, createAgent: exploreAgent() })), 0);
   assert.equal(loaded, false);
+});
+
+// ---- automatic login ----
+
+const LOGIN_FM = (user = "U_VAR", pass = "P_VAR") => [
+  "---", "login:", "  method: script", "  url: https://s.test/login",
+  `  username-env: ${user}`, `  password-env: ${pass}`,
+  '  username-selector: "#u"', '  password-selector: "#p"', '  submit-selector: "#s"',
+  "---", "# env", "",
+].join("\n");
+
+interface FakeAuth { broker: AuthBroker; calls: string[]; opts: EnsureOptions[] }
+
+function fakeAuth(
+  behave: (o: EnsureOptions, n: number) => Promise<EnsureResult> | EnsureResult = (o) => {
+    o.onReason?.("no saved state");
+    return { path: path.join(process.cwd(), ".duckwright", "auth", `${o.env.name}.json`), reused: false, costUsd: 0 };
+  },
+): FakeAuth {
+  const calls: string[] = [];
+  const opts: EnsureOptions[] = [];
+  const broker = {
+    ensure: async (o: EnsureOptions) => {
+      calls.push(o.env.name);
+      opts.push(o);
+      return behave(o, calls.length);
+    },
+  } as unknown as AuthBroker;
+  return { broker, calls, opts };
+}
+
+test("login_single_task_prints_lines_before_run", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const fa = fakeAuth();
+  const states: (string | null)[] = [];
+  const createAgent = agentWith(async (o) => {
+    e.out.push("RUN");
+    states.push(o.state ?? null);
+    return result(true);
+  });
+  assert.equal(await main(["-p", ...e.argv, "--env", "staging"], e.deps({ createAgent, auth: fa.broker })), 0);
+  const st = path.join(e.tmp, ".duckwright", "auth", "staging.json");
+  assert.equal(e.out[0], "Login: staging: logging in (script), no saved state");
+  assert.equal(e.out[1], "Login: staging: saved state .duckwright/auth/staging.json  Cost: $0.0000");
+  assert.ok(e.out.indexOf("RUN") > 1);
+  assert.deepEqual(states, [st]);
+  assert.equal(fa.calls.length, 1 + 1); // up front, then the run's own ensure (reuses in the real broker)
+});
+
+test("login_reuse_line", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const fa = fakeAuth((o) => ({ path: "/x/s.json", reused: true, costUsd: 0 }));
+  const createAgent = agentWith(async () => result(true));
+  assert.equal(await main(["-p", ...e.argv, "--env", "staging"], e.deps({ createAgent, auth: fa.broker })), 0);
+  assert.equal(e.out[0], "Login: staging: using saved state /x/s.json");
+  assert.ok(!e.out.some((l) => l.includes("logging in")));
+});
+
+test("login_reasons_are_printed", async () => {
+  for (const reason of ["saved state unreadable", "saved state expired", "saved state failed the check"]) {
+    const e = env();
+    envFile(e.tmp, "staging", LOGIN_FM());
+    const fa = fakeAuth((o) => { o.onReason?.(reason); return { path: "/x/s.json", reused: false, costUsd: 0.5 }; });
+    const createAgent = agentWith(async () => result(true));
+    assert.equal(await main(["-p", ...e.argv, "--env", "staging"], e.deps({ createAgent, auth: fa.broker })), 0);
+    assert.equal(e.out[0], `Login: staging: logging in (script), ${reason}`);
+    assert.equal(e.out[1], "Login: staging: saved state /x/s.json  Cost: $0.5000");
+  }
+});
+
+function batchFiles(e: Env, envs: (string | null)[], extra: string[] = []): string {
+  const dir = path.join(e.tmp, "batch");
+  fs.mkdirSync(dir);
+  envs.forEach((n, i) => {
+    const fm = n === null ? "" : `---\nenv: ${n}\n${extra[i] ?? ""}---\n`;
+    fs.writeFileSync(path.join(dir, `t${i + 1}.md`), `${fm}task ${i + 1}\n`);
+  });
+  return dir;
+}
+
+test("login_batch_shares_one_login", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const dir = batchFiles(e, ["staging", "staging", "staging"]);
+  const fa = fakeAuth();
+  const states: (string | null)[] = [];
+  const createAgent = agentWith(async (o) => { states.push(o.state ?? null); return result(true); });
+  assert.equal(await main(["-p", "-f", dir, "--skill", e.argv[2]], e.deps({ createAgent, auth: fa.broker })), 0);
+  assert.equal(e.out.filter((l) => l.startsWith("Login:")).length, 2);
+  assert.ok(e.out.findIndex((l) => l.startsWith("Login:")) < e.out.findIndex((l) => l.startsWith("[1/3]")));
+  assert.equal(states.length, 3);
+  assert.equal(new Set(states).size, 1);
+  assert.equal(fa.opts.filter((o) => o.onReason !== undefined && o.env.name === "staging").length >= 1, true);
+});
+
+test("login_two_envs_in_first_seen_order_and_explicit_state_excluded", async () => {
+  const e = env();
+  envFile(e.tmp, "b", LOGIN_FM());
+  envFile(e.tmp, "a", LOGIN_FM());
+  envFile(e.tmp, "c", LOGIN_FM());
+  fs.writeFileSync(path.join(e.tmp, "s.json"), "{}");
+  const dir = batchFiles(e, ["b", "a", "b", "c"], ["", "", "", `state: ${path.join(e.tmp, "s.json")}\n`]);
+  const fa = fakeAuth();
+  const createAgent = agentWith(async () => result(true));
+  assert.equal(await main(["-p", "-f", dir, "--skill", e.argv[2]], e.deps({ createAgent, auth: fa.broker })), 0);
+  assert.deepEqual(fa.calls.slice(0, 2), ["b", "a"]);
+  const lines = e.out.filter((l) => l.startsWith("Login:") && l.includes("logging in"));
+  assert.deepEqual(lines.map((l) => l.split(":")[1].trim()), ["b", "a"]);
+});
+
+test("login_explicit_state_from_cli_skips_login", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  fs.writeFileSync(path.join(e.tmp, "s.json"), "{}");
+  const fa = fakeAuth();
+  const createAgent = agentWith(async () => result(true));
+  assert.equal(await main(["-p", ...e.argv, "--env", "staging", "--state", "s.json"], e.deps({ createAgent, auth: fa.broker })), 0);
+  assert.equal(fa.calls.length, 0);
+  assert.ok(!e.out.some((l) => l.startsWith("Login:")));
+});
+
+test("login_explicit_state_from_global_config_skips_login", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  fs.writeFileSync(path.join(e.tmp, "s.json"), "{}");
+  const fa = fakeAuth();
+  const createAgent = agentWith(async () => result(true));
+  assert.equal(await main(["-p", ...e.argv, "--env", "staging"],
+    e.deps({ createAgent, auth: fa.broker, loadConfig: () => ({ state: path.join(e.tmp, "s.json") }) as never })), 0);
+  assert.equal(fa.calls.length, 0);
+});
+
+test("login_failure_exits_1_without_running", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const dir = batchFiles(e, ["staging", "staging"]);
+  const fa = fakeAuth(() => { throw new LoginError("the check text was not found"); });
+  assert.equal(await main(["-p", "-f", dir, "--skill", e.argv[2]], e.deps({ auth: fa.broker })), 1);
+  assert.deepEqual(e.err, ["login failed: staging: the check text was not found"]);
+  assert.ok(!e.out.some((l) => l.startsWith("Batch:") || l.startsWith("[1/")));
+  assert.equal(fa.calls.length, 1);
+});
+
+test("login_abort_exits_130", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const ac = new AbortController();
+  const fa = fakeAuth(async () => { ac.abort(); throw new AbortedError(); });
+  assert.equal(await main(["-p", ...e.argv, "--env", "staging"], e.deps({ auth: fa.broker, signal: ac.signal })), 130);
+  assert.ok(!e.err.some((l) => l.includes("login failed")));
+});
+
+test("login_credentials_not_in_output", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const fa = fakeAuth(() => { throw new LoginError("bad"); });
+  await main(["-p", ...e.argv, "--env", "staging"], e.deps({ auth: fa.broker, env: { U_VAR: "alice-secret", P_VAR: "hunter2-secret" } }));
+  const all = [...e.out, ...e.err].join("\n");
+  assert.ok(!all.includes("alice-secret") && !all.includes("hunter2-secret"));
+});
+
+test("login_invalid_block_is_preflight_exit_2_with_file_prefix", async () => {
+  const e = env();
+  envFile(e.tmp, "bad", "---\nlogin: foo\n---\nx\n");
+  envFile(e.tmp, "ok", LOGIN_FM());
+  const dir = batchFiles(e, ["bad", "ok"]);
+  const fa = fakeAuth();
+  assert.equal(await main(["-p", "-f", dir, "--skill", e.argv[2]], e.deps({ auth: fa.broker })), 2);
+  assert.ok(e.err.join("\n").startsWith(path.join(dir, "t1.md")) || e.err.join("\n").includes("t1.md: "));
+  assert.equal(fa.calls.length, 0);
+});
+
+test("login_broker_reaches_tui_and_explore_runs", async () => {
+  const e = env();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const fa = fakeAuth();
+  const fake = fakeTui();
+  assert.equal(await main(["--skill", e.argv[2], "--env", "staging"],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent, auth: fa.broker })), 0);
+  assert.ok(fa.calls.includes("staging"));
+  const e2 = exploreEnv();
+  envFile(e2.tmp, "staging", LOGIN_FM());
+  const fa2 = fakeAuth();
+  await main([...e2.argv, "--env", "staging"], e2.deps({ createAgent: exploreAgent(FLOWS, true), auth: fa2.broker }));
+  assert.ok(fa2.calls.includes("staging"));
 });
