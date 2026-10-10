@@ -7,8 +7,8 @@
 ## Environment
 - Build: `npm install && npm run build`; entry point `node dist/bin.js` (alias `duckwright` below; `npm link` also works). Node >= 22.18.
 - Real `claude` CLI logged in and on PATH; Chromium available as for any normal duckwright run.
-- Jev scenarios need `TYPESAFE_API_KEY` set to a real key (called `KEY` below). Non-Jev scenarios need no key.
-- 2FA scenario needs a test site with TOTP login and its secret (`TOTP_SECRET`), configured as the README describes for 2FA.
+- Jev scenarios need `TYPESAFE_API_KEY`. Two keys are used: FAKE-KEY (a made-up value such as `sk-qa-SECRET123`; Jev answers 401/403, so no answers or usage are produced) and REAL-KEY (a valid key; exercises answers, usage and routes). Each Jev scenario says which one it uses. Non-Jev scenarios need no key.
+- 2FA scenario needs a test site with TOTP login and its secret, set as `DUCKWRIGHT_TOTP_SECRET` as the README describes (called SECRET-VALUE below: the base32 value itself, not the variable name).
 - Work in an empty directory `$WORK`; runs are written to `$WORK/runs/<id>/`.
 - Reset: `rm -rf $WORK/runs $WORK/duckwright.conf $WORK/*.md` between scenarios unless the scenario says otherwise. Capture streams with `duckwright ... >out.txt 2>err.txt`.
 
@@ -17,6 +17,12 @@
 - TASK-FILE-ON: `$WORK/on.md` with front matter `debug: true` then the TASK-A text.
 - TASK-FILE-OFF: `$WORK/off.md` with front matter `debug: false` then the TASK-A text.
 - TASK-FILE-BAD: `$WORK/bad.md` with front matter `debug: maybe`.
+- CONF-BAD: `$WORK/duckwright.conf` containing `debug: maybe`.
+- CONF-DUP: `$WORK/duckwright.conf` containing two lines `debug: true`.
+- JEV-BAD: `$WORK/jevbad.md` with front matter `jev: maybe` (reference message format).
+- WRAP-CLAUDE: a shell script `$WORK/bin/claude`, put first on PATH, that runs a step then `exec`s the real `claude` with the same args and stdin (`REAL_CLAUDE` = its absolute path). Variants are defined in the scenarios that use them.
+- WIDE-PAGE: a local HTML page `$WORK/wide.html` (served with `python3 -m http.server`) with 300 `<button>` elements, and NARROW-PAGE: `$WORK/narrow.html` with 3 buttons and a link to a second page.
+- EMPTY-PAGE: `$WORK/empty.html` containing only a paragraph of text (no clickable elements).
 - TASK-FILE-DUP: `$WORK/dup.md` with two lines `debug: true`.
 - CONF-ON: `$WORK/duckwright.conf` containing `debug: true` (use the config location the README documents; pass it as the README says).
 - BATCH: `$WORK/a.md` and `$WORK/b.md`, each a short task.
@@ -27,13 +33,15 @@
 
 | Criterion | Contracts | Scenarios |
 | --- | --- | --- |
-| SC1 | C1, C4, C5, C6 | TS-1, TS-2, TS-3, TS-4, TS-12, TS-13 |
-| SC2 | C4, C5 | TS-5, TS-6, TS-7 |
+| SC1 | C1, C4, C5, C6 | TS-1, TS-2, TS-3, TS-4, TS-12, TS-13, TS-29, TS-30 |
+| SC2 | C4, C5 | TS-5, TS-6, TS-7, TS-27, TS-28 |
 | SC3 | C4 | TS-8 |
 | SC4 | C4, C5 | TS-9, TS-10 |
-| SC5 | C5, C6 | TS-11, TS-R1, TS-R2 |
-| SC6 | C1, C2, C3 | TS-14, TS-15, TS-16, TS-17, TS-18, TS-19, TS-20, TS-21 |
+| SC5 | C5, C6 | TS-11, TS-R1, TS-R2, TS-R3 |
+| SC6 | C1, C2, C3 | TS-14, TS-15, TS-16, TS-17, TS-18, TS-19, TS-20, TS-21, TS-25, TS-26 |
 | SC7 | C5, C6 | TS-22, TS-23, TS-24 |
+
+TS-R4 is removed (the unit suite is a run check, see Out of scope).
 
 ## Scenarios
 
@@ -100,7 +108,7 @@
 
 **Contract:** C4 · **Criteria:** SC2 · **Type:** CLI · **Priority:** P1
 
-**Preconditions:** `TYPESAFE_API_KEY=KEY`; TASK-A.
+**Preconditions:** `TYPESAFE_API_KEY=REAL-KEY`; TASK-A.
 
 **Steps:**
 1. Run `duckwright -p --jev --debug "<TASK-A>" >out.txt 2>err.txt`.
@@ -128,7 +136,7 @@
 
 **Contract:** C4 · **Criteria:** SC2 · **Type:** CLI · **Priority:** P2
 
-**Preconditions:** Case A: `TYPESAFE_API_KEY=invalid`. Case B: `TYPESAFE_API_KEY=KEY` with network to the Jev host blocked (e.g. via a firewall rule or `HTTPS_PROXY` to a closed port).
+**Preconditions:** Case A: `TYPESAFE_API_KEY=invalid`. Case B: `TYPESAFE_API_KEY=REAL-KEY` with network to the Jev host blocked (e.g. via a firewall rule or `HTTPS_PROXY` to a closed port).
 
 **Steps:**
 1. Case A: run `duckwright -p --jev --debug "<TASK-A>" >out.txt 2>err.txt`.
@@ -142,7 +150,7 @@
 
 **Contract:** C4 · **Criteria:** SC3 · **Type:** CLI · **Priority:** P1
 
-**Preconditions:** TS-5 run (with `--jev`) and TS-1 run (without).
+**Preconditions:** TS-5 run (REAL-KEY, `--jev`) and TS-1 run (without).
 
 **Steps:**
 1. Read the last block of the `--jev` run's `err.txt`.
@@ -151,37 +159,37 @@
 **Expected:**
 - Last block is `===== [debug <run-id>] summary =====` with lines `claude: <calls> calls  input <n>  output <n>  cache read <n>  cache write <n> tokens  cost $<fixed4>`, `jev: <requests> requests (<retries> retries)  input <n>  output <n> tokens  cost $<fixed4>`, `routes: accepted <n>  low_confidence <n>  error <n>  needs_text <n>  done <n>  skipped <n>`, `total cost: $<fixed4>`.
 - `calls` equals the number of `· claude` blocks; `requests` equals the number of `jev request` blocks; `retries` equals those with k > 1; route counts match the route blocks.
-- Total cost equals Claude cost plus Jev cost (to 4 decimals).
+- Total cost equals Claude cost plus Jev cost within a tolerance of 0.0001 (each is printed rounded to 4 decimals).
 - In the run without `--jev` the `jev:` and `routes:` lines are absent.
 
 ### TS-9: API key and Authorization never appear
 
 **Contract:** C4, C5 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P1
 
-**Preconditions:** `TYPESAFE_API_KEY=KEY` (a distinctive value, e.g. `sk-qa-SECRET123`).
+**Preconditions:** Two cases. Case A: `TYPESAFE_API_KEY=sk-qa-SECRET123` (FAKE-KEY; Jev rejects it, which exercises the request headers and error body). Case B: `TYPESAFE_API_KEY=REAL-KEY`; let `K` be its literal value.
 
 **Steps:**
-1. Run `duckwright -p --jev --debug "<TASK-A>" >out.txt 2>err.txt`.
-2. `grep -c "sk-qa-SECRET123" out.txt err.txt runs/<id>/debug.log runs/<id>/history.json`.
+1. Run `duckwright -p --jev --debug "<TASK-A>" >out.txt 2>err.txt` once per case.
+2. `grep -c "<key value>" out.txt err.txt runs/<id>/debug.log runs/<id>/history.json`.
 3. `grep -i "authorization" err.txt`.
 
 **Expected:**
-- Count is 0 in `err.txt`, `out.txt` and `debug.log`.
-- Every `Authorization` occurrence is followed by `[REDACTED]`; no `Bearer <token>` text is visible.
+- Count of the key value is 0 in `err.txt`, `out.txt`, `debug.log` and `history.json`, in both cases.
+- In Case B at least one Jev request block exists. Every `Authorization` occurrence is followed by `[REDACTED]`; no `Bearer <token>` text is visible.
 
 ### TS-10: TOTP secret and 2FA codes never appear
 
 **Contract:** C4, C5 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P1
 
-**Preconditions:** LOGIN-TASK on the 2FA test site with `TOTP_SECRET` configured.
+**Preconditions:** LOGIN-TASK on the 2FA test site with `DUCKWRIGHT_TOTP_SECRET=SECRET-VALUE`.
 
 **Steps:**
 1. Run `duckwright -p --debug "<LOGIN-TASK>" >out.txt 2>err.txt`.
 2. Note the 6-digit codes the run used (from the site or the run's own output where they are not hidden).
-3. Search `err.txt` and `debug.log` for `TOTP_SECRET` and for each code.
+3. Search `err.txt` and `debug.log` for SECRET-VALUE (its value, not the variable name) and for each code.
 
 **Expected:**
-- Neither the secret nor any issued code appears in `err.txt` or `debug.log` (a redaction marker appears in their place).
+- Neither SECRET-VALUE nor any issued code appears in `err.txt` or `debug.log`. Only absence is asserted; the spec defines no redaction marker.
 
 ### TS-11: Full page snapshots and prompts are not truncated
 
@@ -355,14 +363,101 @@
 
 **Contract:** C5 · **Criteria:** SC7, SC1 · **Type:** CLI · **Priority:** P2
 
-**Preconditions:** Make `runs/<id>/debug.log` unwritable, e.g. create the run dir's `debug.log` as a directory is not possible beforehand, so instead run with `runs` on a filesystem where, after the run folder is created, a pre-created `debug.log`-named read-only mount is used; if not feasible, run as a user and `chattr +i` a pre-made run folder (record the method used).
+**Preconditions:** WRAP-CLAUDE variant BREAK-LOG, first on PATH. Before exec'ing the real `claude`, it takes the newest folder `d` under `$WORK/runs/` and, if `d/debug.log` is a file, runs `rm -f d/debug.log && mkdir d/debug.log` (a directory now occupies the log path, so appends fail deterministically, no privileges needed). TASK-A (2 or more Claude steps).
 
 **Steps:**
-1. Run `duckwright -p --debug "<TASK-A>" >out.txt 2>err.txt`.
+1. Run `duckwright -p --debug "<TASK-A>" >out.txt 2>err.txt`; note the exit code.
+2. Reset, run `duckwright -p "<TASK-A>" >out_off.txt 2>/dev/null` with the same PATH; note the exit code.
 
 **Expected:**
-- `err.txt` contains exactly one line starting `warning: debug log: cannot write <path>: `.
-- Debug blocks continue to appear on stderr; exit code and stdout equal a run without `--debug`.
+- `err.txt` contains exactly one line starting `warning: debug log: cannot write `, naming `<absolute path of runs/<id>/debug.log>`.
+- Debug blocks keep appearing on stderr after that warning (including blocks of the second and later steps).
+- Exit code and normalised stdout equal those of step 2.
+
+### TS-25: Invalid `debug` value in duckwright.conf
+
+**Contract:** C3 · **Criteria:** SC6 · **Type:** CLI · **Priority:** P2
+
+**Preconditions:** CONF-BAD in effect; for reference, a config with `jev: maybe` instead.
+
+**Steps:**
+1. Run `duckwright -p "<TASK-A>"`; capture exit code and stderr.
+2. Replace the config's content with `jev: maybe` and run again; capture stderr.
+
+**Expected:**
+- Step 1: exit 2; stderr names the config file path and `debug`, and uses the same message format as the `jev: maybe` error of step 2; no run folder is created.
+
+### TS-26: Duplicate `debug` key in duckwright.conf
+
+**Contract:** C3 · **Criteria:** SC6 · **Type:** CLI · **Priority:** P2
+
+**Preconditions:** CONF-DUP in effect.
+
+**Steps:**
+1. Run `duckwright -p "<TASK-A>"`; capture exit code and stderr.
+
+**Expected:**
+- Exit 2; stderr names the config file and the line, with `"debug" is set twice` (same format as the task-file error in TS-20). If the existing config loader accepts duplicate keys for other keys (check by duplicating `jev: true`), the same lenient behavior is expected for `debug` instead (record which).
+
+### TS-27: Target-count boundary for Jev routing (255)
+
+**Contract:** C4 · **Criteria:** SC2 · **Type:** File · **Priority:** P2
+
+**Preconditions:** REAL-KEY; WIDE-PAGE (300 clickable elements) and NARROW-PAGE.
+
+**Steps:**
+1. Run `duckwright -p --jev --debug "On http://localhost:8000/wide.html click the first button" >out.txt 2>err.txt`.
+2. Run the same against NARROW-PAGE.
+3. Read the route blocks of step 2 (and later) in each `debug.log`.
+
+**Expected:**
+- Step 1: a route block for the step that sees the page has `outcome: skipped`, `reason: too many targets (<n> > 255)` with `<n>` the actual count (greater than 255), `brain: claude`, and no `jev request` block for that step.
+- Step 2: no `too many targets` reason appears; the step is routed to Jev (a `jev request` block exists).
+- The exact boundary (255 accepted, 256 skipped) is covered by the unit tests, since the count is of clickable targets as the tool sees them and is not directly settable from outside.
+
+### TS-28: Other skipped reasons
+
+**Contract:** C4 · **Criteria:** SC2 · **Type:** File · **Priority:** P3
+
+**Preconditions:** REAL-KEY. Case A: EMPTY-PAGE. Case B: a task that makes a step fail then continue, using NARROW-PAGE: `"On http://localhost:8000/narrow.html click the button labelled DOES-NOT-EXIST, then click the first button"`. Case C: a task that repeats itself (see below).
+
+**Steps:**
+1. Case A: run `duckwright -p --jev --debug "Open http://localhost:8000/empty.html and read the text" >out.txt 2>err.txt`.
+2. Case B: run the Case B task the same way.
+3. Case C: run `duckwright -p --jev --debug "Click the first button on http://localhost:8000/narrow.html twice in a row, then finish"` and look for a step whose prompt contains the repeat nudge.
+4. Search each `debug.log` for the reasons below.
+
+**Expected:**
+- Case A: a route with `outcome: skipped`, `reason: no clickable targets on the page`, `brain: claude`.
+- Case B: the step after a failed step has `outcome: skipped`, `reason: previous step failed`.
+- Case C: if the agent repeats an action and the prompt shows the nudge (the `prompt sections:` list has an `other` row), the route is `outcome: skipped`, `reason: repeat nudge in the prompt`. Whether the model repeats is not controllable; if no nudge appears, mark this case not reproduced (not a failure). `no step context` is not reachable from the CLI and is left to unit tests.
+
+### TS-29: Claude timeout shown as `exit: -1 (timeout)`
+
+**Contract:** C4 · **Criteria:** SC1 · **Type:** CLI · **Priority:** P3
+
+**Preconditions:** WRAP-CLAUDE variant HANG that sleeps 3600 seconds instead of running claude.
+
+**Steps:**
+1. Run `duckwright -p --debug "<TASK-A>" >out.txt 2>err.txt` and wait for the run to end (the Claude call timeout; ends the run as it does without `--debug`).
+
+**Expected:**
+- The step 1 Claude block has `exit: -1 (timeout)`, a `----- stderr -----` section with `timeout`, usage `n/a` values, and the log ends with a `summary` block.
+- Exit code equals that of the same HANG run without `--debug`.
+
+### TS-30: Unreadable system prompt file
+
+**Contract:** C4 · **Criteria:** SC1 · **Type:** File · **Priority:** P3
+
+**Preconditions:** WRAP-CLAUDE variant that does nothing but exec the real `claude`; a TS-1 run done first to learn a system prompt file path `P` that the run creates inside its run folder or temp area. If `P` is removed or made unreadable by the wrapper before the Claude call finishes (`chmod 000` as non-root, or delete), the debug code reads it after the call.
+
+**Steps:**
+1. Make the wrapper `rm -f` the first path after `--append-system-prompt-file` in its args, then exec the real `claude`.
+2. Run `duckwright -p --debug "<TASK-A>" >out.txt 2>err.txt`.
+
+**Expected:**
+- The `system prompts` block shows `(cannot read: <message>)` as the contents for that path; the step block still lists the path; the run proceeds as without `--debug`.
+- If the system prompt file is a repo-owned file that cannot be removed by QA, mark this scenario not feasible black-box (unit tests cover it).
 
 ## Regression
 
@@ -399,19 +494,10 @@
 
 **Steps:**
 1. Run `duckwright -p --jev --no-jev --network "<TASK-A>"`.
+2. Open `runs/<id>/history.json`.
 
 **Expected:**
 - Runs as before; no `debug.log`; `history.json` has `jev_steps` of 0.
-
-### TS-R4: Existing test suite
-
-**Contract:** C1 · **Criteria:** SC5 · **Type:** CLI · **Priority:** P2
-
-**Steps:**
-1. Run `npm test` and `npm run typecheck`.
-
-**Expected:**
-- Both exit 0 with all existing tests passing.
 
 ## Out of scope
 - Unit and integration tests (run as checks during implementation)
