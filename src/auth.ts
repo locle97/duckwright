@@ -1,0 +1,277 @@
+// Automatic login: one AuthBroker per process logs in once per environment and caches the
+// storage state under <cwd>/.duckwright/auth/. This module must not import src/runs/run.ts at
+// runtime (run.ts imports this one); anything it needs from a run arrives in LoginRunContext.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import type { RunArgs } from "./args.ts";
+import type { LoginCheck, LoginConfig } from "./environment.ts";
+import type { AgentOptions } from "./loop.ts";
+import { AbortedError, runProcess } from "./proc.ts";
+import type { Runner } from "./proc.ts";
+import { PlaywrightCLI } from "./pw.ts";
+import type { RunDeps } from "./runs/run.ts";
+import { Scrubber } from "./scrub.ts";
+
+export const AUTH_DIR = path.join(".duckwright", "auth");
+/** A cookie that expires within this many ms counts as already expired. */
+const EXPIRY_MARGIN_MS = 60_000;
+
+/** The login failed; the message is the REASON only (callers add `login failed: ENV: `). */
+export class LoginError extends Error {
+  override name = "LoginError";
+}
+
+/** What an agent login needs from the run that triggered it. Supplied by startRun (Tasks 7-8). */
+export interface LoginRunContext {
+  args: RunArgs;
+  deps: Pick<RunDeps, "prompts" | "signal" | "createAgent" | "runner" | "jevTransport" | "humanFor" | "onWarning">;
+  /** Builds the brain for a run folder; injected by run.ts so this module needs no runtime import of it. */
+  makeBrain: (workdir: string, scrubber: Scrubber) => AgentOptions["brain"];
+}
+
+export interface EnsureOptions {
+  env: { name: string; login: LoginConfig };
+  cwd?: string;
+  signal: AbortSignal;
+  headed: boolean;
+  /** Only agent logins need it; script logins ignore it. */
+  run?: LoginRunContext;
+  /** Called with the C3 REASON when a login has to run (not when a saved state is reused). */
+  onReason?: (reason: string) => void;
+}
+
+export interface BrokerOptions {
+  /** Where username/password variables are read, at login time only. Default `process.env`. */
+  env?: Record<string, string | undefined>;
+  /** Runs playwright-cli (default `runProcess`); a test seam. */
+  runner?: Runner;
+  now?: () => number;
+  createPw?: (session: string, signal: AbortSignal) => PlaywrightCLI;
+}
+
+export interface EnsureResult {
+  /** Absolute path of the cached state. */
+  path: string;
+  reused: boolean;
+  costUsd: number;
+}
+
+export function authLabel(envName: string): string {
+  // `envName` is already an environment label (see envLabel in environment.ts).
+  return envName.replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
+export function cachePath(envName: string, cwd: string): string {
+  return path.join(cwd, AUTH_DIR, `${authLabel(envName)}.json`);
+}
+
+export function stateProblem(file: string, now: number): "missing" | "unreadable" | "expired" | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable";
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return "unreadable";
+  }
+  const cookies = (data as { cookies?: unknown } | null)?.cookies;
+  if (data === null || typeof data !== "object" || !Array.isArray(cookies)) return "unreadable";
+  for (const c of cookies) {
+    const expires = (c as { expires?: unknown } | null)?.expires;
+    if (typeof expires === "number" && expires > 0 && expires * 1000 <= now + EXPIRY_MARGIN_MS) return "expired";
+  }
+  return null;
+}
+
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+export class AuthBroker {
+  readonly #env: Record<string, string | undefined>;
+  readonly #runner: Runner;
+  readonly #now: () => number;
+  readonly #createPw: (session: string, signal: AbortSignal) => PlaywrightCLI;
+  readonly #inflight = new Map<string, Promise<EnsureResult>>();
+  /** Cache path -> mtime of the state file whose check already passed in this process (D11). */
+  readonly #checked = new Map<string, number>();
+
+  constructor(o: BrokerOptions = {}) {
+    this.#env = o.env ?? process.env;
+    this.#runner = o.runner ?? runProcess;
+    this.#now = o.now ?? Date.now;
+    this.#createPw = o.createPw
+      ?? ((session, signal) => new PlaywrightCLI({ session, runner: this.#runner, signal }));
+  }
+
+  ensure(opts: EnsureOptions): Promise<EnsureResult> {
+    const cwd = opts.cwd ?? process.cwd();
+    const key = cachePath(opts.env.name, cwd);
+    const running = this.#inflight.get(key);
+    if (running) return running;
+    const p = this.#ensure(opts, cwd, key).finally(() => this.#inflight.delete(key));
+    this.#inflight.set(key, p);
+    return p;
+  }
+
+  async #ensure(opts: EnsureOptions, cwd: string, file: string): Promise<EnsureResult> {
+    const { env, signal } = opts;
+    const label = authLabel(env.name);
+    const problem = stateProblem(file, this.#now());
+    let reason: string;
+    if (problem === null) {
+      if (await this.#checkPassed(file, label, env.login.check, signal)) {
+        return { path: file, reused: true, costUsd: 0 };
+      }
+      reason = "saved state failed the check";
+    } else {
+      reason = { missing: "no saved state", unreadable: "saved state unreadable", expired: "saved state expired" }[problem];
+    }
+    opts.onReason?.(reason);
+    const costUsd = await this.#login(opts, cwd, file, label);
+    this.#markChecked(file);
+    return { path: file, reused: false, costUsd };
+  }
+
+  #mtime(file: string): number | null {
+    try {
+      return fs.statSync(file).mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
+  #markChecked(file: string): void {
+    const m = this.#mtime(file);
+    if (m !== null) this.#checked.set(file, m);
+  }
+
+  /** D10 (c): a fresh session loads the state and looks for the check text. Never throws except on abort. */
+  async #checkPassed(file: string, label: string, check: LoginCheck | null, signal: AbortSignal): Promise<boolean> {
+    if (check === null) return true;
+    const m = this.#mtime(file);
+    if (m !== null && this.#checked.get(file) === m) return true;
+    const pw = this.#createPw(`duckwright-check-${label}`, signal);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-check-"));
+    try {
+      const opened = await pw.open(false);
+      if (opened.code !== 0) return false;
+      await pw.stateLoad(file);
+      await checkPage(pw, check, path.join(dir, "snapshot.yml"));
+      this.#markChecked(file);
+      return true;
+    } catch (e) {
+      if (e instanceof AbortedError || signal.aborted) throw new AbortedError();
+      return false;
+    } finally {
+      await pw.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  #credentials(login: LoginConfig): { username: string; password: string } {
+    const read = (name: string): string => {
+      const v = this.#env[name];
+      if (v === undefined || v === "") throw new LoginError(`environment variable ${name} is not set`);
+      return v;
+    };
+    return { username: read(login.usernameEnv), password: read(login.passwordEnv) };
+  }
+
+  async #login(opts: EnsureOptions, cwd: string, file: string, label: string): Promise<number> {
+    const { login } = opts.env;
+    const creds = this.#credentials(login);
+    const scrubber = new Scrubber();
+    scrubber.addSecret(creds.password);
+    scrubber.addSecret(creds.username);
+    prepareCacheDir(cwd, file);
+    const tmp = `${file}.tmp`;
+    try {
+      if (login.method === "script") {
+        await this.#scriptLogin(opts, label, login, creds, scrubber, tmp);
+        publish(tmp, file);
+        return 0;
+      }
+      // Task 7 replaces this with the agent login.
+      throw new LoginError("agent login is not available yet");
+    } catch (e) {
+      if (e instanceof AbortedError) throw e;
+      if (opts.signal.aborted) throw new AbortedError();
+      throw e instanceof LoginError ? new LoginError(scrubber.scrub(e.message)) : e;
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+
+  async #scriptLogin(
+    opts: EnsureOptions, label: string, login: Extract<LoginConfig, { method: "script" }>,
+    creds: { username: string; password: string }, scrubber: Scrubber, tmp: string,
+  ): Promise<void> {
+    const pw = this.#createPw(`duckwright-login-${label}`, opts.signal);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-login-"));
+    const step = async (name: string, run: () => Promise<{ code: number; stdout: string; stderr: string } | void>) => {
+      try {
+        const res = await run();
+        if (res && res.code !== 0) throw new Error(res.stderr || res.stdout || `exit ${res.code}`);
+      } catch (e) {
+        if (e instanceof AbortedError) throw e;
+        throw new LoginError(scrubber.scrub(`${name} failed: ${messageOf(e)}`));
+      }
+    };
+    try {
+      await step("open", () => pw.open(opts.headed));
+      await step("goto", () => pw.run("goto", [login.url]));
+      await step("fill username", () => pw.run("fill", [login.usernameSelector, creds.username]));
+      await step("fill password", () => pw.run("fill", [login.passwordSelector, creds.password]));
+      await step("click submit", () => pw.run("click", [login.submitSelector]));
+      if (login.check !== null) await checkPage(pw, login.check, path.join(dir, "snapshot.yml"));
+      await step("state-save", () => pw.stateSave(tmp));
+    } finally {
+      await pw.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * Go to the check URL and look for the text. The snapshot call is `pw.snapshot(file)`, i.e.
+ * `playwright-cli -s=SESSION snapshot --filename=FILE`.
+ */
+export async function checkPage(pw: PlaywrightCLI, check: LoginCheck, snapshotFile: string): Promise<void> {
+  const g = await pw.run("goto", [check.url]);
+  if (g.code !== 0) throw new LoginError(`goto failed: ${g.stderr || g.stdout || `exit ${g.code}`}`);
+  const snapshot = await pw.snapshot(snapshotFile);
+  if (!snapshot.includes(check.text)) {
+    throw new LoginError(`check failed: "${check.text}" not found at ${check.url}`);
+  }
+}
+
+/** Creates `.duckwright/auth` (0o700) and `.duckwright/.gitignore` (`*`, only if absent). */
+function prepareCacheDir(cwd: string, file: string): void {
+  try {
+    const authDir = path.dirname(file);
+    const root = path.dirname(authDir);
+    fs.mkdirSync(authDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(root, 0o700);
+    fs.chmodSync(authDir, 0o700);
+    const ignore = path.join(root, ".gitignore");
+    if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, "*\n");
+  } catch (e) {
+    throw new LoginError(`cannot write ${file}: ${messageOf(e)}`);
+  }
+}
+
+/** Moves the saved temp file onto the cache path with mode 0o600. */
+function publish(tmp: string, file: string): void {
+  try {
+    if (!fs.existsSync(tmp)) throw new Error("state-save wrote no file");
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    throw new LoginError(`cannot write ${file}: ${messageOf(e)}`);
+  }
+}
