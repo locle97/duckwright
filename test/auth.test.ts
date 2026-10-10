@@ -108,6 +108,7 @@ test("script_login_issues_exact_steps_and_saves_cache", async () => {
   assert.deepEqual(res, { path: cache, reused: false, costUsd: 0 });
   assert.equal(fs.statSync(cache).mode & 0o777, 0o600);
   assert.equal(fs.statSync(path.dirname(cache)).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(path.join(cwd, ".duckwright")).mode & 0o777, 0o700);
   assert.equal(fs.readFileSync(path.join(cwd, ".duckwright", ".gitignore"), "utf8"), "*\n");
   assert.equal(fs.existsSync(`${cache}.tmp`), false);
 });
@@ -314,4 +315,70 @@ test("aborted_signal_rejects_with_aborted_error", async () => {
     b.ensure({ env: { name: "staging", login: SCRIPT }, cwd: tmpDir(), signal: ac.signal, headed: false }),
     (e: Error) => e instanceof AbortedError && !(e instanceof LoginError),
   );
+});
+
+test("check_snapshot_failure_is_scrubbed_login_error", async () => {
+  const r = fakeRunner((argv) => {
+    if (cmd(argv) === "snapshot") return { code: 1, stdout: "", stderr: `page said ${PASSWORD}` };
+    return ok();
+  });
+  await assert.rejects(ensure(broker(r as never), tmpDir(), { ...SCRIPT, check: CHECK }), (e: Error) => {
+    assert.ok(e instanceof LoginError);
+    assert.match(e.message, /\[REDACTED\]/);
+    assert.ok(!e.message.includes(PASSWORD));
+    return true;
+  });
+});
+
+test("state_save_failure_with_empty_stderr_reports_exit_code", async () => {
+  const r = fake({ fail: { "state-save": { code: 3, stdout: "", stderr: "" } } });
+  await assert.rejects(ensure(broker(r), tmpDir()), (e: Error) => {
+    assert.ok(e instanceof LoginError);
+    assert.equal(e.message, "state-save failed: exit 3");
+    return true;
+  });
+});
+
+test("joiner_survives_first_caller_abort_with_one_extra_login", async () => {
+  const cwd = tmpDir();
+  const ac1 = new AbortController();
+  const ac2 = new AbortController();
+  let first = true;
+  const r = fakeRunner((argv) => {
+    if (cmd(argv) === "goto" && first) {
+      first = false;
+      ac1.abort();
+      throw new AbortedError();
+    }
+    if (cmd(argv) === "state-save") fs.writeFileSync(argv[3], '{"cookies":[]}');
+    return ok();
+  });
+  const b = broker(r as never);
+  const mk = (signal: AbortSignal) =>
+    b.ensure({ env: { name: "staging", login: SCRIPT }, cwd, signal, headed: false });
+  const a = mk(ac1.signal);
+  const c = mk(ac2.signal);
+  await assert.rejects(a, AbortedError);
+  const res = await c;
+  assert.equal(res.reused, false);
+  assert.equal(r.calls.filter((x) => cmd(x.argv) === "open").length, 2);
+});
+
+test("joiner_own_abort_rejects_promptly", async () => {
+  const cwd = tmpDir();
+  const ac2 = new AbortController();
+  let release!: () => void;
+  const gate = new Promise<void>((res) => { release = res; });
+  const r = async (argv: string[]) => {
+    if (cmd(argv) === "goto") await gate;
+    if (cmd(argv) === "state-save") fs.writeFileSync(argv[3], '{"cookies":[]}');
+    return ok();
+  };
+  const b = new AuthBroker({ env: ENV, runner: r as never, now: () => NOW });
+  const a = ensure(b, cwd);
+  const c = b.ensure({ env: { name: "staging", login: SCRIPT }, cwd, signal: ac2.signal, headed: false });
+  ac2.abort();
+  await assert.rejects(c, AbortedError);
+  release();
+  await a;
 });

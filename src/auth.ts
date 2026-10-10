@@ -91,6 +91,30 @@ export function stateProblem(file: string, now: number): "missing" | "unreadable
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+type StepResult = { code: number; stdout: string; stderr: string } | void;
+export type Step = (name: string, run: () => Promise<StepResult>) => Promise<void>;
+
+/** Runs one login step; any failure becomes a scrubbed `LoginError("NAME failed: ...")`. */
+function makeStep(scrubber: Scrubber): Step {
+  return async (name, run) => {
+    try {
+      const res = await run();
+      if (res && res.code !== 0) throw new Error(res.stderr || res.stdout || `exit ${res.code}`);
+    } catch (e) {
+      if (e instanceof AbortedError) throw e;
+      throw new LoginError(scrubber.scrub(`${name} failed: ${messageOf(e)}`));
+    }
+  };
+}
+
+/** Shared tail of every login: the optional check, then saving the state to `tmp`. */
+export async function finishLogin(
+  pw: PlaywrightCLI, check: LoginCheck | null, tmp: string, snapshotFile: string, step: Step,
+): Promise<void> {
+  if (check !== null) await checkPage(pw, check, snapshotFile, step);
+  await step("state-save", () => pw.run("state-save", [tmp]));
+}
+
 export class AuthBroker {
   readonly #env: Record<string, string | undefined>;
   readonly #runner: Runner;
@@ -112,10 +136,28 @@ export class AuthBroker {
     const cwd = opts.cwd ?? process.cwd();
     const key = cachePath(opts.env.name, cwd);
     const running = this.#inflight.get(key);
-    if (running) return running;
+    if (running) return this.#join(running, opts);
     const p = this.#ensure(opts, cwd, key).finally(() => this.#inflight.delete(key));
     this.#inflight.set(key, p);
     return p;
+  }
+
+  /**
+   * Wait for a login another caller started. That login is driven by the starter's signal only:
+   * if it ends aborted while this caller is still live, start a fresh one; if this caller's own
+   * signal aborts, stop waiting at once.
+   */
+  #join(running: Promise<EnsureResult>, opts: EnsureOptions): Promise<EnsureResult> {
+    const { signal } = opts;
+    return new Promise<EnsureResult>((resolve, reject) => {
+      if (signal.aborted) return reject(new AbortedError());
+      const onAbort = (): void => reject(new AbortedError());
+      signal.addEventListener("abort", onAbort, { once: true });
+      running.then(resolve, (e) => {
+        if (e instanceof AbortedError && !signal.aborted) this.ensure(opts).then(resolve, reject);
+        else reject(e);
+      }).finally(() => signal.removeEventListener("abort", onAbort));
+    });
   }
 
   async #ensure(opts: EnsureOptions, cwd: string, file: string): Promise<EnsureResult> {
@@ -201,7 +243,7 @@ export class AuthBroker {
     } catch (e) {
       if (e instanceof AbortedError) throw e;
       if (opts.signal.aborted) throw new AbortedError();
-      throw e instanceof LoginError ? new LoginError(scrubber.scrub(e.message)) : e;
+      throw new LoginError(scrubber.scrub(messageOf(e)));
     } finally {
       fs.rmSync(tmp, { force: true });
     }
@@ -213,23 +255,14 @@ export class AuthBroker {
   ): Promise<void> {
     const pw = this.#createPw(`duckwright-login-${label}`, opts.signal);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-login-"));
-    const step = async (name: string, run: () => Promise<{ code: number; stdout: string; stderr: string } | void>) => {
-      try {
-        const res = await run();
-        if (res && res.code !== 0) throw new Error(res.stderr || res.stdout || `exit ${res.code}`);
-      } catch (e) {
-        if (e instanceof AbortedError) throw e;
-        throw new LoginError(scrubber.scrub(`${name} failed: ${messageOf(e)}`));
-      }
-    };
+    const step = makeStep(scrubber);
     try {
       await step("open", () => pw.open(opts.headed));
       await step("goto", () => pw.run("goto", [login.url]));
       await step("fill username", () => pw.run("fill", [login.usernameSelector, creds.username]));
       await step("fill password", () => pw.run("fill", [login.passwordSelector, creds.password]));
       await step("click submit", () => pw.run("click", [login.submitSelector]));
-      if (login.check !== null) await checkPage(pw, login.check, path.join(dir, "snapshot.yml"));
-      await step("state-save", () => pw.stateSave(tmp));
+      await finishLogin(pw, login.check, tmp, path.join(dir, "snapshot.yml"), step);
     } finally {
       await pw.close();
       fs.rmSync(dir, { recursive: true, force: true });
@@ -241,10 +274,13 @@ export class AuthBroker {
  * Go to the check URL and look for the text. The snapshot call is `pw.snapshot(file)`, i.e.
  * `playwright-cli -s=SESSION snapshot --filename=FILE`.
  */
-export async function checkPage(pw: PlaywrightCLI, check: LoginCheck, snapshotFile: string): Promise<void> {
-  const g = await pw.run("goto", [check.url]);
-  if (g.code !== 0) throw new LoginError(`goto failed: ${g.stderr || g.stdout || `exit ${g.code}`}`);
-  const snapshot = await pw.snapshot(snapshotFile);
+export async function checkPage(
+  pw: PlaywrightCLI, check: LoginCheck, snapshotFile: string,
+  step: Step = makeStep(new Scrubber()),
+): Promise<void> {
+  await step("goto", () => pw.run("goto", [check.url]));
+  let snapshot = "";
+  await step("snapshot", async () => { snapshot = await pw.snapshot(snapshotFile); });
   if (!snapshot.includes(check.text)) {
     throw new LoginError(`check failed: "${check.text}" not found at ${check.url}`);
   }
