@@ -81,3 +81,78 @@ test("env_list_filters_and_sorts", () => {
   fs.mkdirSync(path.join(tmp, "environments", "dir.md"));
   assert.deepEqual(listEnvironments(tmp), ["A", "a", "b"]);
 });
+
+const SCRIPT_FM = [
+  "---", "login:", "  method: script", "  url: https://staging.example.com/login",
+  "  username-env: STAGING_USER", "  password-env: STAGING_PASSWORD",
+  '  username-selector: "#email"', '  password-selector: "#password"',
+  '  submit-selector: "button[type=submit]"', "  check-url: https://staging.example.com/account",
+  "  check-text: Sign out", "---",
+];
+
+test("env_login_none", () => {
+  const tmp = tmpDir();
+  envFile(tmp, "a.md", "# Staging\n");
+  const r = loadEnvironment("a", tmp);
+  assert.equal(r.text, "# Staging");
+  assert.equal(r.login, null);
+});
+
+test("env_login_script", () => {
+  const tmp = tmpDir();
+  envFile(tmp, "a.md", [...SCRIPT_FM, "# Staging", "body"].join("\r\n"));
+  const r = loadEnvironment("a", tmp);
+  assert.equal(r.text, "# Staging\nbody");
+  assert.deepEqual(r.login, {
+    method: "script", url: "https://staging.example.com/login", usernameSelector: "#email",
+    passwordSelector: "#password", submitSelector: "button[type=submit]", usernameEnv: "STAGING_USER",
+    passwordEnv: "STAGING_PASSWORD",
+    check: { url: "https://staging.example.com/account", text: "Sign out" },
+  });
+});
+
+test("env_login_agent_comments_and_open_fence_spaces", () => {
+  const tmp = tmpDir();
+  envFile(tmp, "a.md", [
+    "---   ", "# note", "login:", "  method: agent", "", "  task: 'Log in via SSO' # c",
+    "  username-env: U", "  password-env: P", "---", "Body",
+  ].join("\n"));
+  assert.deepEqual(loadEnvironment("a", tmp).login, {
+    method: "agent", task: "Log in via SSO", usernameEnv: "U", passwordEnv: "P", check: null,
+  });
+});
+
+test("env_login_errors", () => {
+  const tmp = tmpDir();
+  const p = path.join(tmp, "environments", "a.md");
+  const fm = (...l: string[]) => ["---", ...l, "---", "body"].join("\n");
+  const ok = ["login:", "  method: agent", "  task: t", "  username-env: U", "  password-env: P"];
+  const cases: [string, string][] = [
+    ["---\nlogin:\n  method: agent\nbody", `${p}: front matter is not closed with ---`],
+    [fm("login:", "  nocolon"), `${p}:3: expected "key: value"`],
+    [fm("nocolon"), `${p}:2: expected "key: value"`],
+    [fm("foo: bar"), `${p}:2: unknown key "foo" (only login is allowed)`],
+    [fm("login:", '  method: "agent'), `${p}:3: bad quoted value`],
+    [fm("login:", "  bogus: 1"), `${p}:3: login: unknown key "bogus"`],
+    [fm("login:", "  method: agent", "  method: agent"), `${p}:4: login: "method" is set twice`],
+    [fm("login:", "  method:"), `${p}:3: login: "method" has no value`],
+    [fm("login:", "  task: t"), `${p}: login: method is required`],
+    [fm("login:", "  method: ftp"), `${p}:3: login: method must be agent or script, got "ftp"`],
+    [fm("login:", "  method: agent", "  username-env: U", "  password-env: P"), `${p}: login: task is required for method agent`],
+    [fm(...ok, "  url: https://x.test"), `${p}:7: login: url is not used by method agent`],
+    [fm("login:", "  method: agent", "  task: t", "  username-env: 1X", "  password-env: P"),
+      `${p}:5: login: username-env must be an environment variable name (letters, digits and _, not starting with a digit), got "1X"`],
+    [fm("login:", "  method: script", "  url: ftp://x"), `${p}:4: login: url must be an http or https URL, got "ftp://x"`],
+    [fm(...ok, "  check-url: https://x.test"), `${p}: login: check-url and check-text must be set together`],
+    [fm(...ok, "  check-text: hi"), `${p}: login: check-url and check-text must be set together`],
+    [fm("login: foo"), `${p}:2: login: must be followed by indented "key: value" lines`],
+  ];
+  for (const [content, msg] of cases) {
+    envFile(tmp, "a.md", content);
+    assert.equal(loadError("a", tmp), `environment file invalid: ${msg}`, content);
+  }
+  envFile(tmp, "a.md", fm(...ok).replace("body", ""));
+  assert.equal(loadError("a", tmp), `environment file is empty: ${p}`);
+  envFile(tmp, "a.md", "---\n" + "x".repeat(20000));
+  assert.match(loadError("a", tmp), /too large/);
+});
