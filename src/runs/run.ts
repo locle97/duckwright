@@ -10,14 +10,17 @@ import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
 import { EnvError, loadEnvironment } from "../environment.ts";
-import { HybridBrain, JevAuthError, JevClient } from "../jev.ts";
+import { HybridBrain, JevAuthError, JevClient, fetchTransport } from "../jev.ts";
+import type { JevTransport } from "../jev.ts";
+import { DebugLog, debugRunner, debugTransport } from "../debuglog.ts";
 import { ExportError, exportRun } from "../export.ts";
 import type { HistoryData } from "../export.ts";
 import type { Evidence } from "../evidence.ts";
 import type { AgentOptions, RunResult } from "../loop.ts";
 import { pageDir } from "../observe.ts";
 import { resolvePath } from "../paths.ts";
-import { AbortedError } from "../proc.ts";
+import { AbortedError, runProcess } from "../proc.ts";
+import type { Runner } from "../proc.ts";
 import type { StepRecord } from "../prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../pw.ts";
 import { makeRunDir } from "../rundir.ts";
@@ -69,6 +72,12 @@ export interface RunDeps {
   humanFor?: (ctx: { signal: AbortSignal; events: RunEvents }) => Human | null;
   /** Where the TOTP secret is read from. Default `process.env`. */
   env?: Record<string, string | undefined>;
+  /** Where debug-log blocks are also sent (print mode passes stderr). The file is written regardless. */
+  debugConsole?: (text: string) => void;
+  /** The inner Claude runner (default `runProcess`); a test seam. */
+  runner?: Runner;
+  /** The inner Jev transport (default `fetchTransport`); a test seam. */
+  jevTransport?: JevTransport;
 }
 
 export interface RunHandle {
@@ -174,25 +183,39 @@ async function execute(
     if (env) envRecord = { name: env.name, path: env.path };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
-    const claude = new Brain({
-      systemFiles: [deps.prompts.system, modeMd, args.skill],
-      model: args.model,
-      snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
-      signal,
-    });
-    const brain = args.jev
-      ? new HybridBrain({
-        jev: new JevClient({ apiKey: ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim(), signal }),
-        claude, minConfidence: args.jevThreshold,
-      })
-      : claude;
-    const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     const twofa = createTwoFactor({
       secret: (deps.env ?? process.env)[SECRET_ENV] ?? null,
       human: deps.humanFor?.({ signal, events }) ?? null,
       timeoutSec: args.twofaTimeout,
       signal, events,
     });
+    const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
+    let log: DebugLog | null = null;
+    if (args.debug) {
+      log = new DebugLog({
+        runId: path.basename(workdir), file: path.join(workdir, "debug.log"), console: deps.debugConsole,
+        secrets: apiKey !== "" ? [apiKey] : [], scrub: (t) => twofa.scrubber.scrub(t), onWarning: deps.onWarning,
+      });
+      log.attach(events);
+    }
+    const claude = new Brain({
+      systemFiles: [deps.prompts.system, modeMd, args.skill],
+      model: args.model,
+      snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
+      signal,
+      runner: log ? debugRunner(deps.runner ?? runProcess, log) : deps.runner,
+    });
+    const brain = args.jev
+      ? new HybridBrain({
+        jev: new JevClient({
+          apiKey, signal,
+          transport: log ? debugTransport(deps.jevTransport ?? fetchTransport, log) : deps.jevTransport,
+        }),
+        claude, minConfidence: args.jevThreshold,
+        ...(log ? { onRoute: (r) => log.route(r) } : {}),
+      })
+      : claude;
+    const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     agent = deps.createAgent({
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
