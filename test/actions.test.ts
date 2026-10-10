@@ -555,3 +555,10 @@ test("twofa_total_is_capped_at_five", async () => {
   const { results } = await execute(pw, [A("twofa", "totp", "e5")], undefined, undefined, null, null, t);
   assert.deepEqual(results, ["error: too many 2FA attempts in this run"]);
 });
+
+test("dblclick_is_allowed_and_page_changing", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await execute(pw, [A("dblclick", "e5"), A("fill", "e9", "hi")]);
+  assert.deepEqual(results, ["ok", "skipped: page may have changed"]);
+  assert.deepEqual(calls, [["dblclick", "e5"]]);
+});

@@ -13,7 +13,7 @@ import { sliceCodePoints } from "./text.ts";
 export const ALLOWED: ReadonlySet<string> = new Set(ALLOWED_COMMANDS);
 export const ALLOWED_LIST = ALLOWED_COMMANDS.join(", ");
 export const PAGE_CHANGING: ReadonlySet<string> = new Set([
-  "goto", "click", "press", "tab-new", "tab-select", "tab-close", "go-back", "twofa",
+  "goto", "click", "dblclick", "press", "tab-new", "tab-select", "tab-close", "go-back", "twofa",
 ]);
 
 // Harmless flags per command (from `playwright-cli <cmd> --help`). Any other flag,
@@ -22,6 +22,7 @@ export const ALLOWED_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
   fill: new Set(["--submit"]),
   type: new Set(["--submit"]),
   click: new Set(["--modifiers"]),
+  dblclick: new Set(["--modifiers"]),
   screenshot: new Set(["--type", "--full-page", "--hires"]),
 };
 const FLAG = /^-{1,2}[A-Za-z]/;
