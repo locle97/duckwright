@@ -7,6 +7,8 @@ import { RunControl } from "./control.ts";
 import { RunEvents } from "./events.ts";
 import { startVideo, stopVideo, takeScreenshot } from "./evidence.ts";
 import type { Evidence } from "./evidence.ts";
+import { captureConsoleErrors } from "./console.ts";
+import { flat } from "./text.ts";
 import { captureStep, clearRequests, currentOrigin, networkDir } from "./network.ts";
 import { observe, pageDir, pasteSnapshot } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
@@ -55,6 +57,7 @@ export interface AgentOptions {
   events?: RunEvents;
   control?: RunControl;
   network?: boolean;
+  consoleErrors?: boolean;
   twofa?: TwoFactor;
   video?: boolean;
   screenshot?: boolean;
@@ -75,6 +78,7 @@ export class Agent {
   readonly events: RunEvents;
   readonly control: RunControl | undefined;
   readonly network: boolean;
+  readonly consoleErrors: boolean;
   readonly twofa: TwoFactor | undefined;
   readonly video: boolean;
   readonly screenshot: boolean;
@@ -99,6 +103,7 @@ export class Agent {
     this.events = opts.events ?? new RunEvents();
     this.control = opts.control;
     this.network = opts.network ?? false;
+    this.consoleErrors = opts.consoleErrors ?? false;
     this.twofa = opts.twofa;
     this.video = opts.video ?? false;
     this.screenshot = opts.screenshot ?? false;
@@ -248,6 +253,12 @@ export class Agent {
         this.pendingNetworkErrors = [];
         rec.network = entries;
         if (errs.length) rec.networkErrors = errs;
+      }
+      if (this.consoleErrors) {
+        const cap = await captureConsoleErrors(this.pw);
+        const messages = cap.messages.map(this.scrub);
+        if (messages.length) rec.consoleErrors = messages;
+        if (cap.error !== null) this.evidence.warnings.push(`console capture failed at step ${step}: ${this.scrub(flat(cap.error))}`);
       }
       await this.record(history, rec, cost, startedAt);
       if (done !== null) return { success: done.success, answer: this.scrub(done.answer), steps, costUsd: this.costUsd, history };

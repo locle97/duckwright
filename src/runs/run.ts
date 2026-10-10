@@ -60,6 +60,8 @@ export interface RunSpec {
   task: string;
   taskFile: string | null;
   args: RunArgs;
+  exportTest?: boolean;
+  consoleErrors?: boolean;
 }
 
 export interface RunDeps {
@@ -123,6 +125,7 @@ export function historyJson(
       ...(r.screenshotError ? { screenshot_error: r.screenshotError } : {}),
       ...(r.network ? { network: r.network } : {}),
       ...(r.networkErrors?.length ? { network_errors: [...r.networkErrors] } : {}),
+      ...(r.consoleErrors?.length ? { console_errors: [...r.consoleErrors] } : {}),
       ...(r.requestOrigins?.some((o) => o !== null) ? { request_origins: [...r.requestOrigins] } : {}),
     })),
   };
@@ -219,7 +222,7 @@ async function execute(
     agent = deps.createAgent({
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
-      snapshotMode: args.snapshot, network: args.network, video: args.video, screenshot: args.screenshot,
+      snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa, environment: env?.text ?? null,
     });
     events.emit({
@@ -267,6 +270,8 @@ async function execute(
     let error: string | null = null;
     if (!result.success) {
       exported = { kind: "skipped" };
+    } else if (spec.exportTest === false) {
+      exported = { kind: "off" };
     } else {
       try {
         const r = exportRun(workdir);

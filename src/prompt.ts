@@ -15,6 +15,7 @@ export interface StepRecord {
   codes: (string | null)[];
   network?: NetworkEntry[];
   networkErrors?: string[];
+  consoleErrors?: string[];
   requestOrigins?: (string | null)[];
   screenshot?: string;
   screenshotError?: string;
