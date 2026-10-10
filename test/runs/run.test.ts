@@ -684,6 +684,20 @@ test("start_run_passes_console_errors", async () => {
 });
 
 test("history_json_records_explicit_state_after_env", async () => {
+  await inEnvDir(async () => {
+    const inside = path.join(process.cwd(), "auth", "s.json");
+    const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside, env: "staging" });
+    const h = startRun(spec, deps);
+    await h.done;
+    const j = readHistory(h.workdir);
+    assert.equal(j.env.name, "staging");
+    assert.equal(j.state.source, "file");
+    const keys = Object.keys(j);
+    assert.equal(keys.indexOf("state"), keys.indexOf("env") + 1);
+  });
+});
+
+test("history_json_records_explicit_state_after_task_file", async () => {
   const inside = path.join(process.cwd(), "auth", "s.json");
   const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside });
   const h = startRun(spec, deps);

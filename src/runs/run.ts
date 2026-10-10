@@ -194,7 +194,8 @@ async function execute(
   try {
     const env = args.env ? loadEnvironment(args.env) : null;
     if (env) envRecord = { name: env.name, path: env.path };
-    if (args.state) stateRecord = { path: statePathForHistory(resolvePath(args.state), resolvePath(process.cwd())), source: "file" };
+    const statePath = args.state ? resolvePath(args.state) : null;
+    if (statePath) stateRecord = { path: statePathForHistory(statePath, resolvePath(process.cwd())), source: "file" };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const twofa = createTwoFactor({
@@ -232,7 +233,7 @@ async function execute(
     const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     agent = deps.createAgent({
       task, pw, brain, workdir,
-      maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
+      maxSteps: args.maxSteps, headed: args.headed, state: statePath,
       snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa, environment: env?.text ?? null,
     });
