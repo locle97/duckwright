@@ -82,6 +82,7 @@ export interface HistoryData {
   task: string;
   task_file: string | null;
   env?: { name: string; path: string };
+  state?: { path: string; source: "file" | "login" };
   success: boolean;
   answer: string;
   steps: number;
@@ -105,8 +106,23 @@ export class ExportError extends Error {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** The `test.use` lines (each ending in a newline) for a run that started from a storage state. */
+export function stateBlock(state: { path: string; source: "file" | "login" }): string {
+  const how = state.source === "login" ? "auto-login" : "--state";
+  const json = JSON.stringify(state.path);
+  const first = state.path.includes("\n")
+    ? `// The run started from a storage state (${how}).`
+    : `// The run started from the storage state in ${json.slice(1, -1)} (${how}).`;
+  return `${first}\n`
+    + "// Set DUCKWRIGHT_STORAGE_STATE to use another file; in CI, supply one.\n"
+    + `test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || ${json} });\n`;
+}
+
 function shapeError(data: unknown): string | null {
   if (!isObject(data)) return "expected a JSON object";
+  if (data.state !== undefined && (!isObject(data.state) || typeof data.state.path !== "string")) {
+    return "'state' must be an object with a string 'path'";
+  }
   if (typeof data.task !== "string") return "'task' must be a string";
   if (typeof data.success !== "boolean") return "'success' must be true or false";
   if (!Array.isArray(data.history)) return "'history' must be a list";
@@ -267,11 +283,12 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   const body = data.history.flatMap((_, index) => [...arms[index], ...lines[index]]);
   if (!hasCode) throw new ExportError("nothing to export: the run recorded no Playwright code", 1);
   warnings.unshift(...tabs.map((t) => `run used ${t}; edit the test by hand, it assumes a single page`));
-  if (setups > 0) warnings.push(COOKIES_NOTE);
+  if (setups > 0 && data.state === undefined) warnings.push(COOKIES_NOTE);
   if (!asserted) warnings.push(NO_ASSERTIONS);
   warnings.push(...manual);
   const head = HEADER + (manual.length > 0 ? MANUAL_NOTE : "") + (usesTotp ? `${TOTP_IMPORT}\n${TOTP_HELPER}` : "");
   const spec = head + "\n"
+    + (data.state !== undefined ? stateBlock(data.state) + "\n" : "")
     + `test(${JSON.stringify(data.task)}, async ({ page }) => {\n`
     + body.map((line) => line + "\n").join("")
     + "});\n";

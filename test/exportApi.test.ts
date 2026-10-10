@@ -132,3 +132,18 @@ test("malformed_network_entries_rejected_with_exit_2", () => {
   assert.throws(bad([{ ...ok, id: null }]), badHistory(/id/));
   assert.throws(bad([null]), badHistory(/network/));
 });
+
+test("api_header_has_no_state_hint", () => {
+  assert.ok(!API_HEADER.includes("--state"));
+});
+
+test("api_spec_has_test_use_only_with_state", () => {
+  const tmp = tmpDir();
+  const entries = [[entry("0001", "GET", "http://app.test/api/me", 200)]];
+  const block = "// The run started from the storage state in s.json (--state).\n"
+    + "// Set DUCKWRIGHT_STORAGE_STATE to use another file; in CI, supply one.\n"
+    + 'test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || "s.json" });\n';
+  const withState = renderApiSpec({ ...run(entries), state: { path: "s.json", source: "file" } }, tmp).spec;
+  assert.ok(withState.startsWith(API_HEADER + "\n" + block + "\n" + "test("));
+  assert.ok(!renderApiSpec(run(entries), tmp).spec.includes("test.use"));
+});

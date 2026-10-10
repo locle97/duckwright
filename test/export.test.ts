@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { ExportError, NO_ASSERTIONS, SPEC_NAME, TOTP_HELPER, TOTP_IMPORT, exportRun, loadHistory, renderSpec } from "../src/export.ts";
+import { ExportError, NO_ASSERTIONS, SPEC_NAME, TOTP_HELPER, TOTP_IMPORT, exportRun, loadHistory, renderSpec, stateBlock } from "../src/export.ts";
 import type { HistoryData } from "../src/export.ts";
 import { ROOT, tmpDir } from "./helpers.ts";
 
@@ -533,4 +533,53 @@ test("export accepts history with jev fields", () => {
   const plain = run([step([["goto", ["https://example.com/form"], GOTO], ["click", ["e1"], CLICK]])]);
   const withJev = { ...run([jevStep]), jev_steps: 1, claude_steps: 0 } as HistoryData;
   assert.equal(renderSpec(withJev).spec, renderSpec(plain).spec);
+});
+
+const STATE_LOGIN = { path: ".duckwright/auth/staging.json", source: "login" as const };
+const LOGIN_BLOCK = "// The run started from the storage state in .duckwright/auth/staging.json (auto-login).\n"
+  + "// Set DUCKWRIGHT_STORAGE_STATE to use another file; in CI, supply one.\n"
+  + 'test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || ".duckwright/auth/staging.json" });\n';
+
+test("state_login_renders_test_use_block", () => {
+  const { spec } = renderSpec({ ...GREET, state: STATE_LOGIN });
+  assert.equal(stateBlock(STATE_LOGIN), LOGIN_BLOCK);
+  assert.equal(spec, HEADER + "\n" + LOGIN_BLOCK + "\n" + 'test("greet", async ({ page }) => {\n'
+    + `  ${GOTO}\n  ${FILL}\n  ${CLICK}\n  ${EXPECT}\n` + "});\n");
+});
+
+test("state_file_says_state_flag", () => {
+  const { spec } = renderSpec({ ...GREET, state: { path: "a.json", source: "file" } });
+  assert.ok(spec.includes("// The run started from the storage state in a.json (--state).\n"));
+  assert.ok(spec.includes('test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || "a.json" });\n'));
+});
+
+test("state_block_goes_after_totp_helper", () => {
+  const totp = run([step([["twofa", ["totp"], "await page.getByLabel('Code').fill('[2FA CODE]');"]]), step([["goto", ["u"], GOTO]])]);
+  const { spec } = renderSpec({ ...totp, state: STATE_LOGIN });
+  assert.ok(spec.includes(TOTP_HELPER + "\n" + LOGIN_BLOCK + "\ntest("));
+});
+
+test("state_path_with_newline_is_left_out_of_the_comment", () => {
+  const block = stateBlock({ path: "a\nb.json", source: "file" });
+  assert.equal(block.split("\n")[0], "// The run started from a storage state (--state).");
+  assert.ok(block.includes('storageState: process.env.DUCKWRIGHT_STORAGE_STATE || "a\\nb.json"'));
+  assert.equal(block.split("\n").length, 4);
+});
+
+test("state_replaces_the_cookies_note", () => {
+  const steps = [reqStep(["POST", "/api/items", "{}"], "ok 201"), step([["goto", ["u"], GOTO]])];
+  assert.ok(renderSpec(run(steps)).warnings.some((w) => /storageState/.test(w)));
+  assert.ok(!renderSpec({ ...run(steps), state: STATE_LOGIN }).warnings.some((w) => /storageState/.test(w)));
+});
+
+for (const [i, state] of ["x", { path: 1 }, null, [], {}].entries()) {
+  test(`load_history_rejects_bad_state ${i}`, () => {
+    const runDir = writeRun(tmpDir(), { ...GREET, state });
+    assert.throws(() => loadHistory(runDir), exportError(2, /^not a duckwright history: .*history\.json: 'state' must be an object with a string 'path'$/));
+  });
+}
+
+test("load_history_accepts_state", () => {
+  const runDir = writeRun(tmpDir(), { ...GREET, state: STATE_LOGIN });
+  assert.deepEqual(loadHistory(runDir).data.state, STATE_LOGIN);
 });
