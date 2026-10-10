@@ -137,7 +137,7 @@ test("open_a_planned_folder_without_the_planner", async () => {
   assert.deepEqual(mgr.plan(folder), { ok: false, error: `${folder}: already open` });
 });
 
-test("run_plan_runs_tasks_one_after_another_in_order", async () => {
+test("run_plan_fills_free_slots_in_order", async () => {
   const { mgr, fakes, planFile } = setup();
   mgr.plan(planFile);
   await settle();
@@ -146,19 +146,18 @@ test("run_plan_runs_tasks_one_after_another_in_order", async () => {
   mgr.movePlanTask(c!, -2);
   assert.deepEqual(mgr.plans()[0]!.taskIds, [c, a, b]);
   assert.deepEqual(mgr.runPlan(p.id, "all"), { ok: true });
-  assert.equal(fakes.length, 1, "only one task at a time, though two slots are free");
+  assert.equal(fakes.length, 2, "fills both free slots, in the plan's order");
   assert.ok(fakes[0]!.spec.task.includes("Do three"));
-  assert.deepEqual(mgr.plans()[0]!.queued, [a, b]);
+  assert.ok(fakes[1]!.spec.task.includes("Do one"));
+  assert.deepEqual(mgr.plans()[0]!.queued, [b]);
   assert.deepEqual(mgr.runPlan(p.id, "all"), { ok: false, error: "the plan is already running" });
   fakes[0]!.finish(outcome("fail"));
   await settle();
-  assert.equal(fakes.length, 2);
-  assert.ok(fakes[1]!.spec.task.includes("Do one"));
+  assert.equal(fakes.length, 3, "a freed slot starts the next queued task");
+  assert.ok(fakes[2]!.spec.task.includes("Do two"));
   fakes[1]!.finish(outcome("pass"));
-  await settle();
   fakes[2]!.finish(outcome("pass"));
   await settle();
-  assert.equal(fakes.length, 3);
   assert.deepEqual(mgr.plans()[0]!.queued, []);
   // Run again only the failed one.
   assert.deepEqual(mgr.runPlan(p.id, "failed"), { ok: true });
@@ -169,7 +168,7 @@ test("run_plan_runs_tasks_one_after_another_in_order", async () => {
   assert.deepEqual(mgr.runPlan(p.id, "failed"), { ok: false, error: "no failed tasks to run again" });
 });
 
-test("stop_plan_clears_the_queue_and_stops_the_running_task", async () => {
+test("stop_plan_clears_the_queue_and_stops_the_running_tasks", async () => {
   const { mgr, fakes, planFile } = setup();
   mgr.plan(planFile);
   await settle();
@@ -177,9 +176,11 @@ test("stop_plan_clears_the_queue_and_stops_the_running_task", async () => {
   mgr.runPlan(p.id, "all");
   mgr.stopPlan(p.id);
   assert.deepEqual(mgr.plans()[0]!.queued, []);
+  assert.equal(fakes.length, 2, "the two free slots are filled");
   fakes[0]!.finish(outcome("stop"));
+  fakes[1]!.finish(outcome("stop"));
   await settle();
-  assert.equal(fakes.length, 1, "nothing else starts");
+  assert.equal(fakes.length, 2, "nothing else starts");
 });
 
 test("a_task_that_cannot_start_ends_the_plan_run", async () => {
