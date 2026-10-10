@@ -203,7 +203,7 @@ export type JevTransport = (
 
 export type JevSleep = (ms: number, signal?: AbortSignal) => Promise<void>;
 
-const defaultTransport: JevTransport = async (url, init) => {
+export const fetchTransport: JevTransport = async (url, init) => {
   const r = await globalThis.fetch(url, init);
   return { status: r.status, text: () => r.text() };
 };
@@ -241,7 +241,7 @@ export class JevClient {
     this.apiKey = o.apiKey;
     this.model = o.model ?? JEV_MODEL;
     this.timeoutMs = o.timeoutMs ?? JEV_TIMEOUT_MS;
-    this.transport = o.transport ?? defaultTransport;
+    this.transport = o.transport ?? fetchTransport;
     this.sleep = o.sleep ?? defaultSleep;
     this.signal = o.signal;
   }
@@ -375,15 +375,37 @@ export function targetDescription(t: Target): string {
   return t.context ? `${base} (${t.context})` : base;
 }
 
+export interface RouteInfo {
+  step: number;
+  outcome: "accepted" | "low_confidence" | "error" | "needs_text" | "done" | "skipped";
+  reason: string;
+}
+
 export class HybridBrain implements DecideFn {
   readonly jev: Pick<JevClient, "ask">;
   readonly claude: DecideFn;
   readonly minConfidence: number;
+  private readonly onRoute?: (r: RouteInfo) => void;
 
-  constructor(o: { jev: Pick<JevClient, "ask">; claude: DecideFn; minConfidence?: number }) {
+  constructor(o: {
+    jev: Pick<JevClient, "ask">;
+    claude: DecideFn;
+    minConfidence?: number;
+    onRoute?: (r: RouteInfo) => void;
+  }) {
+    this.onRoute = o.onRoute;
     this.jev = o.jev;
     this.claude = o.claude;
     this.minConfidence = o.minConfidence ?? 0.8;
+  }
+
+  private route(step: StepInput | undefined, outcome: RouteInfo["outcome"], reason: string): void {
+    if (!this.onRoute) return;
+    try {
+      this.onRoute({ step: step?.ctx.step ?? 0, outcome, reason });
+    } catch {
+      // a reporting callback must never change routing
+    }
   }
 
   async decide(prompt: string, grep = true, step?: StepInput): Promise<[Decision, number]> {
@@ -400,10 +422,18 @@ export class HybridBrain implements DecideFn {
       }
     };
 
-    if (!step || step.ctx.step === 1 || step.ctx.nudged || step.ctx.previousFailed) return viaClaude(null, 0);
+    const skip = (reason: string) => {
+      this.route(step, "skipped", reason);
+      return viaClaude(null, 0);
+    };
+    if (!step) return skip("no step context");
+    if (step.ctx.step === 1) return skip("step 1 always uses Claude");
+    if (step.ctx.nudged) return skip("repeat nudge in the prompt");
+    if (step.ctx.previousFailed) return skip("previous step failed");
     const pageUrl = currentTabUrl(step.obs.tabs);
     const candidates = targetCandidates(step.obs.snapshot, pageUrl);
-    if (candidates.length === 0 || candidates.length > MAX_TARGETS) return viaClaude(null, 0);
+    if (candidates.length === 0) return skip("no clickable targets on the page");
+    if (candidates.length > MAX_TARGETS) return skip(`too many targets (${candidates.length} > ${MAX_TARGETS})`);
 
     const { ctx, obs } = step;
     const criteria: Record<string, string> = {};
@@ -425,6 +455,7 @@ export class HybridBrain implements DecideFn {
       );
     } catch (e) {
       if (e instanceof JevError) {
+        this.route(step, "error", `jev error: ${e.message}`);
         return viaClaude(
           { action: null, action_confidence: null, target: null, target_confidence: null, routed: `error: ${e.message}` },
           e.cost,
@@ -446,8 +477,22 @@ export class HybridBrain implements DecideFn {
     const target = candidates.find((c) => c.target.ref === t.choice)?.target;
     if (a.choice === "needs_text" || a.choice === "done") {
       record.routed = a.choice;
-    } else if (a.confidence < this.minConfidence || (opt.target && (!target || t.confidence < this.minConfidence))) {
+      this.route(
+        step,
+        a.choice,
+        a.choice === "done"
+          ? "jev says the task is done; Claude writes the answer"
+          : "jev says the next move needs typed text",
+      );
+    } else if (a.confidence < this.minConfidence) {
       record.routed = "low_confidence";
+      this.route(step, "low_confidence", `action confidence ${a.confidence.toFixed(2)} < threshold ${this.minConfidence.toFixed(2)}`);
+    } else if (opt.target && !target) {
+      record.routed = "low_confidence";
+      this.route(step, "low_confidence", `target ${t.choice} is not on the page`);
+    } else if (opt.target && t.confidence < this.minConfidence) {
+      record.routed = "low_confidence";
+      this.route(step, "low_confidence", `target confidence ${t.confidence.toFixed(2)} < threshold ${this.minConfidence.toFixed(2)}`);
     }
     if (record.routed !== "accepted") return viaClaude(record, jevCost);
 
@@ -462,6 +507,11 @@ export class HybridBrain implements DecideFn {
       action = { cmd: opt.cmd!, args: [...opt.args] };
       goal = `jev: ${a.choice} (${conf.toFixed(2)})`;
     }
+    this.route(
+      step,
+      "accepted",
+      `jev chose ${a.choice}${opt.target ? ` ${target!.ref}` : ""} (confidence ${conf.toFixed(2)})`,
+    );
     return [
       { evaluationPreviousGoal: "", memory: ctx.memory, nextGoal: goal, actions: [action], source: "jev", jev: record },
       jevCost,
