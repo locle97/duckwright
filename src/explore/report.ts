@@ -163,7 +163,7 @@ export function renderExploreMarkdown(r: ExploreReport): string {
   const parts: string[][] = [];
   parts.push([`# Exploration report: ${flat(r.url)}`]);
   parts.push([`Run: ${flat(r.run_dir)}  Steps: ${r.steps}  Cost: $${fixed4(r.cost_usd)}  Result: ${r.success ? "success" : "failure"}`]);
-  if (r.answer_error) parts.push([`The agent's answer could not be read as a flow list: ${r.answer_error}.`]);
+  if (r.answer_error) parts.push([`The agent's answer could not be read as a flow list: ${flat(r.answer_error)}.`]);
   if (r.dropped_flows > 0) parts.push([`${r.dropped_flows} flow(s) in the answer were unreadable and left out.`]);
 
   parts.push([`## Broken links and failed requests (${r.network_checked ? r.failed_requests.length : "-"})`]);

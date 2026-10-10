@@ -226,3 +226,25 @@ test("writeExploreReport writes explore.md and explore.json", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("markdown flattens a multi-line answer_error into one paragraph", () => {
+  const raw = "Unexpected token\n# Injected\n- item";
+  const md = renderExploreMarkdown(base({ answer_error: raw }));
+  const line = md.split("\n").filter((l) => l.startsWith("The agent's answer"));
+  assert.equal(line.length, 1);
+  assert.ok(line[0].includes("Unexpected token # Injected - item"));
+  assert.ok(!md.split("\n").some((l) => l.startsWith("# Injected") || l.startsWith("- item")));
+});
+
+test("markdown shows 'no response' without colon when status_text is empty", () => {
+  const md = renderExploreMarkdown(base({
+    failed_requests: [{ method: "GET", url: "https://a/1", status: null, status_text: "", steps: [1] }],
+  }));
+  assert.ok(md.includes("- GET https://a/1 → no response  (step 1)"));
+});
+
+test("markdown omits Notes line for a broken flow with empty notes", () => {
+  const md = renderExploreMarkdown(base({ broken_flows: [flow({ status: "dead-end", notes: "" })] }));
+  assert.ok(md.includes("### Search (dead-end)"));
+  assert.ok(!md.includes("Notes:"));
+});
