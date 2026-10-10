@@ -6,8 +6,16 @@
 
 ## Environment
 - Start: `cd <worktree> && npm install && npm run build`, then use `node dist/bin.js` (called `duckwright` below; or `npx duckwright` after `npm link`). `playwright-cli` and the `claude` CLI must be installed and logged in for scenarios that run a real task (TS-13 to TS-22).
-- Local login site (for login scenarios): run `node <scratch>/login-site.mjs` serving `http://localhost:4100`. It has `/login` (form with `#email`, `#password`, `button[type=submit]`; accepts `qa@example.com` / `S3cret-QA-pw`, then sets a session cookie and redirects to `/account`), `/account` (shows `Sign out` when the cookie is set, `Please log in` otherwise) and a `/login?expiring=1` variant is not needed. QA writes this small server; any equivalent works.
+- Local login site (for login scenarios): QA writes a small server `<scratch>/login-site.mjs` (any equivalent works) and starts it with `node <scratch>/login-site.mjs` serving `http://localhost:4100`. It must behave exactly as follows:
+  - `GET /login`: HTML form with `#email`, `#password` and `button[type=submit]`.
+  - `POST /login`: with `qa@example.com` / `S3cret-QA-pw` it sets a session cookie (session id kept in the server's memory only) and redirects to `/account`. With any other credentials it answers 200 on `/login` (the browser stays at `http://localhost:4100/login`) with an error page that echoes the submitted password value back in the text (for example `Wrong password: <value>`).
+  - `GET /account`: shows `Sign out` when the cookie holds a live session, otherwise `Please log in`.
+  - `GET /hang`: accepts the request and never answers (used by TS-36).
+  - Request log: every request is printed to the server's stdout as `<METHOD> <PATH>` (for example `POST /login`), one per line; QA redirects it to `<work>/site.log`.
+  - Sessions live in memory, so restarting the server invalidates every earlier cookie (used by TS-22).
+- Failure shims (used by TS-14, TS-33 and TS-34): `<scratch>/shim/playwright-cli` is a shell script placed first on `PATH`. It skips the leading `-s=<session>` argument, and when the sub-command equals `$FAIL_CMD` and this is the `$FAIL_NTH`-th call (default 1) of that sub-command since the shim's counter file `$SHIM_COUNT` was emptied, it prints `boom: <its full argv>` to stderr and exits 1; otherwise it runs the real `playwright-cli` with the same argv. `<scratch>/shim/claude` is a script that appends its full argv and stdin to `$CLAUDE_LOG`, then runs the real `claude` with the same argv and stdin.
 - Accounts / auth: `export QA_USER=qa@example.com; export QA_PASS='S3cret-QA-pw'`.
+- BASE (baseline for byte-identical checks, TS-12 and TS-32): `git -C <worktree> worktree add <scratch>/base main && cd <scratch>/base && npm install && npm run build`; `duckwright-base` below is `node <scratch>/base/dist/bin.js`. The branch worktree is never switched.
 - Reset: run each scenario in a fresh empty directory `<work>` (`rm -rf <work> && mkdir <work> && cd <work>`), which removes `runs/`, `.duckwright/` and `environments/`.
 
 ## Test data
@@ -28,7 +36,7 @@
   # Local
   A small test site on port 4100.
   ```
-- **ENV-AGENT** `environments/agentlocal.md`: same as ENV-SCRIPT but `method: agent`, `task: Open http://localhost:4100/login and sign in`, no selector keys or `url`.
+- **ENV-AGENT** `environments/agentlocal.md`, in this line order: 1 `---`, 2 `login:`, 3 `  method: agent`, 4 `  task: Open http://localhost:4100/login and sign in`, 5 `  username-env: QA_USER`, 6 `  password-env: QA_PASS`, 7 `  check-url: http://localhost:4100/account`, 8 `  check-text: Sign out`, 9 `---`; body `# AgentLocal` and one text line.
 - **ENV-PLAIN** `environments/plain.md`: `# Plain` and one body line, no front matter.
 - **TASKS** folder `tasks/` with `a.md`, `b.md`, `c.md`, each a one-line task such as `Open http://localhost:4100/account and confirm the page says Sign out`, each with `env: environments/local.md`.
 - **HIST-STATE-FILE**: a `runs/<id>/` of a successful run made with `--state auth.json` and `--env` omitted (copy a real one, or edit a real `history.json`), so its `history.json` has `"state": {"path": "auth.json", "source": "file"}` after `env`/`task_file`.
@@ -45,9 +53,9 @@
 | SC1 | C4, C5, C6 | TS-1, TS-2, TS-3, TS-4, TS-5, TS-6, TS-23 |
 | SC2 | C5 | TS-7, TS-8, TS-9, TS-10, TS-11, TS-12 |
 | SC3 | C1 | TS-13, TS-14, TS-15, TS-16, TS-17 |
-| SC4 | C2, C3 | TS-18, TS-19, TS-20 |
-| SC5 | C2, C3 | TS-21, TS-22, TS-24, TS-25 |
-| SC6 | C1, C3, C4, C5 | TS-26, TS-27, TS-28 |
+| SC4 | C2, C3 | TS-18, TS-19, TS-20, TS-26, TS-27, TS-33, TS-34, TS-35, TS-36, TS-37, TS-38 |
+| SC5 | C2, C3 | TS-21, TS-22, TS-24, TS-25, TS-39, TS-40 |
+| SC6 | C1, C3, C4, C5 | TS-24, TS-26, TS-27, TS-28, TS-33 |
 
 ## Scenarios
 
@@ -82,7 +90,7 @@
 
 ### TS-3: `test.use` placement with TOTP and tab helpers
 **Contract:** C5 · **Criteria:** SC1 · **Type:** CLI · **Priority:** P3
-**Preconditions:** HIST-TABS edited to add `"state": {"path": "auth.json", "source": "file"}` and a `twofa` step recorded as a TOTP fill.
+**Preconditions:** HIST-TABS edited to add `"state": {"path": "auth.json", "source": "file"}` and one `twofa` action with result `ok` and `args` `["#code"]` (the way history records a TOTP step; the export then emits the TOTP helper).
 **Steps:**
 1. `duckwright export runs/<id>`
 **Expected:**
@@ -141,19 +149,16 @@
 **Expected:**
 - `selectTab` is defined; `closeTab` is not defined anywhere in the file.
 
-### TS-10: Generated tab spec behaves correctly against a stub context
-**Contract:** C5 · **Criteria:** SC2 · **Type:** Library · **Priority:** P2
-**Preconditions:** the exported spec from TS-8; a scratch Node script that copies the two helper functions out of it and calls them with a fake `page` object whose `context().pages()` returns an array of fake pages with `close()` and `bringToFront()` methods.
+### TS-10: Exported tab spec is valid and helpers are byte-exact
+**Contract:** C5 · **Criteria:** SC2 · **Type:** CLI · **Priority:** P3
+**Preconditions:** the exported spec from TS-8, copied into a scratch Playwright project where `@playwright/test` is installed (if it is not, run step 2 only).
 **Steps:**
-1. With pages `[A, B, C]` and current `B`, call `closeTab(B)`.
-2. With pages `[A, B, C]` and current `A`, call `closeTab(A, 2)`.
-3. With pages `[A, B, C]`, call `selectTab(A, 5)`.
-4. With pages `[A]` and current `A`, call `closeTab(A)`.
+1. `npx playwright test --list duckwright.spec.ts` in the scratch project (lists tests without running them or opening a browser).
+2. Compare the `selectTab` and `closeTab` definitions in the spec with the C5 text.
 **Expected:**
-- 1: `B` closed, returns the page now at index 1 (`C`), after `bringToFront`.
-- 2: `C` closed, returns `A`.
-- 3: throws `no tab 5`.
-- 4: throws `closed the last tab`.
+- 1: exit `0`; the output lists the spec's test (the file parses as TypeScript).
+- 2: both definitions are identical to the C5 text, character for character.
+- Running the exported spec against a browser is the user's manual e2e and is not part of this plan.
 
 ### TS-11: Bad tab index in history fails the export
 **Contract:** C5 · **Criteria:** SC2 · **Type:** CLI · **Priority:** P2
@@ -170,26 +175,31 @@
 **Preconditions:** (a) HIST-TABS with every `tab-*` result set to a failure; (b) HIST-PLAIN.
 **Steps:**
 1. Export (a).
-2. Export (b), and compare with the spec the previous release (`git stash`/checkout of `main`, built) exports for the same history.
+2. Export (b), and export the same history with `duckwright-base` (Environment: BASE) and compare the two files with `cmp`.
 **Expected:**
 - (a) exit `0`; callback is the old `async ({ page }) => {` form, no `let page = firstPage;`, no helpers, no tab lines.
 - (b) the two files are byte-identical.
 
 ### TS-13: Valid script `login:` block is accepted
 **Contract:** C1 · **Criteria:** SC3 · **Type:** CLI · **Priority:** P1
-**Preconditions:** ENV-SCRIPT; login site not running.
+**Preconditions:** ENV-SCRIPT; login site running; `QA_USER`/`QA_PASS` set; no `.duckwright/`.
 **Steps:**
-1. `duckwright -p "Open http://localhost:4100/account" --env environments/local.md` with `QA_USER`/`QA_PASS` set and a cached state absent.
+1. `duckwright -p "Open http://localhost:4100/account" --env environments/local.md --debug`
+2. Read `runs/<id>/debug.log`.
 **Expected:**
-- Preflight passes (no `environment file invalid` message; exit is not `2`). The prompt text the agent sees (see `--debug` log, `runs/<id>/debug.log`) contains `# Local` and `A small test site on port 4100.` and does not contain `login:`, `username-env` or `---`.
+- Preflight passes (no `environment file invalid` message; exit is not `2`). The prompt text in `runs/<id>/debug.log` contains `# Local` and `A small test site on port 4100.` and does not contain `login:`, `username-env` or `---`.
 
-### TS-14: Valid agent `login:` block is accepted
+### TS-14: Valid agent `login:` block is accepted and the login agent gets the fixed paragraph
 **Contract:** C1 · **Criteria:** SC3 · **Type:** CLI · **Priority:** P1
-**Preconditions:** ENV-AGENT.
+**Preconditions:** ENV-AGENT; login site running; `QA_USER`/`QA_PASS` set; no `.duckwright/`; the `claude` shim from Environment first on `PATH` with `CLAUDE_LOG=<work>/claude.log`.
 **Steps:**
-1. Run as TS-13 with `--env environments/agentlocal.md --debug`.
+1. `duckwright -p "Open http://localhost:4100/account" --env environments/agentlocal.md`
+2. Read `<work>/claude.log`.
 **Expected:**
-- No `environment file invalid` message. The login agent's prompt in `.duckwright/auth/local.login/` or the debug output includes the task followed by `Type {{username}} where the username or email goes and {{password}} where the password goes; Duckwright replaces them with the real values. Never type real credentials. When you are logged in, finish with done success.`
+- No `environment file invalid` message; exit is not `2`.
+- `claude.log` contains the login agent's prompt: the text `Open http://localhost:4100/login and sign in` followed by `Type {{username}} where the username or email goes and {{password}} where the password goes; Duckwright replaces them with the real values. Never type real credentials. When you are logged in, finish with done success.`
+- `claude.log` contains neither `S3cret-QA-pw` nor `username-env`.
+- The login agent writes no `debug.log`, `history.json` or spec (only one `runs/<id>/` exists, the task's own run).
 
 ### TS-15: Each C1 error exits 2 with the exact message
 **Contract:** C1 · **Criteria:** SC3 · **Type:** CLI · **Priority:** P2
@@ -199,19 +209,19 @@
 | --- | --- |
 | delete the closing `---` | `environment file invalid: PATH: front matter is not closed with ---` |
 | line 3 becomes `just text` | `environment file invalid: PATH:3: expected "key: value"` |
-| add `other: 1` before the closing `---` (line 14) | `environment file invalid: PATH:14: unknown key "other" (only login is allowed)` |
+| add `other: 1` as a new line 12 (before the closing `---`) | `environment file invalid: PATH:12: unknown key "other" (only login is allowed)` |
 | line 3 `method: "script` | `environment file invalid: PATH:3: bad quoted value` |
-| add indented `colour: red` (line 14) | `environment file invalid: PATH:14: login: unknown key "colour"` |
-| add a second `url:` line (line 14) | `environment file invalid: PATH:14: login: "url" is set twice` |
+| add indented `  colour: red` as a new line 12 | `environment file invalid: PATH:12: login: unknown key "colour"` |
+| add a second indented `  url: http://localhost:4100/login` as a new line 12 | `environment file invalid: PATH:12: login: "url" is set twice` |
 | line 4 becomes `url:` | `environment file invalid: PATH:4: login: "url" has no value` |
 | delete the `method` line | `environment file invalid: PATH: login: method is required` |
 | `method: ldap` (line 3) | `environment file invalid: PATH:3: login: method must be agent or script, got "ldap"` |
 | delete `submit-selector` line | `environment file invalid: PATH: login: submit-selector is required for method script` |
-| ENV-AGENT plus a `url:` line (line 7) | `environment file invalid: PATH:7: login: url is not used by method agent` |
+| ENV-AGENT with an indented `  url: http://localhost:4100/login` inserted as new line 7 | `environment file invalid: PATH:7: login: url is not used by method agent` |
 | `username-env: 1BAD` (line 5) | `environment file invalid: PATH:5: login: username-env must be an environment variable name (letters, digits and _, not starting with a digit), got "1BAD"` |
 | `url: ftp://x/login` (line 4) | `environment file invalid: PATH:4: login: url must be an http or https URL, got "ftp://x/login"` |
 | delete `check-text` line | `environment file invalid: PATH: login: check-url and check-text must be set together` |
-(Line numbers: adjust to the actual line if the file layout differs; the number must be the 1-based line of the offending line.)
+(Line numbers follow ENV-SCRIPT: 1 `---`, 2 `login:`, 3 `method`, 4 `url`, 5 `username-env`, 6 `password-env`, 7 `username-selector`, 8 `password-selector`, 9 `submit-selector`, 10 `check-url`, 11 `check-text`, 12 closing `---`. "Delete the closing `---`" removes line 12. N is the 1-based line of the offending line.)
 
 ### TS-16: Invalid env file inside a batch and the TUI/web
 **Contract:** C1 · **Criteria:** SC3 · **Type:** CLI · **Priority:** P2
@@ -225,11 +235,11 @@
 
 ### TS-17: Front matter edge cases
 **Contract:** C1 · **Criteria:** SC3 · **Type:** CLI · **Priority:** P3
-**Preconditions:** (a) ENV-PLAIN with a body that starts with `---` on line 2 (not line 1); (b) ENV-SCRIPT with a trailing space after both `---`; (c) ENV-SCRIPT with the body deleted; (d) ENV-SCRIPT padded with text past 16384 bytes.
+**Preconditions:** (a) ENV-PLAIN with a body that starts with `---` on line 2 (not line 1); (b) ENV-SCRIPT with a trailing space after both `---`; (c) ENV-SCRIPT with the body deleted; (d) ENV-SCRIPT padded with body text to exactly 16384 bytes in total; (e) the same padded to 16385 bytes.
 **Steps:**
 1. Run `duckwright -p "x" --env <file>` for each.
 **Expected:**
-- (a) no front matter parsing; behaves as today (no error). (b) accepted. (c) exit `2`, `environment file is empty` style message (existing text). (d) exit `2`, the existing too-large message.
+- (a) no front matter parsing; behaves as today (no error). (b) accepted. (c) exit `2`, stderr `environment file is empty: ` followed by the file path. (d) accepted, no error. (e) exit `2`, stderr `environment file too large: ` + the file path + ` is 16385 bytes (limit 16384)`.
 
 ### TS-18: Batch with one login env logs in once
 **Contract:** C3 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P1
@@ -309,7 +319,7 @@
 **Contract:** C2, C3 · **Criteria:** SC5 · **Type:** CLI · **Priority:** P3
 **Preconditions:** `<work>/.duckwright` is a regular file (`touch .duckwright`), no cached state.
 **Steps:**
-1. Run the TS-13 command.
+1. Export `QA_USER=qa@example.com` and `QA_PASS='S3cret-QA-pw'` (both set), then run the TS-13 command step 1 (with `--debug`; login site running).
 **Expected:**
 - Exit `1`; stderr `login failed: local: cannot write ` followed by the path and a message. No task runs.
 
@@ -354,6 +364,93 @@
 - 3: `LEAK-ME-123` does not appear in `.duckwright/auth/*.login/` or in the stderr message.
 - The state file `.duckwright/auth/local.json` itself holds cookies (expected, mode `600`).
 
+### TS-33: Every script-login step failure names its step
+**Contract:** C3 · **Criteria:** SC4, SC6 · **Type:** CLI · **Priority:** P2
+**Preconditions:** ENV-SCRIPT; login site running; `QA_USER`/`QA_PASS` set; no `.duckwright/`; the `playwright-cli` shim first on `PATH`, `SHIM_COUNT` emptied before each case.
+**Steps:** for each row set the variables, run `duckwright -p "x" --env environments/local.md`.
+| `FAIL_CMD` / `FAIL_NTH` | Expected stderr starts with |
+| --- | --- |
+| `open` / 1 | `login failed: local: open failed: boom` |
+| `goto` / 1 | `login failed: local: goto failed: boom` |
+| `fill` / 1 | `login failed: local: fill username failed: boom` |
+| `fill` / 2 | `login failed: local: fill password failed: boom` |
+| `state-save` / 1 | `login failed: local: state-save failed: boom` |
+**Expected:**
+- Each row: exit `1`; no task runs (no `runs/`); no `[1/` line; no batch summary.
+- Row `fill` / 2: the message does not contain `S3cret-QA-pw` (the shim echoes its argv, so the password value appears as `[REDACTED]`).
+- Row `state-save`: neither `.duckwright/auth/local.json` nor `.duckwright/auth/local.json.tmp` exists.
+- Each row: `playwright-cli list` shows no session named `duckwright-login-*` afterwards (the session is always closed).
+
+### TS-34: Agent login failures
+**Contract:** C3 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P2
+**Preconditions:** ENV-AGENT; login site running; `QA_USER`/`QA_PASS` set; no `.duckwright/`; the `playwright-cli` shim first on `PATH`.
+**Steps:**
+1. `FAIL_CMD=state-save FAIL_NTH=1`; run `duckwright -p "x" --env environments/agentlocal.md`.
+2. Unset the shim variables; set `QA_PASS=wrong`; run the same command again.
+**Expected:**
+- 1: exit `1`; stderr starts `login failed: agentlocal: playwright error: ` and contains `boom`; no task runs; no `.duckwright/auth/agentlocal.json`.
+- 2: the check at `http://localhost:4100/account` finds no `Sign out`; exit `1`; stderr starts `login failed: agentlocal: ` (either `check failed: "Sign out" not found at http://localhost:4100/account` or `login agent did not finish: `); it contains neither `wrong` nor `S3cret-QA-pw`; `.duckwright/auth/agentlocal.login/` is kept.
+
+### TS-35: Script login with an unreachable login URL
+**Contract:** C3 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P2
+**Preconditions:** ENV-SCRIPT with `url:` changed to `http://localhost:4199/login` (nothing listens on 4199); no `.duckwright/`; `QA_USER`/`QA_PASS` set.
+**Steps:**
+1. `duckwright -p "x" --env environments/local.md`
+**Expected:**
+- Exit `1`; stderr starts `login failed: local: goto failed: `; no `runs/` folder; no `.duckwright/auth/local.json`.
+
+### TS-36: Interrupt during login exits 130
+**Contract:** C3 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P2
+**Preconditions:** ENV-SCRIPT with `url:` changed to `http://localhost:4100/hang`; login site running; `QA_USER`/`QA_PASS` set; no `.duckwright/`.
+**Steps:**
+1. Start `duckwright -p "x" --env environments/local.md` in the background with stdout to a file.
+2. When the file contains `Login: local: logging in (script), no saved state`, send `SIGINT` to the process.
+3. Wait for exit; run `playwright-cli list`.
+**Expected:**
+- Exit code `130`; no `runs/` folder; no `.duckwright/auth/local.json`; `playwright-cli list` shows no session named `duckwright-login-*`; no `Login: local: saved state` line.
+
+### TS-37: Explore uses the shared login
+**Contract:** C3 · **Criteria:** SC4 · **Type:** CLI · **Priority:** P3
+**Preconditions:** ENV-SCRIPT; login site running; no `.duckwright/`.
+**Steps:**
+1. With `QA_PASS` unset: `duckwright explore http://localhost:4100/account --env environments/local.md`.
+2. Export `QA_USER`/`QA_PASS`; run the same command again.
+**Expected:**
+- 1: no `Login:` line is printed; the output reports the run as failed with `login failed: local: environment variable QA_PASS is not set`; no browser step ran.
+- 2: no `Login:` line is printed; `site.log` has exactly one `POST /login`; `.duckwright/auth/local.json` exists; the explore run does not fail with a login message.
+
+### TS-38: TUI uses the shared login
+**Contract:** C3 · **Criteria:** SC4 · **Type:** UI · **Priority:** P3
+**Preconditions:** ENV-SCRIPT; login site running; no `.duckwright/`.
+**Steps:**
+1. With `QA_PASS` unset, run `duckwright` (TUI), choose environment `local`, enter the task `Open http://localhost:4100/account` and start it.
+2. Quit; export `QA_USER`/`QA_PASS`; run `duckwright` again, choose `local`, start the same task twice in a row.
+**Expected:**
+- 1: no `Login:` line; the run ends `fail` with the answer `login failed: local: environment variable QA_PASS is not set`; its `history.json` has zero steps.
+- 2: `site.log` has exactly one `POST /login`; both runs have `"state": {"path": ".duckwright/auth/local.json", "source": "login"}` in `history.json`.
+
+### TS-39: State from the global config also bypasses login
+**Contract:** C3 · **Criteria:** SC5 · **Type:** CLI · **Priority:** P2
+**Preconditions:** ENV-SCRIPT; a valid `auth.json` in `<work>`; `QA_USER`/`QA_PASS` unset; no `.duckwright/`; `XDG_CONFIG_HOME=<work>/xdg` with `<work>/xdg/duckwright/duckwright.conf` containing the single line `state: auth.json` (resolved from the config's folder: place `auth.json` in `<work>/xdg/duckwright/`).
+**Steps:**
+1. `duckwright -p "Open http://localhost:4100/account" --env environments/local.md`
+**Expected:**
+- No `Login:` line; no `.duckwright/` folder; no `POST /login` in `site.log`; exit `0`.
+- `history.json` has `"state"` with `"source": "file"` and the `path` of the config's `auth.json`.
+
+### TS-40: Cookie expiry margin of 60 seconds
+**Contract:** C2 · **Criteria:** SC5 · **Type:** CLI · **Priority:** P2
+**Preconditions:** TS-18 already ran in `<work>` (valid cache); login site running; `QA_USER`/`QA_PASS` set.
+**Steps:**
+1. Edit `.duckwright/auth/local.json`: set every cookie's `expires` to now + 30 seconds (epoch seconds). Run the TS-21 step 1 command immediately.
+2. Edit it again: set every cookie's `expires` to now + 600 seconds. Run the same command.
+3. Edit it again: set one cookie's `expires` to `-1` (session cookie). Run the same command.
+**Expected:**
+- 1: `Login: local: logging in (script), saved state expired` (30 s is inside the 60 s margin).
+- 2: `Login: local: using saved state .duckwright/auth/local.json`.
+- 3: `Login: local: using saved state .duckwright/auth/local.json`.
+- The exact boundary (`expires` = now + 60 s) cannot be hit reliably by hand and is left to the unit tests.
+
 ## Regression
 
 ### TS-29: Environment without `login:` behaves as before
@@ -387,7 +484,7 @@
 1. Export a history with `expect`, `request` and `twofa` steps and no state or tabs.
 2. Read `README.md`, `examples/environments/staging.md`, `.gitignore`.
 **Expected:**
-- 1: output identical to the previous release's export of the same history.
+- 1: output byte-identical (`cmp`) to what `duckwright-base export` writes for a copy of the same history.
 - 2: README no longer says to edit state or tab exports by hand, and no longer mentions `// TODO(duckwright)`; roadmap item "Multi-tab and storage state in exports" is `[x]` and a checked automatic-login line exists; the sample starts with a `login:` block using `method: script` with `check-url`/`check-text`; `.gitignore` contains `.duckwright/`.
 
 ## Out of scope
