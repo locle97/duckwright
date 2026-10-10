@@ -494,6 +494,9 @@ test("explore: usage errors", () => {
   exErr("not an http(s) URL: not a url", "not a url");
   exErr("unrecognized arguments: extra", U, "extra");
   exErr("explore takes a URL, not --file", U, "-f", "x");
+  exErr("explore takes a URL, not --file", U, "-fx.md");
+  exErr("argument --max-steps: invalid int value: 'abc'", "--max-steps", "abc", "--version");
+  exErr("argument --max-steps: invalid int value: 'abc'", "--max-steps", "abc", "--help");
   exErr("--plan cannot be used with explore", U, "--plan", "x");
   exErr("--web cannot be used with explore", U, "--web");
   for (const [f, v] of [["--port", "1"], ["--max-parallel", "2"], ["--past", "1"], ["--theme", "dark"]]) {

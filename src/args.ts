@@ -437,10 +437,9 @@ export function parseExploreArgs(argv: string[], defaultSkill: string, settings:
   }
   const scan = { firstError: null as UsageError | null, extras: [] as string[] };
   const parsed = parseRunArgs([...kept, ...after], defaultSkill, settings, scan);
-  if (parsed.kind === "help") return { kind: "help", text: EXPLORE_HELP };
-  if (parsed.kind === "version") {
+  if (parsed.kind === "help" || parsed.kind === "version") {
     if (scan.firstError) throw scan.firstError;
-    return parsed;
+    return parsed.kind === "help" ? { kind: "help", text: EXPLORE_HELP } : parsed;
   }
   const url = parsed.args.task;
   if (url === null) fail("give a URL to explore");
@@ -452,7 +451,7 @@ export function parseExploreArgs(argv: string[], defaultSkill: string, settings:
   if (!ok) fail(`not an http(s) URL: ${url}`);
   if (scan.extras.length) fail(`unrecognized arguments: ${scan.extras.join(" ")}`);
   for (const [flags, msg] of EXPLORE_REJECTED) {
-    if (kept.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`)))) fail(msg);
+    if (kept.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`) || (f === "-f" && a.startsWith("-f"))))) fail(msg);
   }
   if (writeTasksValue !== null) fail(`argument --write-tasks: ignored explicit argument '${writeTasksValue}'`);
   if (scan.firstError) throw scan.firstError;
