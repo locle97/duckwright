@@ -5,7 +5,12 @@ import { test } from "node:test";
 
 import { AUTH_DIR, AuthBroker, LoginError, authLabel, cachePath, stateProblem } from "../src/auth.ts";
 import type { LoginConfig } from "../src/environment.ts";
+import type { RunArgs } from "../src/args.ts";
+import type { AgentOptions, RunResult } from "../src/loop.ts";
 import { AbortedError } from "../src/proc.ts";
+import { PlaywrightError } from "../src/pw.ts";
+import { PROMPTS } from "../src/runs/run.ts";
+import type { AgentLike } from "../src/runs/run.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { fakeRunner, ok, tmpDir } from "./helpers.ts";
 
@@ -381,4 +386,164 @@ test("joiner_own_abort_rejects_promptly", async () => {
   await assert.rejects(c, AbortedError);
   release();
   await a;
+});
+
+// ---- agent login (Task 7) ----
+
+const AGENT: LoginConfig = {
+  method: "agent", task: "Log in via the SSO button", usernameEnv: "STAGING_USER", passwordEnv: "STAGING_PASSWORD", check: null,
+};
+const PARAGRAPH = "Type {{username}} where the username or email goes and {{password}} where the password goes; Duckwright replaces them with the real values. Never type real credentials. When you are logged in, finish with done success.";
+
+function runResult(success: boolean, answer = "done", costUsd = 0.25): RunResult {
+  return { success, answer, steps: 1, costUsd, history: [] };
+}
+
+interface AgentHarness {
+  opts: AgentOptions[];
+  workdirFiles: string[][];
+  createAgent: (o: AgentOptions) => AgentLike;
+}
+
+/** A fake createAgent: captures options, lists the work folder, runs beforeClose like Agent does on success. */
+function harness(behave: (o: AgentOptions) => Promise<RunResult> | RunResult): AgentHarness {
+  const h: AgentHarness = {
+    opts: [], workdirFiles: [],
+    createAgent: (o) => {
+      h.opts.push(o);
+      h.workdirFiles.push(fs.readdirSync(o.workdir));
+      const agent: AgentLike = {
+        costUsd: 0,
+        async run() {
+          const r = await behave(o);
+          agent.costUsd = r.costUsd;
+          if (r.success) await o.beforeClose?.(r);
+          return r;
+        },
+      };
+      return agent;
+    },
+  };
+  return h;
+}
+
+function runCtx(h: AgentHarness, over: Partial<RunArgs> = {}) {
+  return {
+    args: {
+      task: "t", file: null, maxSteps: 7, model: "mm", headed: false, skill: "s.md", session: "s",
+      state: null, env: null, allowFileAccess: false, snapshot: "grep", print: false, maxParallel: null, plan: null,
+      network: true, video: true, screenshot: true, twofaTimeout: 300, web: false, port: null, jev: false,
+      jevThreshold: 0.8, debug: true, ...over,
+    } as RunArgs,
+    deps: { prompts: PROMPTS, signal: sig(), createAgent: h.createAgent },
+    makeBrain: () => (async () => { throw new Error("unused"); }) as never,
+  };
+}
+
+function agentEnsure(b: AuthBroker, cwd: string, h: AgentHarness, login: LoginConfig = AGENT, extra: object = {}) {
+  return b.ensure({
+    env: { name: "staging", login, text: "ENV TEXT" } as never, cwd, signal: sig(), headed: true, run: runCtx(h), ...extra,
+  });
+}
+
+test("agent_login_creates_agent_with_expected_options", async () => {
+  const cwd = tmpDir();
+  const r = fake();
+  const h = harness(() => runResult(true));
+  const res = await agentEnsure(broker(r), cwd, h);
+  const o = h.opts[0];
+  assert.equal(o.task, `Log in via the SSO button\n\n${PARAGRAPH}`);
+  assert.deepEqual(o.fillValues, { "{{username}}": "u@x.com", "{{password}}": PASSWORD });
+  assert.equal(o.pw.session, "duckwright-login-staging");
+  assert.equal(o.maxSteps, 7);
+  assert.equal(o.headed, true);
+  assert.equal(o.snapshotMode, "grep");
+  assert.equal(o.environment, "ENV TEXT");
+  assert.equal(o.workdir, path.join(cwd, AUTH_DIR, "staging.login"));
+  assert.equal(o.twofa!.scrubber.scrub(`a ${PASSWORD} b u@x.com`), "a [REDACTED] b [REDACTED]");
+  assert.equal(o.network, undefined);
+  assert.equal(o.video, undefined);
+  assert.equal(o.screenshot, undefined);
+  assert.equal(res.costUsd, 0.25);
+  assert.equal(res.reused, false);
+  assert.equal(res.path, cachePath("staging", cwd));
+  assert.ok(fs.existsSync(res.path));
+  assert.ok(!fs.existsSync(`${res.path}.tmp`));
+});
+
+test("agent_login_saves_state_in_agent_session_and_cleans_work_dir", async () => {
+  const cwd = tmpDir();
+  const r = fake();
+  const h = harness(() => runResult(true));
+  await agentEnsure(broker(r), cwd, h, { ...AGENT, check: CHECK } as LoginConfig);
+  const cmds = r.calls.map((c) => cmd(c.argv));
+  assert.deepEqual(cmds, ["goto", "snapshot", "state-save"]);
+  assert.ok(r.calls.every((c) => c.argv[1] === "-s=duckwright-login-staging"));
+  assert.equal(r.calls[2].argv[3], `${cachePath("staging", cwd)}.tmp`);
+  assert.ok(!fs.existsSync(path.join(cwd, AUTH_DIR, "staging.login")));
+  // no run artifacts
+  assert.deepEqual(fs.readdirSync(path.join(cwd, AUTH_DIR)).sort(), ["staging.json"]);
+});
+
+test("agent_login_empties_stale_work_dir_first", async () => {
+  const cwd = tmpDir();
+  const stale = path.join(cwd, AUTH_DIR, "staging.login");
+  fs.mkdirSync(stale, { recursive: true });
+  fs.writeFileSync(path.join(stale, "old.txt"), "x");
+  const h = harness(() => runResult(true));
+  await agentEnsure(broker(fake()), cwd, h);
+  assert.deepEqual(h.workdirFiles[0], []);
+});
+
+test("agent_login_failure_keeps_work_dir_and_scrubs_answer", async () => {
+  const cwd = tmpDir();
+  const h = harness((o) => {
+    fs.writeFileSync(path.join(o.workdir, "trace.txt"), "x");
+    return runResult(false, `stuck, saw ${PASSWORD}`);
+  });
+  const b = broker(fake());
+  await assert.rejects(agentEnsure(b, cwd, h), (e: Error) => {
+    assert.ok(e instanceof LoginError);
+    assert.equal(e.message, "login agent did not finish: stuck, saw [REDACTED]");
+    return true;
+  });
+  assert.ok(fs.existsSync(path.join(cwd, AUTH_DIR, "staging.login", "trace.txt")));
+  assert.ok(!fs.existsSync(cachePath("staging", cwd)));
+});
+
+test("agent_login_playwright_error_message", async () => {
+  const h = harness(() => { throw new PlaywrightError(`boom ${PASSWORD}`); });
+  await assert.rejects(agentEnsure(broker(fake()), tmpDir(), h), (e: Error) => {
+    assert.ok(e instanceof LoginError);
+    assert.equal(e.message, "playwright error: boom [REDACTED]");
+    return true;
+  });
+});
+
+test("agent_login_check_failure_writes_no_cache", async () => {
+  const cwd = tmpDir();
+  const h = harness(() => runResult(true));
+  await assert.rejects(
+    agentEnsure(broker(fake({ snapshot: "nothing" })), cwd, h, { ...AGENT, check: CHECK } as LoginConfig),
+    (e: Error) => e instanceof LoginError && e.message.startsWith("check failed:"),
+  );
+  assert.ok(!fs.existsSync(cachePath("staging", cwd)));
+  assert.ok(fs.existsSync(path.join(cwd, AUTH_DIR, "staging.login")));
+});
+
+test("agent_login_without_run_context_fails", async () => {
+  await assert.rejects(
+    broker(fake()).ensure({ env: { name: "staging", login: AGENT }, cwd: tmpDir(), signal: sig(), headed: false }),
+    (e: Error) => e instanceof LoginError,
+  );
+});
+
+test("agent_login_creates_no_history_or_debug_log", async () => {
+  const cwd = tmpDir();
+  const h = harness(() => runResult(true));
+  await agentEnsure(broker(fake()), cwd, h);
+  const found: string[] = [];
+  const walk = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { found.push(e.name); if (e.isDirectory()) walk(path.join(d, e.name)); } };
+  walk(cwd);
+  assert.ok(!found.includes("history.json") && !found.includes("debug.log") && !found.includes("duckwright.spec.ts"));
 });

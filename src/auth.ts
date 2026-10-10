@@ -10,13 +10,19 @@ import type { LoginCheck, LoginConfig } from "./environment.ts";
 import type { AgentOptions } from "./loop.ts";
 import { AbortedError, runProcess } from "./proc.ts";
 import type { Runner } from "./proc.ts";
-import { PlaywrightCLI } from "./pw.ts";
+import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RunDeps } from "./runs/run.ts";
 import { Scrubber } from "./scrub.ts";
+import { SECRET_ENV, createTwoFactor } from "./twofa.ts";
 
 export const AUTH_DIR = path.join(".duckwright", "auth");
 /** A cookie that expires within this many ms counts as already expired. */
 const EXPIRY_MARGIN_MS = 60_000;
+
+/** Appended to the agent login's instructions (C1): the agent types placeholders, never credentials. */
+const AGENT_PARAGRAPH = "Type {{username}} where the username or email goes and {{password}} where the password goes; "
+  + "Duckwright replaces them with the real values. Never type real credentials. "
+  + "When you are logged in, finish with done success.";
 
 /** The login failed; the message is the REASON only (callers add `login failed: ENV: `). */
 export class LoginError extends Error {
@@ -32,7 +38,8 @@ export interface LoginRunContext {
 }
 
 export interface EnsureOptions {
-  env: { name: string; login: LoginConfig };
+  /** `text` is the environment file body, given to the login agent as context. */
+  env: { name: string; login: LoginConfig; text?: string };
   cwd?: string;
   signal: AbortSignal;
   headed: boolean;
@@ -112,7 +119,7 @@ export async function finishLogin(
   pw: PlaywrightCLI, check: LoginCheck | null, tmp: string, snapshotFile: string, step: Step,
 ): Promise<void> {
   if (check !== null) await checkPage(pw, check, snapshotFile, step);
-  await step("state-save", () => pw.run("state-save", [tmp]));
+  await step("state-save", () => pw.stateSave(tmp));
 }
 
 export class AuthBroker {
@@ -238,8 +245,9 @@ export class AuthBroker {
         publish(tmp, file);
         return 0;
       }
-      // Task 7 replaces this with the agent login.
-      throw new LoginError("agent login is not available yet");
+      const costUsd = await this.#agentLogin(opts, login, creds, scrubber, label, file, tmp);
+      publish(tmp, file);
+      return costUsd;
     } catch (e) {
       if (e instanceof AbortedError) throw e;
       if (opts.signal.aborted) throw new AbortedError();
@@ -247,6 +255,42 @@ export class AuthBroker {
     } finally {
       fs.rmSync(tmp, { force: true });
     }
+  }
+
+  /** Drives a `Agent` through the login with placeholders; returns its cost. Work folder is kept on failure. */
+  async #agentLogin(
+    opts: EnsureOptions, login: Extract<LoginConfig, { method: "agent" }>,
+    creds: { username: string; password: string }, scrubber: Scrubber, label: string, file: string, tmp: string,
+  ): Promise<number> {
+    const run = opts.run;
+    if (!run) throw new LoginError("agent login needs a run context");
+    const workdir = path.join(path.dirname(file), `${label}.login`);
+    fs.rmSync(workdir, { recursive: true, force: true });
+    fs.mkdirSync(workdir, { recursive: true, mode: 0o700 });
+    const pw = this.#createPw(`duckwright-login-${label}`, opts.signal);
+    const twofa = createTwoFactor({
+      secret: this.#env[SECRET_ENV] ?? null, human: null, timeoutSec: run.args.twofaTimeout,
+      signal: opts.signal, scrubber,
+    });
+    const step = makeStep(scrubber);
+    const agent = run.deps.createAgent({
+      task: `${login.task}\n\n${AGENT_PARAGRAPH}`,
+      pw, brain: run.makeBrain(workdir, scrubber), workdir,
+      maxSteps: run.args.maxSteps, headed: opts.headed, snapshotMode: run.args.snapshot,
+      signal: opts.signal, twofa, environment: opts.env.text ?? null,
+      fillValues: { "{{username}}": creds.username, "{{password}}": creds.password },
+      beforeClose: () => finishLogin(pw, login.check, tmp, path.join(workdir, "check-snapshot.yml"), step),
+    });
+    let result;
+    try {
+      result = await agent.run();
+    } catch (e) {
+      if (e instanceof PlaywrightError) throw new LoginError(scrubber.scrub(`playwright error: ${e.message}`));
+      throw e;
+    }
+    if (!result.success) throw new LoginError(scrubber.scrub(`login agent did not finish: ${result.answer}`));
+    fs.rmSync(workdir, { recursive: true, force: true });
+    return agent.costUsd;
   }
 
   async #scriptLogin(

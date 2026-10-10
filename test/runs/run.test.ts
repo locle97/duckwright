@@ -13,7 +13,7 @@ import type { Human } from "../../src/twofa.ts";
 import { Brain } from "../../src/brain.ts";
 import type { JevRecord } from "../../src/brain.ts";
 import { HybridBrain, JevAuthError, JevClient } from "../../src/jev.ts";
-import { PROMPTS, historyJson, startRun, statePathForHistory } from "../../src/runs/run.ts";
+import { PROMPTS, historyJson, makeBrain, startRun, statePathForHistory } from "../../src/runs/run.ts";
 import type { AgentLike, RunDeps, RunSpec } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
 
@@ -745,4 +745,13 @@ test("state_path_for_history", () => {
   assert.equal(statePathForHistory("/x/b.json", "/w"), "/x/b.json");
   assert.equal(statePathForHistory("/w", "/w"), "/w");
   assert.equal(statePathForHistory("/wx/b.json", "/w"), "/wx/b.json");
+});
+
+test("make_brain_builds_claude_or_hybrid_brain", () => {
+  const dir = tmpDir();
+  const deps = { prompts: PROMPTS, signal: new AbortController().signal, createAgent: () => { throw new Error("no"); } } as RunDeps;
+  const plain = makeBrain(args(), deps, dir, deps.signal, null);
+  assert.ok(plain instanceof Brain);
+  const hybrid = makeBrain(args({ jev: true }), { ...deps, env: { TYPESAFE_API_KEY: "k" } }, dir, deps.signal, null);
+  assert.ok(hybrid instanceof HybridBrain);
 });

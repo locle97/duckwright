@@ -159,3 +159,11 @@ test("state_save_failure_raises", async () => {
     (e: Error) => e instanceof PlaywrightError && e.message === "nope",
   );
 });
+
+test("state_save_with_empty_output_reports_exit_code", async () => {
+  const fake = fakeRunner({ code: 4, stdout: "", stderr: "" });
+  await assert.rejects(
+    new PlaywrightCLI({ runner: fake }).stateSave("/tmp/s.json"),
+    (e: Error) => e.message === "exit 4",
+  );
+});

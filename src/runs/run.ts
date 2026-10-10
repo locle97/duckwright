@@ -179,6 +179,36 @@ export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
   return { id: path.basename(workdir), workdir, events, control, done };
 }
 
+/**
+ * The brain for one run folder: Claude, or Jev in front of Claude. Shared by `execute` and the
+ * login agent. Prompts are scrubbed by the Agent itself, so no scrubber is needed here.
+ */
+export function makeBrain(
+  args: RunArgs, deps: RunDeps, workdir: string, signal: AbortSignal, log: DebugLog | null,
+): AgentOptions["brain"] {
+  const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
+  const claude = new Brain({
+    systemFiles: [
+      deps.prompts.system,
+      { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot],
+      args.skill,
+    ],
+    model: args.model,
+    snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
+    signal,
+    runner: log ? debugRunner(deps.runner ?? runProcess, log) : deps.runner,
+  });
+  if (!args.jev) return claude;
+  return new HybridBrain({
+    jev: new JevClient({
+      apiKey, signal,
+      transport: log ? debugTransport(deps.jevTransport ?? fetchTransport, log) : deps.jevTransport,
+    }),
+    claude, minConfidence: args.jevThreshold,
+    ...(log ? { onRoute: (r) => log.route(r) } : {}),
+  });
+}
+
 async function execute(
   spec: RunSpec, deps: RunDeps, workdir: string, events: RunEvents, control: RunControl, signal: AbortSignal,
 ): Promise<RunOutcome> {
@@ -197,7 +227,6 @@ async function execute(
     const statePath = args.state ? resolvePath(args.state) : null;
     if (statePath) stateRecord = { path: statePathForHistory(statePath, resolvePath(process.cwd())), source: "file" };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
-    const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const twofa = createTwoFactor({
       secret: (deps.env ?? process.env)[SECRET_ENV] ?? null,
       human: deps.humanFor?.({ signal, events }) ?? null,
@@ -213,23 +242,7 @@ async function execute(
       });
       log.attach(events);
     }
-    const claude = new Brain({
-      systemFiles: [deps.prompts.system, modeMd, args.skill],
-      model: args.model,
-      snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
-      signal,
-      runner: log ? debugRunner(deps.runner ?? runProcess, log) : deps.runner,
-    });
-    const brain = args.jev
-      ? new HybridBrain({
-        jev: new JevClient({
-          apiKey, signal,
-          transport: log ? debugTransport(deps.jevTransport ?? fetchTransport, log) : deps.jevTransport,
-        }),
-        claude, minConfidence: args.jevThreshold,
-        ...(log ? { onRoute: (r) => log.route(r) } : {}),
-      })
-      : claude;
+    const brain = makeBrain(args, deps, workdir, signal, log);
     const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     agent = deps.createAgent({
       task, pw, brain, workdir,

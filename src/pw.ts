@@ -57,7 +57,7 @@ export class PlaywrightCLI {
 
   async stateSave(path: string): Promise<void> {
     const res = await this.run("state-save", [path]);
-    if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout);
+    if (res.code !== 0) throw new PlaywrightError(res.stderr || res.stdout || `exit ${res.code}`);
   }
 
   /** Never throws, and runs even after the run was aborted, so the browser always closes. */
