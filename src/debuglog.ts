@@ -3,9 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { RunEvents } from "./events.ts";
-import type { RouteInfo } from "./jev.ts";
+import { JEV_INPUT_USD_PER_TOKEN, JEV_OUTPUT_USD_PER_TOKEN } from "./jev.ts";
+import type { JevTransport, RouteInfo } from "./jev.ts";
 import type { ProcResult, Runner } from "./proc.ts";
-import { REDACTED, redactText } from "./redact.ts";
+import { REDACTED, redactHeaders, redactText } from "./redact.ts";
 import type { Header } from "./redact.ts";
 import { fixed4 } from "./text.ts";
 
@@ -94,6 +95,7 @@ export class DebugLog {
   #jev = { requests: 0, retries: 0, input: 0, output: 0, cost: 0 };
   #routes = { accepted: 0, low_confidence: 0, error: 0, needs_text: 0, done: 0, skipped: 0 };
   #routeCount = 0;
+  #jevK = 0;
 
   constructor(o: DebugLogOptions) {
     this.#o = o;
@@ -109,7 +111,10 @@ export class DebugLog {
     try {
       events.subscribe((e) => {
         try {
-          if (e.type === "step:start") this.#step = e.step;
+          if (e.type === "step:start") {
+            this.#step = e.step;
+            this.#jevK = 0;
+          }
           else if (e.type === "run:end") this.#summary();
         } catch {
           // logging must never affect the run
@@ -239,11 +244,75 @@ export class DebugLog {
     }
   }
 
-  /** Filled in by the Jev transport wrapper (Task 4). */
-  jevRequest(_info: JevRequestInfo): void {}
+  jevRequest(info: JevRequestInfo): void {
+    try {
+      this.#jevK++;
+      this.#jev.requests++;
+      if (this.#jevK > 1) this.#jev.retries++;
+      const pretty = (s: string): string => {
+        try {
+          return JSON.stringify(JSON.parse(s), null, 2);
+        } catch {
+          return s;
+        }
+      };
+      const lines = [
+        `POST ${info.url}`,
+        `headers: ${redactHeaders(info.headers).map((h) => `${h.name}: ${h.value}`).join(", ")}`,
+        "----- request body -----",
+        pretty(info.body),
+        "----- response -----",
+      ];
+      if (info.text === undefined) {
+        lines.push(`error: ${errText(info.error)}`);
+      } else {
+        lines.push(`status: ${info.status}  wall: ${info.wallSec.toFixed(2)}s`, pretty(info.text));
+        let data: Record<string, unknown> | null = null;
+        try {
+          const parsed: unknown = JSON.parse(info.text);
+          if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed as Record<string, unknown>;
+        } catch {
+          // raw text printed above
+        }
+        const u = (data?.usage ?? {}) as Record<string, unknown>;
+        const inTok = u.input_tokens;
+        const outTok = u.output_tokens;
+        if (isNum(inTok)) this.#jev.input += inTok;
+        if (isNum(outTok)) this.#jev.output += outTok;
+        let c: number | undefined;
+        if (isNum(inTok) && isNum(outTok)) {
+          c = inTok * JEV_INPUT_USD_PER_TOKEN + outTok * JEV_OUTPUT_USD_PER_TOKEN;
+          this.#jev.cost += c;
+        }
+        lines.push("----- usage -----", `input tokens: ${num(inTok)}  output tokens: ${num(outTok)}  cost: $${cost(c)}`);
+        const answers = data?.answers;
+        if (answers !== null && typeof answers === "object" && !Array.isArray(answers)) {
+          const rows: string[] = [];
+          for (const [id, a] of Object.entries(answers as Record<string, unknown>)) {
+            const o = a as Record<string, unknown> | null;
+            if (o && typeof o === "object" && typeof o.choice === "string" && isNum(o.confidence)) {
+              rows.push(`  ${id}: ${o.choice} (confidence ${o.confidence.toFixed(3)})`);
+            }
+          }
+          if (rows.length > 0) lines.push("answers:", ...rows);
+        }
+      }
+      this.write(this.#block(`step ${this.#step} · jev request ${this.#jevK}`, lines.join("\n")));
+    } catch {
+      // logging must never affect the run
+    }
+  }
 
-  /** Filled in by the Jev transport wrapper (Task 4). */
-  route(_info: RouteInfo): void {}
+  route(info: RouteInfo): void {
+    try {
+      this.#routes[info.outcome]++;
+      this.#routeCount++;
+      const body = `outcome: ${info.outcome}\nreason: ${info.reason}\nbrain: ${info.outcome === "accepted" ? "jev" : "claude"}`;
+      this.write(this.#block(`step ${info.step} · route`, body));
+    } catch {
+      // logging must never affect the run
+    }
+  }
 
   #summary(): void {
     const c = this.#claude;
@@ -284,5 +353,31 @@ export function debugRunner(inner: Runner, log: DebugLog): Runner {
       // ignore
     }
     return result;
+  };
+}
+
+export function debugTransport(inner: JevTransport, log: DebugLog): JevTransport {
+  return async (url, init) => {
+    const t0 = log.now();
+    const headers = Object.entries(init.headers).map(([name, value]) => ({ name, value }));
+    const record = (extra: { status?: number; text?: string; error?: unknown }): void => {
+      try {
+        log.jevRequest({ method: init.method, url, headers, body: init.body, wallSec: (log.now() - t0) / 1000, ...extra });
+      } catch {
+        // ignore
+      }
+    };
+    let status: number;
+    let text: string;
+    try {
+      const res = await inner(url, init);
+      status = res.status;
+      text = await res.text();
+    } catch (error) {
+      record({ error });
+      throw error;
+    }
+    record({ status, text });
+    return { status, text: async () => text };
   };
 }

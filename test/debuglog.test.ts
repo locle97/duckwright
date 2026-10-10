@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { DebugLog, debugRunner, estimateTokens, promptSections } from "../src/debuglog.ts";
+import { DebugLog, debugRunner, debugTransport, estimateTokens, promptSections } from "../src/debuglog.ts";
 import { RunEvents } from "../src/events.ts";
+import type { JevTransport } from "../src/jev.ts";
 import type { Observation } from "../src/observe.ts";
 import { buildPrompt } from "../src/prompt.ts";
 import type { ProcResult, Runner } from "../src/proc.ts";
@@ -183,4 +184,70 @@ test("write failure warns once, console continues, no throw", async () => {
   assert.equal(warnings.length, 1);
   assert.ok(warnings[0].startsWith(`debug log: cannot write ${path.resolve(file)}: `));
   assert.equal(out.length, 1 + 1 + 2); // run header, system prompts, two calls
+});
+
+const KEY = "sk-secret-key-123";
+const JEV_BODY = JSON.stringify({ model: "m", note: KEY });
+const JEV_RESP = JSON.stringify({
+  usage: { input_tokens: 100, output_tokens: 20 },
+  answers: { action: { choice: "click", confidence: 0.9 }, bad: { choice: 1 } },
+  leak: "Bearer xyz",
+});
+const initOf = () => ({
+  method: "POST" as const, headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
+  body: JEV_BODY, signal: new AbortController().signal,
+});
+
+test("debugTransport passes through and logs the request", async () => {
+  const { file, log } = setup({ secrets: [KEY], now: clock(0, 250) });
+  const inner: JevTransport = async () => ({ status: 200, text: async () => JEV_RESP });
+  const res = await debugTransport(inner, log)("https://jev/x", initOf());
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), JEV_RESP);
+  const text = fs.readFileSync(file, "utf8");
+  assert.ok(text.includes("===== [debug run1] step 0 · jev request 1 ====="));
+  assert.ok(text.includes("POST https://jev/x\nheaders: Authorization: [REDACTED], Content-Type: application/json\n"));
+  assert.ok(text.includes("status: 200  wall: 0.25s"));
+  assert.ok(text.includes("input tokens: 100  output tokens: 20  cost: $0.0000"));
+  assert.ok(text.includes("answers:\n  action: click (confidence 0.900)\n"));
+  assert.ok(!text.includes("  bad:"));
+  assert.ok(!text.includes(KEY));
+  assert.ok(!text.includes("Bearer xyz"));
+});
+
+test("debugTransport rethrows and logs errors; raw responses", async () => {
+  const { file, log } = setup();
+  const boom = new TypeError("down");
+  await assert.rejects(debugTransport(async () => { throw boom; }, log)("u", initOf()), (e) => e === boom);
+  let text = fs.readFileSync(file, "utf8");
+  assert.ok(text.includes("error: TypeError: down\n"));
+  assert.ok(!text.includes("----- usage -----"));
+  await debugTransport(async () => ({ status: 502, text: async () => "bad gateway" }), log)("u", initOf());
+  text = fs.readFileSync(file, "utf8");
+  assert.ok(text.includes("status: 502"));
+  assert.ok(text.includes("bad gateway\n----- usage -----\ninput tokens: n/a  output tokens: n/a  cost: $n/a\n"));
+  assert.ok(!text.includes("answers:"));
+});
+
+test("jev request counter resets per step; route block; summary", async () => {
+  const { file, log } = setup();
+  const events = new RunEvents();
+  log.attach(events);
+  const t = debugTransport(async () => ({ status: 200, text: async () => JEV_RESP }), log);
+  events.emit({ type: "step:start", step: 2 });
+  await t("u", initOf());
+  await t("u", initOf());
+  await t("u", initOf());
+  events.emit({ type: "step:start", step: 3 });
+  await t("u", initOf());
+  log.route({ step: 3, outcome: "accepted", reason: "jev chose click e1 (confidence 0.90)" });
+  log.route({ step: 4, outcome: "skipped", reason: "no step context" });
+  events.emit({ type: "run:end", outcome: {} as never });
+  const text = fs.readFileSync(file, "utf8");
+  assert.ok(text.includes("step 2 · jev request 3 ="));
+  assert.ok(text.includes("step 3 · jev request 1 ="));
+  assert.ok(text.includes("===== [debug run1] step 3 · route =====\noutcome: accepted\nreason: jev chose click e1 (confidence 0.90)\nbrain: jev\n"));
+  assert.ok(text.includes("outcome: skipped\nreason: no step context\nbrain: claude\n"));
+  assert.ok(text.includes("jev: 4 requests (2 retries)  input 400  output 80 tokens  cost $0.0000\n"));
+  assert.ok(text.includes("routes: accepted 1  low_confidence 0  error 0  needs_text 0  done 0  skipped 1\n"));
 });
