@@ -12,7 +12,8 @@ import { AbortedError, runProcess } from "./proc.ts";
 import type { Runner } from "./proc.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RunDeps } from "./runs/run.ts";
-import { Scrubber } from "./scrub.ts";
+import { RunEvents } from "./events.ts";
+import { Scrubber, scrubTree } from "./scrub.ts";
 import { SECRET_ENV, createTwoFactor } from "./twofa.ts";
 
 export const AUTH_DIR = path.join(".duckwright", "auth");
@@ -34,7 +35,7 @@ export interface LoginRunContext {
   args: RunArgs;
   deps: Pick<RunDeps, "prompts" | "signal" | "createAgent" | "runner" | "jevTransport" | "humanFor" | "onWarning">;
   /** Builds the brain for a run folder; injected by run.ts so this module needs no runtime import of it. */
-  makeBrain: (workdir: string, scrubber: Scrubber) => AgentOptions["brain"];
+  makeBrain: (workdir: string) => AgentOptions["brain"];
 }
 
 export interface EnsureOptions {
@@ -268,27 +269,37 @@ export class AuthBroker {
     fs.rmSync(workdir, { recursive: true, force: true });
     fs.mkdirSync(workdir, { recursive: true, mode: 0o700 });
     const pw = this.#createPw(`duckwright-login-${label}`, opts.signal);
+    const events = new RunEvents();
     const twofa = createTwoFactor({
-      secret: this.#env[SECRET_ENV] ?? null, human: null, timeoutSec: run.args.twofaTimeout,
-      signal: opts.signal, scrubber,
+      secret: this.#env[SECRET_ENV] ?? null,
+      human: run.deps.humanFor?.({ signal: opts.signal, events }) ?? null,
+      timeoutSec: run.args.twofaTimeout, signal: opts.signal, events, scrubber,
     });
     const step = makeStep(scrubber);
     const agent = run.deps.createAgent({
       task: `${login.task}\n\n${AGENT_PARAGRAPH}`,
-      pw, brain: run.makeBrain(workdir, scrubber), workdir,
+      pw, brain: run.makeBrain(workdir), workdir,
       maxSteps: run.args.maxSteps, headed: opts.headed, snapshotMode: run.args.snapshot,
-      signal: opts.signal, twofa, environment: opts.env.text ?? null,
+      signal: opts.signal, twofa, events, environment: opts.env.text ?? null,
       fillValues: { "{{username}}": creds.username, "{{password}}": creds.password },
       beforeClose: () => finishLogin(pw, login.check, tmp, path.join(workdir, "check-snapshot.yml"), step),
     });
-    let result;
     try {
-      result = await agent.run();
+      let result;
+      try {
+        result = await agent.run();
+      } catch (e) {
+        if (e instanceof AbortedError) throw e;
+        if (e instanceof PlaywrightError) throw new LoginError(scrubber.scrub(`playwright error: ${e.message}`));
+        if (e instanceof LoginError) throw e;
+        throw new LoginError(scrubber.scrub(`login agent did not finish: ${messageOf(e)}`));
+      }
+      if (!result.success) throw new LoginError(scrubber.scrub(`login agent did not finish: ${result.answer}`));
     } catch (e) {
-      if (e instanceof PlaywrightError) throw new LoginError(scrubber.scrub(`playwright error: ${e.message}`));
+      // The folder is kept for debugging, but it must not hold the credentials.
+      scrubTree(workdir, scrubber);
       throw e;
     }
-    if (!result.success) throw new LoginError(scrubber.scrub(`login agent did not finish: ${result.answer}`));
     fs.rmSync(workdir, { recursive: true, force: true });
     return agent.costUsd;
   }

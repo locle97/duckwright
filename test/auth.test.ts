@@ -402,13 +402,14 @@ function runResult(success: boolean, answer = "done", costUsd = 0.25): RunResult
 interface AgentHarness {
   opts: AgentOptions[];
   workdirFiles: string[][];
+  brainDirs: string[];
   createAgent: (o: AgentOptions) => AgentLike;
 }
 
 /** A fake createAgent: captures options, lists the work folder, runs beforeClose like Agent does on success. */
 function harness(behave: (o: AgentOptions) => Promise<RunResult> | RunResult): AgentHarness {
   const h: AgentHarness = {
-    opts: [], workdirFiles: [],
+    opts: [], workdirFiles: [], brainDirs: [],
     createAgent: (o) => {
       h.opts.push(o);
       h.workdirFiles.push(fs.readdirSync(o.workdir));
@@ -427,7 +428,7 @@ function harness(behave: (o: AgentOptions) => Promise<RunResult> | RunResult): A
   return h;
 }
 
-function runCtx(h: AgentHarness, over: Partial<RunArgs> = {}) {
+function runCtx(h: AgentHarness, over: Partial<RunArgs> = {}, deps: object = {}) {
   return {
     args: {
       task: "t", file: null, maxSteps: 7, model: "mm", headed: false, skill: "s.md", session: "s",
@@ -435,8 +436,8 @@ function runCtx(h: AgentHarness, over: Partial<RunArgs> = {}) {
       network: true, video: true, screenshot: true, twofaTimeout: 300, web: false, port: null, jev: false,
       jevThreshold: 0.8, debug: true, ...over,
     } as RunArgs,
-    deps: { prompts: PROMPTS, signal: sig(), createAgent: h.createAgent },
-    makeBrain: () => (async () => { throw new Error("unused"); }) as never,
+    deps: { prompts: PROMPTS, signal: sig(), createAgent: h.createAgent, ...deps },
+    makeBrain: (wd: string) => { h.brainDirs.push(wd); return (async () => { throw new Error("unused"); }) as never; },
   };
 }
 
@@ -464,6 +465,7 @@ test("agent_login_creates_agent_with_expected_options", async () => {
   assert.equal(o.network, undefined);
   assert.equal(o.video, undefined);
   assert.equal(o.screenshot, undefined);
+  assert.deepEqual(h.brainDirs, [o.workdir]);
   assert.equal(res.costUsd, 0.25);
   assert.equal(res.reused, false);
   assert.equal(res.path, cachePath("staging", cwd));
@@ -546,4 +548,69 @@ test("agent_login_creates_no_history_or_debug_log", async () => {
   const walk = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { found.push(e.name); if (e.isDirectory()) walk(path.join(d, e.name)); } };
   walk(cwd);
   assert.ok(!found.includes("history.json") && !found.includes("debug.log") && !found.includes("duckwright.spec.ts"));
+});
+
+function allText(dir: string): string {
+  let out = "";
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    out += e.isDirectory() ? allText(p) : fs.readFileSync(p, "utf8");
+  }
+  return out;
+}
+
+test("agent_login_check_failure_scrubs_kept_work_dir", async () => {
+  const cwd = tmpDir();
+  const h = harness((o) => {
+    fs.writeFileSync(path.join(o.workdir, "page.yml"), `user u@x.com pw ${PASSWORD}`);
+    return runResult(true);
+  });
+  await assert.rejects(
+    agentEnsure(broker(fake({ snapshot: `Welcome u@x.com ${PASSWORD}` })), cwd, h, { ...AGENT, check: CHECK } as LoginConfig),
+    LoginError,
+  );
+  const dir = path.join(cwd, AUTH_DIR, "staging.login");
+  assert.ok(fs.existsSync(path.join(dir, "check-snapshot.yml")));
+  const text = allText(dir);
+  assert.ok(!text.includes("u@x.com") && !text.includes(PASSWORD));
+});
+
+test("agent_login_unsuccessful_result_scrubs_work_dir", async () => {
+  const cwd = tmpDir();
+  const h = harness((o) => {
+    fs.writeFileSync(path.join(o.workdir, "t.txt"), `typed ${PASSWORD}`);
+    return runResult(false);
+  });
+  await assert.rejects(agentEnsure(broker(fake()), cwd, h), LoginError);
+  assert.ok(!allText(path.join(cwd, AUTH_DIR, "staging.login")).includes(PASSWORD));
+});
+
+test("agent_login_other_throw_is_mapped_and_scrubbed", async () => {
+  const cwd = tmpDir();
+  const h = harness((o) => {
+    fs.writeFileSync(path.join(o.workdir, "t.txt"), `typed ${PASSWORD}`);
+    throw new Error(`kaboom ${PASSWORD}`);
+  });
+  await assert.rejects(agentEnsure(broker(fake()), cwd, h), (e: Error) => {
+    assert.ok(e instanceof LoginError);
+    assert.equal(e.message, "login agent did not finish: kaboom [REDACTED]");
+    return true;
+  });
+  assert.ok(!allText(path.join(cwd, AUTH_DIR, "staging.login")).includes(PASSWORD));
+});
+
+test("agent_login_passes_human_from_humanFor_to_twofa", async () => {
+  const asked: string[] = [];
+  const human = { code: async (k: string) => { asked.push(k); return "123456"; }, approve: async () => {} };
+  let ctxSeen: { signal?: AbortSignal; events?: unknown } = {};
+  const h = harness(async (o) => {
+    assert.equal(await o.twofa!.code("sms"), "123456");
+    return runResult(true);
+  });
+  await broker(fake()).ensure({
+    env: { name: "staging", login: AGENT } as never, cwd: tmpDir(), signal: sig(), headed: false,
+    run: runCtx(h, {}, { humanFor: (c: object) => { ctxSeen = c; return human; } }),
+  });
+  assert.deepEqual(asked, ["sms"]);
+  assert.ok(ctxSeen.signal && ctxSeen.events);
 });
