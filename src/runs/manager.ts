@@ -116,7 +116,7 @@ export interface ManagerLike {
   /** Plan a plan whose planning failed again. */
   retryPlan(id: PlanId): Result;
   cancelPlan(id: PlanId): void;
-  /** Run the plan's tasks one after another, in the plan's order: all of them, or the failed and stopped ones. */
+  /** Run the plan's tasks in the plan's order, as many at once as the parallel limit allows: all of them, or the failed and stopped ones. */
   runPlan(id: PlanId, which: "all" | "failed"): Result;
   /** Start no more of the plan's tasks, and stop the one running. */
   stopPlan(id: PlanId): void;
@@ -797,11 +797,10 @@ export class RunManager implements ManagerLike {
     this.#planUpdated(plan);
   }
 
-  /** Start the next task of each running plan whose previous task has finished, while slots are free. */
+  /** Start the queued tasks of each running plan, in order, while parallel slots are free. */
   #advancePlans(): void {
     for (const plan of this.#plans) {
       if (plan.queue.length === 0) continue;
-      if (plan.taskIds.some((x) => this.#activeRunOf(x))) continue;
       while (plan.queue.length > 0) {
         if (this.#closing) {
           plan.queue = [];
@@ -813,7 +812,6 @@ export class RunManager implements ManagerLike {
         if (!task || this.#activeRun(task)) continue;
         // A task that cannot start (the manager already said why) ends the plan run.
         if (!this.start(id).ok) plan.queue = [];
-        break;
       }
       this.#planUpdated(plan);
     }
