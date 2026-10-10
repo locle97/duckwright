@@ -3,6 +3,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { isEnvName, resolveEnv } from "./environment.ts";
+import { resolvePath } from "./paths.ts";
 import { runProcess } from "./proc.ts";
 import type { Runner } from "./proc.ts";
 import { slugify } from "./rundir.ts";
@@ -172,8 +174,13 @@ export async function runPlanner(o: PlannerOptions): Promise<{ doc: PlanDoc; cos
 }
 
 /** One task file: a comment naming the plan and scenario, the shared setup, then the scenario. */
-export function taskFileText(s: Scenario, source: string, setup: string | null): string {
-  const front = ["---", `# From ${flat(source)}, scenario ${s.id}`, ...(setup !== null ? [`setup: ${setup}`] : []), "---"];
+export function taskFileText(s: Scenario, source: string, setup: string | null, env: string | null = null): string {
+  const front = [
+    "---", `# From ${flat(source)}, scenario ${s.id}`,
+    ...(setup !== null ? [`setup: ${setup}`] : []),
+    ...(env !== null ? [`env: ${env}`] : []),
+    "---",
+  ];
   const list = (xs: string[]): string[] => xs.map((x) => `- ${x}`);
   const body = [`# ${s.id}: ${s.title}`, ""];
   if (s.preconditions.length > 0) body.push("Preconditions:", ...list(s.preconditions), "");
@@ -199,10 +206,20 @@ function freshFolder(root: string, slug: string): string {
  * Write a planned folder under `root`: `<root>/<plan name>/` (with -2, -3, ... rather than touch
  * an existing one) holding NN-<title>.md per scenario, shared/setup.md, and plan.json.
  */
-export function writePlan(doc: PlanDoc, planFile: string, root = "tasks"): LoadedPlan {
+export function writePlan(doc: PlanDoc, planFile: string, root = "tasks", env: string | null = null): LoadedPlan {
   const name = path.basename(planFile);
   const folder = freshFolder(root, slugify(path.parse(planFile).name) || "plan");
   const setup = doc.setup !== "" ? SETUP_FILE : null;
+  let envValue: string | null = null;
+  if (env !== null) {
+    if (isEnvName(env)) envValue = env;
+    else {
+      // Task-file paths are read relative to the file, so write one relative to the folder,
+      // and never in a form that would be re-read as a name.
+      const rel = path.relative(resolvePath(folder), resolveEnv(env).path);
+      envValue = !rel.includes("/") && !rel.includes(path.sep) && !/\.md$/i.test(rel) ? `./${rel}` : rel;
+    }
+  }
   if (setup !== null) {
     fs.mkdirSync(path.join(folder, path.dirname(setup)), { recursive: true });
     fs.writeFileSync(path.join(folder, setup), doc.setup + "\n");
@@ -211,7 +228,7 @@ export function writePlan(doc: PlanDoc, planFile: string, root = "tasks"): Loade
   const tasks: PlanEntry[] = doc.tasks.map((s, i) => {
     // The number keeps names unique and the folder's order the plan's order.
     const file = `${String(i + 1).padStart(width, "0")}-${slugify(s.title) || "scenario"}.md`;
-    fs.writeFileSync(path.join(folder, file), taskFileText(s, planFile, setup));
+    fs.writeFileSync(path.join(folder, file), taskFileText(s, planFile, setup, envValue));
     return { file, id: s.id, title: s.title };
   });
   const manifest: Manifest = { version: 1, name, source: planFile, setup, notes: doc.notes, skipped: doc.skipped, tasks };

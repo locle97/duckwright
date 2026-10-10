@@ -15,7 +15,7 @@ const usage = (message: string) => (e: unknown) => e instanceof UsageError && e.
 test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
-    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid",
+    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", env: null,
     print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
     jev: false, jevThreshold: 0.8,
   });
@@ -31,7 +31,7 @@ test("every option", () => {
     "--state", "a.json", "--allow-file-access", "--snapshot-grep", "go",
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
-    session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep",
+    session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep", env: null,
     print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8,
   });
 });
@@ -340,6 +340,37 @@ test("evidence_help_lines", () => {
     + "                        runs/<id>/screenshots/ (default off)\n";
   assert.ok(text.includes(block));
   assert.ok(text.indexOf("--network, --no-network") < text.indexOf(block));
+});
+
+test("args_env_values", () => {
+  assert.equal(parse("--env", "staging", "x").env, "staging");
+  assert.equal(parse("--env=staging", "x").env, "staging");
+  assert.equal(parse("--env", "envs/x.md", "x").env, "envs/x.md");
+  assert.equal(args(parseRunArgs(["x"], "/s", { env: "qa" })).env, "qa");
+  assert.equal(args(parseRunArgs(["--env", "prod", "x"], "/s", { env: "qa" })).env, "prod");
+});
+
+test("args_env_none_is_null", () => {
+  assert.equal(parse("--env", "none", "x").env, null);
+  assert.equal(args(parseRunArgs(["x"], "/s", { env: "none" })).env, null);
+  assert.equal(args(parseRunArgs(["--env", "none", "x"], "/s", { env: "qa" })).env, null);
+});
+
+test("args_env_errors", () => {
+  assert.throws(() => parse("x", "--env"), usage("argument --env: expected one argument"));
+  const bad = (v: string) => `argument --env: invalid environment: '${v}' (use a name of letters, digits, '.', '_' and '-', or a path to a .md file)`;
+  assert.throws(() => parse("--env", ".x", "x"), usage(bad(".x")));
+  assert.throws(() => parse("--env=", "x"), usage(bad("")));
+});
+
+test("args_env_usage_and_help", () => {
+  assert.ok(RUN_USAGE.includes("                  [--state FILE] [--env ENV] [--allow-file-access]\n"));
+  assert.ok(RUN_HELP.includes(
+    "                        state-load before the task starts\n"
+    + "  --env ENV             environment context: the text of environments/ENV.md\n"
+    + "                        (or of the .md file at path ENV) is put into every\n"
+    + "                        step's prompt; none = no environment\n",
+  ));
 });
 
 test("jev defaults", () => {

@@ -9,6 +9,7 @@ import { Brain } from "../brain.ts";
 import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
+import { EnvError, loadEnvironment } from "../environment.ts";
 import { HybridBrain, JevAuthError, JevClient } from "../jev.ts";
 import { ExportError, exportRun } from "../export.ts";
 import type { HistoryData } from "../export.ts";
@@ -81,11 +82,13 @@ export interface RunHandle {
 export function historyJson(
   task: string, success: boolean, answer: string, steps: number, costUsd: number,
   history: StepRecord[], taskFile: string | null = null, video: string | null = null,
+  env: { name: string; path: string } | null = null,
 ): HistoryData {
   const jevSteps = history.filter((r) => r.decision.source === "jev").length;
   return {
     task,
     task_file: taskFile,
+    ...(env !== null ? { env } : {}),
     success,
     answer,
     steps,
@@ -163,9 +166,12 @@ async function execute(
   const collected: StepRecord[] = [];
   let agent: AgentLike | null = null;
   let outcome: RunOutcome;
+  let envRecord: { name: string; path: string } | null = null;
   // Let the caller subscribe before anything is emitted.
   await Promise.resolve();
   try {
+    const env = args.env ? loadEnvironment(args.env) : null;
+    if (env) envRecord = { name: env.name, path: env.path };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const claude = new Brain({
@@ -191,7 +197,7 @@ async function execute(
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
       snapshotMode: args.snapshot, network: args.network, video: args.video, screenshot: args.screenshot,
-      signal, events, control, twofa,
+      signal, events, control, twofa, environment: env?.text ?? null,
     });
     events.emit({
       type: "run:start", task, maxSteps: args.maxSteps, model: args.model, snapshot: args.snapshot,
@@ -208,6 +214,8 @@ async function execute(
       code = 130;
     } else if (e instanceof PlaywrightError) {
       message = `playwright error: ${e.message}`;
+    } else if (e instanceof EnvError) {
+      message = e.message;
     } else if (e instanceof JevAuthError) {
       message = "jev error: invalid TYPESAFE_API_KEY";
     } else {
@@ -216,7 +224,7 @@ async function execute(
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     let written: string | null = historyPath;
     try {
-      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video));
+      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video, envRecord));
     } catch {
       written = null;
     }
@@ -229,7 +237,7 @@ async function execute(
   async function finish(result: RunResult): Promise<RunOutcome> {
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     writeHistory(historyPath, historyJson(
-      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video,
+      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video, envRecord,
     ));
     const warnings: string[] = [];
     let exported: ExportOutcome = { kind: "off" };

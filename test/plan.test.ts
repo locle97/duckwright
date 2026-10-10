@@ -7,6 +7,7 @@ import {
   MANIFEST, PLAN_SCHEMA, PlanError, isPlanFolder, loadPlan, parsePlanDoc, plannerArgv, runPlanner, taskFileText, writeManifest, writePlan,
 } from "../src/plan.ts";
 import type { PlanDoc } from "../src/plan.ts";
+import { resolvePath } from "../src/paths.ts";
 import { loadTaskFile } from "../src/taskfile.ts";
 import { fakeRunner, ok, tmpDir } from "./helpers.ts";
 
@@ -130,4 +131,36 @@ test("load_plan_drops_missing_files_and_rejects_bad_manifests", () => {
   fs.writeFileSync(path.join(plan.folder, MANIFEST), "{");
   assert.throws(() => loadPlan(plan.folder), /cannot read/);
   assert.ok(!isPlanFolder(tmpDir()));
+});
+
+test("task_file_text_env", () => {
+  assert.equal(
+    taskFileText(DOC.tasks[1]!, "plan.md", "shared/setup.md", "staging").split("\n").slice(0, 5).join("\n"),
+    "---\n# From plan.md, scenario TS-2\nsetup: shared/setup.md\nenv: staging\n---",
+  );
+  assert.equal(
+    taskFileText(DOC.tasks[1]!, "plan.md", null, "staging").split("\n").slice(0, 4).join("\n"),
+    "---\n# From plan.md, scenario TS-2\nenv: staging\n---",
+  );
+  assert.equal(taskFileText(DOC.tasks[0]!, "p.md", "s.md"), taskFileText(DOC.tasks[0]!, "p.md", "s.md", null));
+});
+
+test("write_plan_env_path_relative_to_folder", () => {
+  const tmp = tmpDir();
+  const prev = process.cwd();
+  process.chdir(tmp);
+  try {
+    const plan = writePlan(DOC, "qa.md", "tasks", "envs/eu.md");
+    for (const t of plan.tasks) {
+      assert.ok(fs.readFileSync(t.path, "utf8").includes("\nenv: ../../envs/eu.md\n"));
+      assert.equal(loadTaskFile(t.path).settings.env, resolvePath(path.join(tmp, "envs", "eu.md")));
+    }
+    assert.ok(!fs.readFileSync(plan.setupPath!, "utf8").includes("env:"));
+    const abs = writePlan(DOC, "qa.md", "tasks", path.join(tmp, "tasks", "qa-2", "envfile"));
+    assert.ok(fs.readFileSync(abs.tasks[0]!.path, "utf8").includes("\nenv: ./envfile\n"));
+    const named = writePlan(DOC, "qa.md", "tasks", "staging");
+    assert.ok(fs.readFileSync(named.tasks[0]!.path, "utf8").includes("\nenv: staging\n"));
+  } finally {
+    process.chdir(prev);
+  }
 });

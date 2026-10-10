@@ -5,6 +5,7 @@ import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts"
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
+import { EnvError, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun } from "./export.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
@@ -134,7 +135,7 @@ async function planMain(deps: CliDeps, args: RunArgs): Promise<number> {
     deps.stderr(`plan error: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
-  const loaded = writePlan(r.doc, plan);
+  const loaded = writePlan(r.doc, plan, "tasks", args.env);
   deps.stdout(`Plan: ${loaded.tasks.length} task${loaded.tasks.length === 1 ? "" : "s"} in ${loaded.folder}${path.sep}  Cost: $${fixed4(r.cost)}`);
   if (loaded.setupPath !== null) deps.stdout(`Shared setup: ${loaded.setupPath}`);
   for (const t of loaded.tasks) deps.stdout(`  ${t.path}`);
@@ -145,13 +146,21 @@ async function planMain(deps: CliDeps, args: RunArgs): Promise<number> {
   return 0;
 }
 
-function preflight(deps: CliDeps, skill: string, state: string | null): string | null {
+function preflight(deps: CliDeps, skill: string, state: string | null, env: string | null = null): string | null {
   const { system, snapshotFull, snapshotGrep, snapshotHybrid } = deps.prompts;
   for (const p of [system, snapshotFull, snapshotGrep, snapshotHybrid]) {
     if (!isFile(p)) return `system prompt not found: ${p} (is the installation complete?)`;
   }
   if (!isFile(skill)) return `playwright-cli skill not found: ${skill}`;
   if (state && !isFile(state)) return `state file not found: ${state}`;
+  if (env) {
+    try {
+      loadEnvironment(env);
+    } catch (e) {
+      if (e instanceof EnvError) return e.message;
+      throw e;
+    }
+  }
   if (!deps.which("claude")) return "claude CLI not found on PATH (install Claude Code)";
   if (!deps.which("playwright-cli")) return "playwright-cli not found on PATH (npm i -g @playwright/cli@latest)";
   return null;
@@ -160,7 +169,7 @@ function preflight(deps: CliDeps, skill: string, state: string | null): string |
 const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : null);
 
 function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
-  const err = preflight(deps, args.skill, statePath(args));
+  const err = preflight(deps, args.skill, statePath(args), args.env);
   if (err) return err;
   if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
   return null;

@@ -6,7 +6,7 @@ import { formKey, formResult, openForm } from "../../src/tui/form.ts";
 import type { FormState } from "../../src/tui/form.ts";
 import { key } from "../../src/tui/keypress.ts";
 
-const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false };
+const EFF: Effective = { model: "m-default", maxSteps: 30, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false, env: null };
 
 function press(f: FormState, ...specs: string[]): FormState {
   return specs.reduce((s, spec) => formKey(s, key(spec)), f);
@@ -16,17 +16,17 @@ test("form_open_prefills_effective_and_overrides", () => {
   const f = openForm(7, EFF, { maxSteps: 5, headed: true });
   assert.equal(f.taskId, 7);
   assert.equal(f.focus, 0);
-  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "jev"]);
-  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode", "video", "screenshot", "jev"]);
-  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid", "false", "false", "false"]);
-  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false, false, false, false]);
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "jev", "env"]);
+  assert.deepEqual(f.fields.map((x) => x.label), ["model", "max steps", "headed", "snapshot mode", "video", "screenshot", "jev", "environment"]);
+  assert.deepEqual(f.fields.map((x) => x.raw), ["m-default", "5", "true", "hybrid", "false", "false", "false", "none"]);
+  assert.deepEqual(f.fields.map((x) => x.overridden), [false, true, true, false, false, false, false, false]);
   assert.ok(f.fields.every((x) => x.error === null));
 });
 
 test("form_evidence_fields", () => {
   let f = openForm(null, EFF, {});
-  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "jev"]);
-  assert.deepEqual(f.fields.slice(-3).map((x) => x.label), ["video", "screenshot", "jev"]);
+  assert.deepEqual(f.fields.map((x) => x.key), ["model", "maxSteps", "headed", "snapshot", "video", "screenshot", "jev", "env"]);
+  assert.deepEqual(f.fields.slice(-4, -1).map((x) => x.label), ["video", "screenshot", "jev"]);
   f = press(f, "down", "down", "down", "down");
   assert.equal(f.fields[4].key, "video");
   f = press(f, "x");
@@ -101,9 +101,66 @@ test("form_result_only_overridden", () => {
   assert.deepEqual(r, { ok: true, overrides: { model: "m2", headed: true, snapshot: "full" } });
 });
 
+test("form_env_field_open", () => {
+  const eff = { ...EFF, env: null };
+  const last = (o: Parameters<typeof openForm>[2]) => openForm(null, eff, o, 0, ["qa", "staging"]).fields.at(-1);
+  assert.deepEqual(last({}), { key: "env", label: "environment", raw: "none", overridden: false, error: null, effective: "none", opened: "none", openedOverridden: false });
+  assert.deepEqual([last({ env: null })?.raw, last({ env: null })?.overridden], ["none", true]);
+  assert.deepEqual([last({ env: "qa" })?.raw, last({ env: "qa" })?.overridden], ["qa", true]);
+});
+
+test("form_env_cycles_and_resets", () => {
+  let f = openForm(null, { ...EFF, env: "eu" }, {}, 7, ["qa", "staging"]);
+  const raw = () => f.fields[7].raw;
+  f = press(f, "space");
+  assert.equal(raw(), "none");
+  f = press(f, "right");
+  assert.equal(raw(), "qa");
+  f = press(f, "left");
+  assert.equal(raw(), "staging");
+  f = press(f, "space");
+  assert.equal(raw(), "eu");
+  f = press(f, "space");
+  f = press(f, "x");
+  assert.equal(raw(), "none", "typing is ignored");
+  f = press(f, "backspace");
+  assert.equal(raw(), "none", "backspace is ignored");
+  assert.deepEqual(formResult(f), { ok: true, overrides: { env: null } });
+  f = press(f, "right");
+  assert.deepEqual(formResult(f), { ok: true, overrides: { env: "qa" } });
+  f = press(f, "ctrl+r");
+  assert.equal(raw(), "eu");
+  assert.equal(f.fields[7].overridden, false);
+  assert.deepEqual(formResult(f), { ok: true, overrides: {} });
+});
+
+test("form_env_cycle_keeps_unlisted_override", () => {
+  let f = openForm(null, { ...EFF, env: null }, { env: "eu" }, 7, ["qa"]);
+  const seen = [f.fields[7].raw];
+  for (let i = 0; i < 3; i++) { f = press(f, "space"); seen.push(f.fields[7].raw); }
+  assert.deepEqual(seen, ["eu", "none", "qa", "eu"]);
+});
+
+test("form_env_cycle_back_to_unlisted_effective_resets", () => {
+  let f = openForm(null, { ...EFF, env: "foo" }, {}, 7, ["qa"]);
+  f = press(f, "space", "space", "space");
+  assert.equal(f.fields[7].raw, "foo");
+  assert.equal(f.fields[7].overridden, false);
+  assert.deepEqual(formResult(f), { ok: true, overrides: {} });
+});
+
+test("form_env_cycle_keeps_task_override_when_unlisted", () => {
+  let f = openForm(1, { ...EFF, env: "eu" }, { env: "eu" }, 7, ["qa"]);
+  const seen = [f.fields[7].raw];
+  for (let i = 0; i < 3; i++) { f = press(f, "space"); seen.push(f.fields[7].raw); }
+  assert.deepEqual(seen, ["eu", "none", "qa", "eu"]);
+  assert.equal(f.fields[7].overridden, true);
+  assert.deepEqual(formResult(f), { ok: true, overrides: { env: "eu" } });
+});
+
 test("form jev field", () => {
   let f = openForm(null, { ...EFF, jev: false }, {});
-  const last = f.fields[f.fields.length - 1];
+  const last = f.fields[6];
   assert.equal(last.key, "jev");
   assert.equal(last.label, "jev");
   assert.equal(last.raw, "false");

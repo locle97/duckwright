@@ -12,8 +12,8 @@ import type { UiAction, ViewState } from "../../src/tui/state.ts";
 function task(id: number, state: TaskState = "idle", runId: string | null = null): TaskSnapshot {
   return {
     id, text: `task ${id}`, name: `"task ${id}"`, source: { kind: "typed" }, state, overrides: {},
-    effective: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false },
-    inherited: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false },
+    effective: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false, env: null },
+    inherited: { model: "m", maxSteps: 10, headed: false, snapshot: "hybrid", video: false, screenshot: false, jev: false, env: null },
     error: null, runId, runCount: runId ? 1 : 0, createdAt: 0, twofa: null, hasSpec: false,
   };
 }
@@ -303,7 +303,7 @@ test("state_escape_restores_previous_focus", () => {
   assert.equal(s.mode, "help");
   s = reduce(s, { type: "escape" });
   assert.equal(s.mode, "detail");
-  const form = { taskId: 1, fields: [], focus: 0 };
+  const form = { taskId: 1, fields: [], focus: 0, environments: [] };
   s = reduce(s, { type: "form", next: form });
   assert.equal(s.mode, "form");
   assert.equal(s.form, form);
@@ -607,26 +607,26 @@ test("state_focus_list_keeps_compose_text", () => {
 test("state_globals", () => {
   const base = task(1).effective;
   assert.equal(initialState(0).globals, null);
-  let s = initialState(0, [task(1)], [], { base, overrides: {} });
-  assert.deepEqual(s.globals, { base, overrides: {} });
+  let s = initialState(0, [task(1)], [], { base, overrides: {}, environments: [] });
+  assert.deepEqual(s.globals, { base, overrides: {}, environments: [] });
   assert.equal(editingGlobals(s), false);
-  s = reduce(s, { type: "manager", event: { type: "globals:updated", globals: { base, overrides: { maxSteps: 3 } } } });
+  s = reduce(s, { type: "manager", event: { type: "globals:updated", globals: { base, overrides: { maxSteps: 3 }, environments: [] } } });
   assert.deepEqual(s.globals?.overrides, { maxSteps: 3 });
-  s = reduce(s, { type: "form", next: { taskId: null, fields: [], focus: 0 } });
+  s = reduce(s, { type: "form", next: { taskId: null, fields: [], focus: 0, environments: [] } });
   assert.equal(editingGlobals(s), true);
-  s = reduce(s, { type: "form", next: { taskId: 1, fields: [], focus: 0 } });
+  s = reduce(s, { type: "form", next: { taskId: 1, fields: [], focus: 0, environments: [] } });
   assert.equal(editingGlobals(s), false, "a task's form is not the globals");
 });
 
 test("state_options_focus", () => {
-  let s = initialState(0, [task(1)], [], { base: task(1).effective, overrides: {} });
+  let s = initialState(0, [task(1)], [], { base: task(1).effective, overrides: {}, environments: [] });
   assert.equal(s.optionsSelected, 0);
   s = reduce(s, { type: "focus", target: "options" });
   assert.deepEqual([s.focus, s.mode], ["options", "options"]);
   s = reduce(s, { type: "optionsMove", delta: -1 });
   assert.equal(s.optionsSelected, 0, "clamped at the first field");
   s = reduce(s, { type: "optionsMove", delta: 9 });
-  assert.equal(s.optionsSelected, 6, "clamped at the last field");
+  assert.equal(s.optionsSelected, 7, "clamped at the last field");
   s = reduce(s, { type: "escape" });
   assert.deepEqual([s.focus, s.mode], ["list", "list"]);
 });

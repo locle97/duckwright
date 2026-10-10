@@ -760,6 +760,17 @@ test("video_start_failure_skips_stop", async () => {
   assert.deepEqual(a.evidence.warnings, ["video failed to start: nope"]);
 });
 
+test("agent_environment_in_every_step_prompt", async () => {
+  const script = [dec([["hover", ["e1"]]]), dec([["hover", ["e2"]]]), dec([["hover", ["e3"]]])];
+  const withEnv = new FakeBrain(script);
+  await agent(new FakePW(), withEnv, { maxSteps: 3, environment: "ENV-TEXT" }).run();
+  assert.equal(withEnv.prompts.length, 3);
+  assert.ok(withEnv.prompts.every((p) => p.includes("<environment>\nENV-TEXT\n</environment>")));
+  const without = new FakeBrain(script);
+  await agent(new FakePW(), without, { maxSteps: 3 }).run();
+  assert.ok(without.prompts.every((p) => !p.includes("<environment>")));
+});
+
 test("decide receives StepInput", async () => {
   const pw = new FakePW();
   const brain = new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]);

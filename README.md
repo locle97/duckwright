@@ -109,7 +109,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 duckwright [--max-parallel N] [--past N] [--theme NAME] [--web [--port PORT]] [options]
 duckwright ["<task>" | -f FILE|FOLDER ...] [options]
 duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
-                  [--skill PATH] [--session NAME] [--state FILE]
+                  [--skill PATH] [--session NAME] [--state FILE] [--env ENV]
                   [--allow-file-access] [--[no-]network]
                   [--[no-]jev] [--jev-threshold FLOAT]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
@@ -135,6 +135,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--skill` | bundled `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `duckwright` | playwright-cli session name |
 | `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
+| `--env` | none | Environment context: the text of `environments/ENV.md` (or of the `.md` file at path ENV) is put into every step's prompt; `none` = no environment (see [Environment context](#environment-context)) |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
 | `--twofa-timeout` | `300` | Seconds (at most `2147483`) to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
@@ -169,7 +170,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 
 A task or `-f` on the command line is added to the task list and started as soon as the TUI opens, up to `--max-parallel` at once, with the rest starting in order as runs finish: `duckwright -f tasks/` runs a whole folder in the TUI. A missing or invalid file is reported before the TUI opens (exit `2`). When you quit, the TUI prints the same kind of summary as a [batch run](#batch-runs).
 
-**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, snapshot mode, video, screenshot, jev). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
+**Global options.** The lower pane of the left column shows the global options (model, max steps, headed, snapshot mode, video, screenshot, jev, environment). `h` or `l` moves the focus between it and the task list; there, `j`/`k` pick a field and `⏎` edits it in place (`O` edits them from anywhere). They apply to every task's next run, above the command-line flags and below a task's own `o` options.
 
 **Past runs.** Runs saved in `runs/` are listed on the sidebar's History tab, newest `--past N` of them (default 20); press `tab` to switch between Tasks and History. Each tab keeps its own selection and filter. Past runs are read-only: select one to see its timeline, and press `space` to run it again with the current flags, which moves it to the Tasks tab.
 
@@ -298,6 +299,24 @@ duckwright "Log in to the demo app as linh and open the dashboard"
 - **An invalid `DUCKWRIGHT_TOTP_SECRET`** stops Duckwright before anything runs (exit `2`).
 - **Exported tests**: a `totp` step becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. Tests exported from a run where you typed the codes still need `DUCKWRIGHT_TOTP_SECRET` set in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
 
+### Environment context
+
+An environment file describes the system under test once, so task files do not repeat it: base URL, test accounts and where their credentials come from, seeded data, feature flags, known quirks, and what is off-limits. [`examples/environments/staging.md`](https://github.com/locle97/duckwright/blob/main/examples/environments/staging.md) is a template.
+
+```bash
+duckwright -p "Open the dashboard and report the plan name" --env staging
+```
+
+- **Folder and naming**: `--env staging` reads `environments/staging.md` in the current directory. A name is letters, digits, `.`, `_` and `-`, and does not start with `.`. A value with a `/` or ending in `.md` is a path to the file instead (`--env ../shared/staging.md`). `none` is reserved: it means no environment, so a file cannot be called `none`.
+- **Where to set it**: `--env ENV` on the command line, `env:` in a task file's front matter, or `env:` in the [global config](#global-config). Precedence, lowest first: config, task file, command line. In a [batch](#batch-runs), `--env` on the command line applies to every task file and overrides each file's own `env:`. `--env none` (or `env: none`) switches off an environment set at a lower level. Choices made in the TUI or web sit on top of the command line.
+- **Relative paths**: a path in a task file or the config resolves from that file's or the config's folder; a relative path given on the command line resolves from the current directory. A bare name always looks in `environments/` of the current directory.
+- **Limits**: the file must be UTF-8 text (a BOM is allowed), not empty after trimming, and at most 16384 bytes. On the command line, preflight fails (exit `2`, before anything runs) with `environment file not found: PATH`, `environment file cannot be read: PATH: REASON`, `environment file too large: PATH is N bytes (limit 16384)`, or `environment file is empty: PATH`. In a batch the message is prefixed with the task file. In the TUI and web the task errors instead (an error toast; the web start request returns 409). If the file disappears after preflight, the run fails with exit `1` on the command line, and in the TUI and web it ends as failed with that message.
+- **In the prompt**: the text is put in an `<environment>` section after `<task>` in every step's prompt, and the system prompt tells the agent to treat it as trusted background where the task wins on any disagreement.
+- **History**: `history.json` records `"env": {"name": ..., "path": ...}` after `task_file` (never the text). With no environment there is no `env` key.
+- **TUI and web**: in the TUI the `environment` field of the global Options pane (`O`) and of each task's `o` options form cycles through `none` and the files in `environments/` (`ctrl+r` goes back to inherited); the task detail shows an `environment` row. In the web UI the Options dialog has an `environment` select (inherit, `none`, each listed file), both globally (`O` or the options strip) and per task (`o` or the task's Options button), and the options strip shows an `env:` chip, marked ✱ when overridden; the effective environment is shown only on the global options strip, not per task. A global choice applies to every task's next run, a per-task one to that task, both above the command line.
+- **Plan mode**: `duckwright plan PLAN --env ENV` writes `env: ENV` into every task file it creates (a path is written relative to the planned folder).
+- **Never put raw secrets in it**: it goes into every prompt. Name where a credential comes from (an environment variable, or the `--state` file) instead of writing the value.
+
 ### Task files
 
 A task can live in a file instead of on the command line, so you can keep it, review it and re-run it without shell quoting:
@@ -334,10 +353,11 @@ and check the greeting says "Hello, Linh!".
 | `jev` | `true` or `false` |
 | `jev-threshold` | a number greater than 0 and at most 1 |
 | `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
+| `env` | an environment name, `none`, or a path to its file (see [Environment context](#environment-context)) |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
 - Flags on the command line override the file, for example `--max-steps 5`.
-- Relative `skill`, `state` and `setup` paths are resolved from the file's folder, not the current directory.
+- Relative `skill`, `state`, `setup` and `env` paths are resolved from the file's folder, not the current directory.
 - `allow-file-access` can only be given on the command line, so a shared task file can never turn it on.
 - With `-p`, give either a task or `-f`, not both (the TUI takes both). A missing or invalid file prints the file, the line where there is one, and the problem, and exits with `2` before anything runs.
 
@@ -362,7 +382,7 @@ theme: dark
 
 - Precedence, lowest first: built-in defaults, the config, a task file's front matter, flags on the command line.
 - A missing file is fine. An invalid line prints `<file>:LINE: problem` and exits with `2` before anything runs.
-- Relative `skill` and `state` paths are resolved from the folder holding the config.
+- Relative `skill`, `state` and `env` paths are resolved from the folder holding the config.
 - `allow-file-access` can only be given on the command line, as in task files.
 
 #### Batch runs
@@ -583,7 +603,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
 - [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
 - [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
-- [ ] **Environment context**: a per-environment context file (for example `environments/staging.md`, chosen with `--env staging`) that is seeded into every task's prompt, so the agent starts each run knowing the basics of the environment under test: base URL, test accounts and where their credentials come from, seeded test data, feature flags, known quirks, and what is off-limits. Shared once instead of repeated in every task file, and never containing raw secrets (referenced by name, like `--state`).
+- [x] **Environment context**: a per-environment context file (for example `environments/staging.md`, chosen with `--env staging`) that is seeded into every task's prompt, so the agent starts each run knowing the basics of the environment under test: base URL, test accounts and where their credentials come from, seeded test data, feature flags, known quirks, and what is off-limits. Shared once instead of repeated in every task file, and never containing raw secrets (referenced by name, like `--state`).
 - [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
 - [x] **npm release**: `npm install -g duckwright`, published from GitHub releases by `release.yml`.
 

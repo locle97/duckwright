@@ -22,7 +22,7 @@ export interface DetailProps {
 
 const SETTINGS: readonly [keyof Effective, string][] = [
   ["model", "model"], ["maxSteps", "max steps"], ["headed", "headed"], ["snapshot", "snapshot mode"],
-  ["video", "video"], ["screenshot", "screenshot"], ["jev", "jev"],
+  ["video", "video"], ["screenshot", "screenshot"], ["jev", "jev"], ["env", "environment"],
 ];
 
 const row = (...children: (ReactElement | string | null)[]): ReactElement => h(Text, { wrap: "truncate-end" }, ...children);
@@ -93,7 +93,7 @@ function IdleTask({ s, t }: { s: ViewState; t: TaskSnapshot }): ReactElement {
       : null,
     row(" "),
     ...SETTINGS.map(([key, label]) => {
-      const value = sanitize(String(t.effective[key]));
+      const value = sanitize(String(t.effective[key] ?? "none"));
       return h(Box, { key },
         row(h(Text, { color: role.muted }, label.padEnd(width)),
           t.overrides[key] !== undefined ? h(Text, { color: role.accent }, value) : value));

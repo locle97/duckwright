@@ -23,7 +23,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, ...over,
+    session: "s-1", state: null, env: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, ...over,
   };
 }
 
@@ -398,6 +398,66 @@ test("run_without_evidence_has_no_video_key", async () => {
   const { spec, deps } = setup(agentWith(async () => result(true)));
   const o = await startRun(spec, deps).done;
   assert.equal("video" in o, false);
+});
+
+function inEnvDir<T>(body: (dir: string) => Promise<T>): Promise<T> {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "environments"));
+  fs.writeFileSync(path.join(dir, "environments", "staging.md"), "Base: https://s\n");
+  const prev = process.cwd();
+  process.chdir(dir);
+  return body(dir).finally(() => process.chdir(prev));
+}
+
+test("run_passes_environment_text_to_agent", async () => {
+  await inEnvDir(async () => {
+    const seen: (string | null | undefined)[] = [];
+    const create = agentWith(async (opts) => { seen.push(opts.environment); return result(true, [rec()]); });
+    const s = setup(create, { env: "staging" });
+    await startRun(s.spec, s.deps).done;
+    const n = setup(create, { env: null });
+    await startRun(n.spec, n.deps).done;
+    assert.equal(seen[0], "Base: https://s");
+    assert.equal(seen[1], null);
+  });
+});
+
+test("history_json_env_present_on_success_and_failure", async () => {
+  await inEnvDir(async (dir) => {
+    const abs = path.join(fs.realpathSync(dir), "environments", "staging.md");
+    const ok = setup(agentWith(async () => result(true, [rec()])), { env: "staging" });
+    const h = startRun(ok.spec, ok.deps);
+    await h.done;
+    const raw = fs.readFileSync(path.join(h.workdir, "history.json"), "utf8");
+    const data = JSON.parse(raw);
+    assert.deepEqual(data.env, { name: "staging", path: abs });
+    const keys = Object.keys(data);
+    assert.equal(keys[keys.indexOf("task_file") + 1], "env");
+    assert.ok(!raw.includes("https://s"));
+    const bad = setup(agentWith(async () => { throw new Error("boom"); }), { env: "staging" });
+    const h2 = startRun(bad.spec, bad.deps);
+    await h2.done;
+    assert.deepEqual(readHistory(h2.workdir).env, { name: "staging", path: abs });
+  });
+});
+
+test("history_json_env_absent_without_env", () => {
+  const a = historyJson("t", true, "a", 1, 0, []);
+  assert.ok(!("env" in a));
+  assert.deepEqual(a, historyJson("t", true, "a", 1, 0, [], null, null, null));
+});
+
+test("run_start_env_failure_fails_run", async () => {
+  await inEnvDir(async (dir) => {
+    let created = 0;
+    const s = setup(agentWith(async () => { created++; return result(true); }), { env: "gone" });
+    const h = startRun(s.spec, s.deps);
+    const o = await h.done;
+    assert.equal(o.exitCode, 1);
+    assert.equal(o.error, `environment file not found: ${path.join(fs.realpathSync(dir), "environments", "gone.md")}`);
+    assert.equal(created, 0);
+    assert.ok(!("env" in readHistory(h.workdir)));
+  });
 });
 
 const JEV_REC: JevRecord = { action: "click", action_confidence: 0.93, target: "e1236", target_confidence: 0.88, routed: "accepted" };
