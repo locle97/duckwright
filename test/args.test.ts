@@ -17,7 +17,7 @@ test("defaults", () => {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
     session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", env: null,
     print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
-    jev: false, jevThreshold: 0.8,
+    jev: false, jevThreshold: 0.8, debug: false,
   });
 });
 
@@ -32,7 +32,7 @@ test("every option", () => {
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
     session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep", env: null,
-    print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8,
+    print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, debug: false,
   });
 });
 
@@ -429,6 +429,30 @@ test("usage and help mention jev", () => {
     + "                        with --jev: the confidence Jev needs for its choice\n"
     + "                        to be used, greater than 0 and at most 1 (default\n"
     + "                        0.8)\n"
-    + "  --snapshot-hybrid ";
+    + "  --debug, --no-debug ";
+  assert.ok(RUN_HELP.includes(block));
+});
+
+test("debug default and flags", () => {
+  assert.equal(parse("t").debug, false);
+  assert.equal(parse("--debug", "t").debug, true);
+  assert.equal(parse("--debug", "--no-debug", "t").debug, false);
+  assert.equal(parse("--no-debug", "--debug", "t").debug, true);
+  assert.equal(args(parseRunArgs(["--no-debug", "t"], "/skill.md", { debug: true })).debug, false);
+  assert.equal(args(parseRunArgs(["t"], "/skill.md", { debug: true })).debug, true);
+});
+
+test("debug explicit argument", () => {
+  assert.throws(() => parse("--debug=x", "t"), usage("argument --debug/--no-debug: ignored explicit argument 'x'"));
+});
+
+test("usage and help mention debug", () => {
+  assert.ok(RUN_USAGE.includes("[--jev | --no-jev] [--jev-threshold FLOAT]\n                  [--debug | --no-debug]\n"));
+  const block = "                        0.8)\n"
+    + "  --debug, --no-debug   log every prompt sent to Claude and Jev, the raw\n"
+    + "                        responses, tokens, cost and timing to\n"
+    + "                        runs/<id>/debug.log, and with -p also to stderr\n"
+    + "                        (default off). The log holds full page snapshots;\n"
+    + "                        credentials are redacted\n";
   assert.ok(RUN_HELP.includes(block));
 });

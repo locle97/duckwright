@@ -88,6 +88,7 @@ export const DEFAULT_CONFIG = `# Global defaults for every run, read at startup 
 # jev: false
 # jev-threshold: 0.8
 # env: staging
+# debug: false
 
 # max-parallel: 3
 # past: 20
