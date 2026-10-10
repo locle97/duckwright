@@ -13,7 +13,7 @@ import type { Human } from "../../src/twofa.ts";
 import { Brain } from "../../src/brain.ts";
 import type { JevRecord } from "../../src/brain.ts";
 import { HybridBrain, JevAuthError, JevClient } from "../../src/jev.ts";
-import { PROMPTS, historyJson, startRun } from "../../src/runs/run.ts";
+import { PROMPTS, historyJson, startRun, statePathForHistory } from "../../src/runs/run.ts";
 import type { AgentLike, RunDeps, RunSpec } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
 
@@ -681,4 +681,54 @@ test("start_run_passes_console_errors", async () => {
   assert.notEqual(seen[0], undefined);
   assert.equal(seen[0], true);
   assert.notEqual(seen[1], true);
+});
+
+test("history_json_records_explicit_state_after_env", async () => {
+  const inside = path.join(process.cwd(), "auth", "s.json");
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside });
+  const h = startRun(spec, deps);
+  await h.done;
+  const j = readHistory(h.workdir);
+  assert.deepEqual(j.state, { path: "auth/s.json", source: "file" });
+  const keys = Object.keys(j);
+  assert.ok(keys.indexOf("state") === keys.indexOf("task_file") + 1);
+});
+
+test("history_json_state_outside_cwd_is_absolute", async () => {
+  const outside = path.join(tmpDir(), "s.json");
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: outside });
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.equal(readHistory(h.workdir).state.path, fs.realpathSync(path.dirname(outside)) + "/s.json");
+});
+
+test("history_json_no_state_has_no_key", async () => {
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])));
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.equal("state" in readHistory(h.workdir), false);
+});
+
+test("failing_run_still_records_state", async () => {
+  const inside = path.join(process.cwd(), "auth", "s.json");
+  const { spec, deps } = setup(agentWith(async () => { throw new Error("boom"); }), { state: inside });
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.deepEqual(readHistory(h.workdir).state, { path: "auth/s.json", source: "file" });
+});
+
+test("history_with_state_exports_test_use", async () => {
+  const inside = path.join(process.cwd(), "auth", "s.json");
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside });
+  const h = startRun(spec, deps);
+  const o = await h.done;
+  assert.equal(o.export.kind, "written");
+  if (o.export.kind === "written") assert.match(fs.readFileSync(o.export.path, "utf8"), /test\.use\(/);
+});
+
+test("state_path_for_history", () => {
+  assert.equal(statePathForHistory("/w/a/b.json", "/w"), "a/b.json");
+  assert.equal(statePathForHistory("/x/b.json", "/w"), "/x/b.json");
+  assert.equal(statePathForHistory("/w", "/w"), "/w");
+  assert.equal(statePathForHistory("/wx/b.json", "/w"), "/wx/b.json");
 });

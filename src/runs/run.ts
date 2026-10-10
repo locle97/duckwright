@@ -90,16 +90,25 @@ export interface RunHandle {
   done: Promise<RunOutcome>;
 }
 
+/** Relative POSIX path when `abs` is inside `cwd`, else the absolute path. */
+export function statePathForHistory(abs: string, cwd: string): string {
+  const rel = path.relative(cwd, abs);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return abs;
+  return rel.split(path.sep).join("/");
+}
+
 export function historyJson(
   task: string, success: boolean, answer: string, steps: number, costUsd: number,
   history: StepRecord[], taskFile: string | null = null, video: string | null = null,
   env: { name: string; path: string } | null = null,
+  state: { path: string; source: "file" | "login" } | null = null,
 ): HistoryData {
   const jevSteps = history.filter((r) => r.decision.source === "jev").length;
   return {
     task,
     task_file: taskFile,
     ...(env !== null ? { env } : {}),
+    ...(state !== null ? { state } : {}),
     success,
     answer,
     steps,
@@ -179,11 +188,13 @@ async function execute(
   let agent: AgentLike | null = null;
   let outcome: RunOutcome;
   let envRecord: { name: string; path: string } | null = null;
+  let stateRecord: { path: string; source: "file" | "login" } | null = null;
   // Let the caller subscribe before anything is emitted.
   await Promise.resolve();
   try {
     const env = args.env ? loadEnvironment(args.env) : null;
     if (env) envRecord = { name: env.name, path: env.path };
+    if (args.state) stateRecord = { path: statePathForHistory(resolvePath(args.state), resolvePath(process.cwd())), source: "file" };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const twofa = createTwoFactor({
@@ -250,7 +261,7 @@ async function execute(
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     let written: string | null = historyPath;
     try {
-      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video, envRecord));
+      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video, envRecord, stateRecord));
     } catch {
       written = null;
     }
@@ -263,7 +274,7 @@ async function execute(
   async function finish(result: RunResult): Promise<RunOutcome> {
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     writeHistory(historyPath, historyJson(
-      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video, envRecord,
+      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video, envRecord, stateRecord,
     ));
     const warnings: string[] = [];
     let exported: ExportOutcome = { kind: "off" };
