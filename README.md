@@ -112,6 +112,7 @@ duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--skill PATH] [--session NAME] [--state FILE] [--env ENV]
                   [--allow-file-access] [--[no-]network]
                   [--[no-]jev] [--jev-threshold FLOAT]
+                  [--debug | --no-debug]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright plan PLAN [-p] [options]
 duckwright export [--api] RUN [-o FILE]
@@ -141,6 +142,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--twofa-timeout` | `300` | Seconds (at most `2147483`) to wait for a person to type a 2FA code or approve a passkey before that `twofa` step fails (see [Two-factor verification](#two-factor-verification)) |
 | `--jev` | off | Let TypeSafe's Jev model pick the command and element for simple steps and leave text and low-confidence steps to Claude (`--no-jev` overrides a task file or config). Needs `TYPESAFE_API_KEY`. Sends page data to TypeSafe, see the [warning](#jev-warning). Available but experimental: savings are not benchmarked yet |
 | `--jev-threshold` | `0.8` | Minimum confidence (greater than 0, at most 1) for Jev's choice to be used instead of Claude's |
+| `--debug` | off | Log every prompt sent to Claude and Jev, the raw responses, tokens, cost and timing to `runs/<id>/debug.log`, and with `-p` also to stderr (`--no-debug` overrides a task file or config). The log holds full page snapshots; credentials are redacted. See [Debug mode](#debug-mode) |
 | `--max-parallel` | `3` | TUI and web: how many runs may be active at once; tasks given on the command line past the limit start as earlier runs finish. An error with `-p` |
 | `--past` | `20` | TUI and web: how many of the newest past runs from `runs/` to show in the sidebar; `0` shows none. An error with `-p` |
 | `--theme` | `auto` | TUI and web: the colour theme: `auto`, `dark`, or `light`. An error with `-p` |
@@ -352,6 +354,7 @@ and check the greeting says "Hello, Linh!".
 | `snapshot` | `hybrid`, `full` or `grep` |
 | `jev` | `true` or `false` |
 | `jev-threshold` | a number greater than 0 and at most 1 |
+| `debug` | `true` or `false` |
 | `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
 | `env` | an environment name, `none`, or a path to its file (see [Environment context](#environment-context)) |
 
@@ -424,6 +427,7 @@ Each step's history line is printed as it happens, followed by the result, answe
 - `events.jsonl`: every run event, one JSON object per line
 - `screenshots/step-NNN.png`: with `--screenshot`, the page after each step (`step-001.png`, `step-002.png`, …). Each step in `history.json` gains a `screenshot` path relative to the run folder, or a `screenshot_error` message when the capture failed
 - `video.webm`: with `--video`, one recording of the whole run. `history.json` gains a top-level `video` key (`"video.webm"`) when it was saved, and `-p` prints a `Video:` line with its path
+- `debug.log`: with `--debug`, every prompt and response of the run (see [Debug mode](#debug-mode)). Not created otherwise
 - `duckwright.spec.ts`: the generated regression test, written after every successful run
 
 > [!CAUTION]
@@ -431,6 +435,28 @@ Each step's history line is printed as it happens, followed by the result, answe
 
 > [!CAUTION]
 > Redaction of captured network data is pattern-based (secret-named headers, secret-named keys in JSON, form and URL query data, and Bearer/Basic credentials). Captured bodies can still hold secrets it misses, and binary response bodies are not redacted at all. Treat `network/` like `history.json`.
+
+### Debug mode
+
+`--debug` (or `debug: true` in a task file or the config) writes everything a run sends to and gets back from Claude and Jev to `runs/<id>/debug.log`, and with `-p` also to stderr. It is for tuning prompts. Each Claude call is a block with the exact argv, the system prompt files, the full prompt with the size of each section, the raw response, token usage, cost and latency. With `--jev` you also get one block per Jev HTTP request and one per step saying why it went to Jev or Claude. A totals summary closes the run. With debug off, no file is written and `history.json` is unchanged.
+
+```text
+===== [debug 20261010-101500-login] step 3 · claude =====
+argv: ["claude","-p","--model","sonnet", ...]
+prompt sections:
+  task                 212 chars  ~53 tokens (est.)
+  page                4310 chars  ~1078 tokens (est.)
+----- prompt (stdin) -----
+...
+----- response -----
+...
+----- usage -----
+input tokens: 1520  output tokens: 94  cache read: 0  cache write: 0
+cost: $0.0123  duration_ms: 4210  duration_api_ms: 3980
+```
+
+> [!CAUTION]
+> `debug.log` contains full page snapshots. Credentials (the Jev API key, 2FA codes, secret-named headers and similar) are redacted, but page content is not. Treat it like `history.json` and do not share it from logged-in pages.
 
 ### Evidence: screenshots and video
 
