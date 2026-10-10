@@ -307,14 +307,15 @@ TS-R4 is removed (the unit suite is a run check, see Out of scope).
 
 **Contract:** C2 · **Criteria:** SC6 · **Type:** CLI · **Priority:** P2
 
-**Preconditions:** TASK-FILE-BAD, TASK-FILE-DUP.
+**Preconditions:** TASK-FILE-BAD, TASK-FILE-DUP, JEV-BAD (`$WORK/jevbad.md`, the reference file).
 
 **Steps:**
 1. Run `duckwright -p bad.md`.
 2. Run `duckwright -p dup.md`.
+3. Run `duckwright -p jevbad.md` (JEV-BAD) and keep its stderr as the reference message format.
 
 **Expected:**
-- Step 1: exit 2; stderr line `<file>:<line>: ...` naming `debug`, in the same message format the existing bool key `jev` gives for an invalid value (compare with a file containing `jev: maybe`).
+- Step 1: exit 2; stderr line `<file>:<line>: ...` naming `debug`, in the same message format the existing bool key `jev` gives for an invalid value (the step 3 output for JEV-BAD is the reference).
 - Step 2: exit 2; stderr contains `dup.md:<line>: "debug" is set twice`.
 
 ### TS-21: Help, usage, README, init template
@@ -378,14 +379,14 @@ TS-R4 is removed (the unit suite is a run check, see Out of scope).
 
 **Contract:** C3 · **Criteria:** SC6 · **Type:** CLI · **Priority:** P2
 
-**Preconditions:** CONF-BAD in effect; for reference, a config with `jev: maybe` instead.
+**Preconditions:** CONF-BAD in effect; for reference, a config with `jev: maybe` instead (step 2).
 
 **Steps:**
 1. Run `duckwright -p "<TASK-A>"`; capture exit code and stderr.
 2. Replace the config's content with `jev: maybe` and run again; capture stderr.
 
 **Expected:**
-- Step 1: exit 2; stderr names the config file path and `debug`, and uses the same message format as the `jev: maybe` error of step 2; no run folder is created.
+- Step 1: exit 2; stderr names the config file path and `debug`, and uses the same message format as the `jev: maybe` error (step 2's output is the reference format, so step 2 has no assertion of its own); no run folder is created.
 
 ### TS-26: Duplicate `debug` key in duckwright.conf
 
@@ -397,7 +398,7 @@ TS-R4 is removed (the unit suite is a run check, see Out of scope).
 1. Run `duckwright -p "<TASK-A>"`; capture exit code and stderr.
 
 **Expected:**
-- Exit 2; stderr names the config file and the line, with `"debug" is set twice` (same format as the task-file error in TS-20). If the existing config loader accepts duplicate keys for other keys (check by duplicating `jev: true`), the same lenient behavior is expected for `debug` instead (record which).
+- Exit 2; stderr is `<config path>:<line>: "debug" is set twice`, where `<line>` is the line number of the second `debug:` line; no run folder is created. (The config loader uses the same `parseSettings` as task files, which rejects any repeated key.)
 
 ### TS-27: Target-count boundary for Jev routing (255)
 
