@@ -59,7 +59,7 @@ export function flat(s: string): string {
   return s ? splitLines(String(s)).join(" ") : "";
 }
 
-const HARNESS_TAG = /<(?=\/?(?:page_snapshot|tabs|task|memory|history|network))/gi;
+const HARNESS_TAG = /<(?=\/?(?:page_snapshot|tabs|task|memory|history|network|environment))/gi;
 
 /** Escape harness section tags inside untrusted page data so it cannot close its block. */
 export function neutralise(body: string): string {

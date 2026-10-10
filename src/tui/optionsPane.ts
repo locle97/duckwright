@@ -43,7 +43,7 @@ export function OptionsPane({ s, width, height }: { s: ViewState; width: number;
   const editing = editingGlobals(s);
   // Navigating: the pane has the focus and a highlighted row, but nothing is being edited.
   const navigating = !editing && s.focus === "options" && s.mode !== "compose";
-  const form = editing && s.form !== null ? s.form : openForm(null, g.base, g.overrides);
+  const form = editing && s.form !== null ? s.form : openForm(null, g.base, g.overrides, 0, g.environments);
   const labelWidth = Math.max(...form.fields.map((f) => f.label.length)) + 2;
   const rows: ReactElement[] = [];
   let focusedRow = 0;

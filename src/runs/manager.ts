@@ -7,6 +7,7 @@ import { parseRunArgs } from "../args.ts";
 import type { RunArgs } from "../args.ts";
 import type { ControlState, RunEvent, RunOutcome, TwofaWait } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
+import { ENV_NONE, envLabel, isEnvName, isEnvPath, listEnvironments, resolveEnv } from "../environment.ts";
 import { SPEC_NAME } from "../export.ts";
 import { resolvePath } from "../paths.ts";
 import { PlanError, isPlanFolder, loadPlan, writeManifest, writePlan } from "../plan.ts";
@@ -25,10 +26,10 @@ export type PlanId = number;
 /** `planning`: the planner is splitting the plan; `ready`: its tasks are in the list; `failed`: planning failed or was cancelled. */
 export type PlanState = "planning" | "ready" | "failed";
 export type TaskState = "idle" | "running" | "paused" | "passed" | "failed" | "stopping" | "stopped";
-export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean; jev?: boolean }
-export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean; jev: boolean }
+export interface Overrides { model?: string; maxSteps?: number; headed?: boolean; snapshot?: SnapshotMode; video?: boolean; screenshot?: boolean; jev?: boolean; env?: string | null }
+export interface Effective { model: string; maxSteps: number; headed: boolean; snapshot: SnapshotMode; video: boolean; screenshot: boolean; jev: boolean; env: string | null }
 /** The options every task's next run starts from: `base` is the defaults and flags, `overrides` the edits on top. */
-export interface Globals { base: Effective; overrides: Overrides }
+export interface Globals { base: Effective; overrides: Overrides; environments: string[] }
 export type TaskSource = { kind: "typed" } | { kind: "file"; path: string };
 /** One submission of the add box: mentioned paths in order, and the leftover typed task. */
 export interface Submission { mentions: string[]; typed: string | null }
@@ -168,7 +169,7 @@ export function taskName(text: string, max = 40): string {
 }
 
 function effectiveOf(a: RunArgs): Effective {
-  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot, jev: a.jev };
+  return { model: a.model, maxSteps: a.maxSteps, headed: a.headed, snapshot: a.snapshot, video: a.video, screenshot: a.screenshot, jev: a.jev, env: envLabel(a.env) };
 }
 
 interface RunRecord {
@@ -331,10 +332,14 @@ export class RunManager implements ManagerLike {
     this.#updated(task);
   }
 
+  #cwd(): string {
+    return this.#o.cwd ?? process.cwd();
+  }
+
   globals(): Globals {
     const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, this.#o.settings);
     if (parsed.kind !== "args") throw new Error("argv does not describe a run");
-    return { base: effectiveOf(parsed.args), overrides: { ...this.#globals } };
+    return { base: effectiveOf(parsed.args), overrides: { ...this.#globals }, environments: listEnvironments(this.#cwd()) };
   }
 
   /** Replace the global options; every task's effective settings follow. */
@@ -737,12 +742,20 @@ export class RunManager implements ManagerLike {
     this.#planUpdated(plan);
     const g = this.globals();
     const model = g.overrides.model ?? g.base.model;
+    let env: string | null;
+    if (this.#globals.env !== undefined) env = this.#globals.env === ENV_NONE ? null : this.#globals.env;
+    else {
+      const parsed = parseRunArgs(this.#o.argv, this.#o.defaultSkill, this.#o.settings);
+      if (parsed.kind !== "args") throw new Error("argv does not describe a run");
+      env = parsed.args.env;
+    }
+    if (env !== null && isEnvPath(env)) env = resolveEnv(env, this.#cwd()).path;
     // Called at once (a throw becomes a rejection), so a cancel right after still reaches the planner.
     void new Promise<{ doc: PlanDoc; cost: number }>((resolve) => resolve(planner({ planFile: plan.source, model, signal: abort.signal })))
       .then(({ doc, cost }) => {
         plan.cost += cost;
         if (abort.signal.aborted) throw new PlanError("cancelled");
-        this.#fill(plan, writePlan(doc, plan.source, this.#o.plansRoot ?? "tasks"));
+        this.#fill(plan, writePlan(doc, plan.source, this.#o.plansRoot ?? "tasks", env));
       })
       .catch((e: unknown) => {
         if (e instanceof PlanError) plan.cost += e.cost;
@@ -855,7 +868,9 @@ export class RunManager implements ManagerLike {
       if (o.video !== undefined) args.video = o.video;
       if (o.screenshot !== undefined) args.screenshot = o.screenshot;
       if (o.jev !== undefined) args.jev = o.jev;
+      if (o.env !== undefined) args.env = o.env === ENV_NONE ? null : o.env;
     }
+    if (args.env !== null && (isEnvName(args.env) || isEnvPath(args.env))) args.env = resolveEnv(args.env, this.#cwd()).path;
     return args;
   }
 
@@ -868,7 +883,7 @@ export class RunManager implements ManagerLike {
     if (!workdir) return null;
     return {
       runId: path.basename(workdir),
-      path: path.resolve(this.#o.cwd ?? process.cwd(), workdir, SPEC_NAME),
+      path: path.resolve(this.#cwd(), workdir, SPEC_NAME),
     };
   }
 
@@ -913,7 +928,7 @@ export class RunManager implements ManagerLike {
 
   /** A file task's name: its path relative to the current folder. */
   #fileName(p: string): string {
-    return path.relative(resolvePath(this.#o.cwd ?? process.cwd()), resolvePath(p)) || p;
+    return path.relative(resolvePath(this.#cwd()), resolvePath(p)) || p;
   }
 
   #find(id: TaskId): Task | undefined {

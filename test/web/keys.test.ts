@@ -10,7 +10,7 @@ import { planSnapshot, snapshot } from "../tui/fake-manager.ts";
 function state(tasks = [snapshot(1, "one")], plans = [] as ReturnType<typeof planSnapshot>[], selection: WebState["selection"] = { kind: "task", id: 1 }): WebState {
   const s: Action = {
     type: "stream", now: 0,
-    message: { type: "state", tasks, plans, globals: { base: snapshot(0, "").effective, overrides: {} }, activeCount: 0, maxParallel: 3, notices: [], theme: "auto", runs: [] },
+    message: { type: "state", tasks, plans, globals: { base: snapshot(0, "").effective, overrides: {}, environments: [] }, activeCount: 0, maxParallel: 3, notices: [], theme: "auto", runs: [] },
   };
   return { ...reduce(initialState(), s), selection };
 }

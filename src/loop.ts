@@ -58,6 +58,7 @@ export interface AgentOptions {
   twofa?: TwoFactor;
   video?: boolean;
   screenshot?: boolean;
+  environment?: string | null;
 }
 
 export class Agent {
@@ -77,6 +78,7 @@ export class Agent {
   readonly twofa: TwoFactor | undefined;
   readonly video: boolean;
   readonly screenshot: boolean;
+  readonly environment: string | null;
   evidence: Evidence = { video: null, warnings: [] };
   private nextNetworkId = 1;
   private pendingNetworkErrors: string[] = [];
@@ -100,6 +102,7 @@ export class Agent {
     this.twofa = opts.twofa;
     this.video = opts.video ?? false;
     this.screenshot = opts.screenshot ?? false;
+    this.environment = opts.environment ?? null;
     const onStep = opts.onStep;
     if (onStep) this.events.subscribe((e) => { if (e.type === "step:end") onStep(e.record); });
   }
@@ -165,7 +168,7 @@ export class Agent {
       if (this.twofa) scrubTree(pageDir(this.workdir), this.twofa.scrubber);
       const nudge = isRepeating(history) ? REPEAT_NUDGE : null;
       const paste = pasteSnapshot(this.snapshotMode, obs);
-      const prompt = this.scrub(buildPrompt(this.task, step, this.maxSteps, history, memory, obs, { nudge, paste }));
+      const prompt = this.scrub(buildPrompt(this.task, step, this.maxSteps, history, memory, obs, { nudge, paste, environment: this.environment }));
       steps = step;
       this.events.emit({ type: "phase", step, phase: "thinking" });
       let decision;

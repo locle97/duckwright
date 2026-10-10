@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { ENV_NONE, isEnvName, isEnvPath } from "./environment.ts";
 import { SNAPSHOT_MODES } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
 import { resolvePath } from "./paths.ts";
@@ -26,11 +27,13 @@ export type TaskSettings = Partial<{
   jev: boolean;
   jevThreshold: number;
   snapshot: SnapshotMode;
+  /** "none", an environment name, or an absolute resolved path to an environment file. */
+  env: string;
   /** A shared setup file whose text is put before the task; resolved by loadTaskFile, never a run setting. */
   setup: string;
 }>;
 
-export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme" | "threshold";
+export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme" | "threshold" | "env";
 
 // Front-matter key -> (setting, kind). allow-file-access is deliberately absent:
 // a shared task file must not be able to grant the browser unrestricted file access.
@@ -48,6 +51,7 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   jev: ["jev", "bool"],
   "jev-threshold": ["jevThreshold", "threshold"],
   snapshot: ["snapshot", "snapshot"],
+  env: ["env", "env"],
   setup: ["setup", "path"],
 };
 const FENCE = "---";
@@ -148,6 +152,19 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
       throw new LineError(`${key} must be full, grep or hybrid, got "${v}"`);
     }
     return v;
+  }
+  if (kind === "env") {
+    if (v === ENV_NONE) return ENV_NONE;
+    if (isEnvName(v)) return v;
+    if (!isEnvPath(v)) {
+      throw new LineError(`env must be an environment name (letters, digits, ".", "_", "-") or a path, got "${v}"`);
+    }
+    try {
+      if (v.includes("\0")) throw new LineError("embedded null byte");
+      return resolvePath(path.resolve(baseDir, expandUser(v)));
+    } catch (e) {
+      throw new LineError(`env is not a usable path: ${(e as Error).message}`);
+    }
   }
   if (kind === "path") {
     try {
