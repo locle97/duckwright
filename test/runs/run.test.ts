@@ -640,3 +640,45 @@ test("debug_without_jev_never_calls_jev_transport", async () => {
   await startRun(spec, deps).done;
   assert.equal(jevCalls, 0);
 });
+
+test("history_json_console_errors_only_when_non_empty", () => {
+  const h = historyJson("t", true, "a", 2, 0, [
+    { ...rec(), consoleErrors: ["TypeError: x"] },
+    { ...rec(), step: 2, consoleErrors: [] },
+    { ...rec(), step: 3 },
+  ]);
+  assert.deepEqual(h.history[0].console_errors, ["TypeError: x"]);
+  assert.equal("console_errors" in h.history[1], false);
+  assert.equal("console_errors" in h.history[2], false);
+});
+
+test("run_export_test_false_skips_export_and_spec", async () => {
+  const mk = () => agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()]); });
+  const off = setup(mk());
+  const ho = startRun({ ...off.spec, exportTest: false }, off.deps);
+  const oo = await ho.done;
+  assert.equal(oo.export.kind, "off");
+  assert.equal(oo.status, "pass");
+  assert.equal(fs.readdirSync(ho.workdir).some((f) => f.endsWith(".spec.ts")), false);
+  const on = setup(mk());
+  const hn = startRun(on.spec, on.deps);
+  assert.equal((await hn.done).export.kind, "written");
+});
+
+test("run_export_test_false_failure_is_off", async () => {
+  const { spec, deps } = setup(agentWith(async () => result(false, [rec()])));
+  const o = await startRun({ ...spec, exportTest: false }, deps).done;
+  assert.equal(o.export.kind, "off");
+});
+
+test("start_run_passes_console_errors", async () => {
+  const seen: (boolean | undefined)[] = [];
+  const mk = () => agentWith(async (opts) => { seen.push(opts.consoleErrors); return result(true); });
+  const a = setup(mk());
+  await startRun({ ...a.spec, consoleErrors: true }, a.deps).done;
+  const b = setup(mk());
+  await startRun(b.spec, b.deps).done;
+  assert.notEqual(seen[0], undefined);
+  assert.equal(seen[0], true);
+  assert.notEqual(seen[1], true);
+});

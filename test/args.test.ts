@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { RUN_HELP, RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "../src/args.ts";
+import { EXPLORE_HELP, EXPLORE_USAGE, RUN_HELP, RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs } from "../src/args.ts";
 import type { ExportArgs, Parsed, RunArgs } from "../src/args.ts";
 
 function args<T>(p: Parsed<T>): T {
@@ -455,4 +455,64 @@ test("usage and help mention debug", () => {
     + "                        (default off). The log holds full page snapshots;\n"
     + "                        credentials are redacted\n";
   assert.ok(RUN_HELP.includes(block));
+});
+
+const U = "https://example.com/";
+const ex = (...a: string[]) => args(parseExploreArgs(a, "/skill.md", { maxSteps: 40 }));
+const exErr = (message: string, ...a: string[]) =>
+  assert.throws(() => parseExploreArgs(a, "/skill.md", { maxSteps: 40 }), (e: unknown) =>
+    e instanceof UsageError && e.message === message && e.usage === EXPLORE_USAGE && e.prog === "duckwright explore");
+
+test("explore: help and version", () => {
+  for (const f of ["-h", "--help"]) assert.deepEqual(parseExploreArgs([f], "/s"), { kind: "help", text: EXPLORE_HELP });
+  assert.ok(EXPLORE_HELP.startsWith(`${EXPLORE_USAGE}\n`));
+  assert.deepEqual(parseExploreArgs(["--version"], "/s"), { kind: "version" });
+});
+
+test("explore: url, --write-tasks and run options", () => {
+  const a = ex(U, "--write-tasks", "-p", "--model", "opus");
+  assert.equal(a.url, U);
+  assert.equal(a.writeTasks, true);
+  assert.equal(a.run.maxSteps, 40);
+  assert.equal(a.run.model, "opus");
+  assert.equal(a.run.print, true);
+  assert.equal(ex("--write-tasks", U).writeTasks, true);
+  assert.equal(ex(U).writeTasks, false);
+  assert.equal(ex(U, "--max-steps", "10").run.maxSteps, 10);
+  assert.equal(ex("http://a.b").url, "http://a.b");
+});
+
+test("explore: after -- everything is positional", () => {
+  exErr("not an http(s) URL: --write-tasks", "--", "--write-tasks");
+  exErr("unrecognized arguments: --write-tasks", U, "--", "--write-tasks");
+});
+
+test("explore: usage errors", () => {
+  exErr("give a URL to explore");
+  exErr("give a URL to explore", "--web");
+  exErr("not an http(s) URL: file:///x", "file:///x");
+  exErr("not an http(s) URL: not a url", "not a url");
+  exErr("unrecognized arguments: extra", U, "extra");
+  exErr("explore takes a URL, not --file", U, "-f", "x");
+  exErr("explore takes a URL, not --file", U, "-fx.md");
+  exErr("argument --max-steps: invalid int value: 'abc'", "--max-steps", "abc", "--version");
+  exErr("argument --max-steps: invalid int value: 'abc'", "--max-steps", "abc", "--help");
+  exErr("--plan cannot be used with explore", U, "--plan", "x");
+  exErr("--web cannot be used with explore", U, "--web");
+  for (const [f, v] of [["--port", "1"], ["--max-parallel", "2"], ["--past", "1"], ["--theme", "dark"]]) {
+    exErr(`${f} does not apply to explore`, U, f, v);
+    exErr(`${f} does not apply to explore`, U, `${f}=${v}`);
+  }
+  exErr("argument --write-tasks: ignored explicit argument '1'", U, "--write-tasks=1");
+  exErr("argument --max-steps: invalid int value: 'abc'", U, "--max-steps", "abc");
+  exErr("unrecognized arguments: --bogus", U, "--bogus");
+});
+
+test("explore: the first violation wins", () => {
+  exErr("not an http(s) URL: file:///x", "file:///x", "--web");
+  exErr("unrecognized arguments: extra", U, "extra", "--web");
+  exErr("--web cannot be used with explore", U, "--web", "--max-steps", "abc");
+  exErr("--port does not apply to explore", U, "--port", "abc");
+  exErr("argument --write-tasks: ignored explicit argument '1'", U, "--write-tasks=1", "--max-steps", "abc");
+  exErr("argument --max-steps: invalid int value: 'abc'", U, "--max-steps", "abc");
 });

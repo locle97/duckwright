@@ -1,12 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { RUN_USAGE, UsageError, parseExportArgs, parseRunArgs } from "./args.ts";
+import { RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
 import { EnvError, loadEnvironment } from "./environment.ts";
-import { ExportError, exportRun } from "./export.ts";
+import { ExportError, exportRun, loadHistory } from "./export.ts";
+import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
+import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
+import { writeExploreTasks } from "./explore/tasks.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
@@ -379,6 +382,7 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
 async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
   if (argv[0] === "export") return exportMain(deps, argv.slice(1));
   if (argv[0] === "init") return initMain(deps, argv.slice(1));
+  if (argv[0] === "explore") return exploreMain(deps, argv.slice(1));
   // `duckwright plan PLAN ...` is `duckwright --plan PLAN ...`.
   if (argv[0] === "plan") {
     if (argv.length < 2 || argv[1]!.startsWith("-")) throw usage("plan: give a plan file or a planned folder");
@@ -468,6 +472,93 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     return 2;
   }
   return (await runOne(deps, fileArgs, p, p))[0];
+}
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** `duckwright explore URL`: one exploration run, then a report (and optionally task files) built from its history. */
+export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number> {
+  let config: GlobalConfig;
+  try {
+    config = deps.loadConfig();
+  } catch (e) {
+    if (!(e instanceof TaskFileError)) throw e;
+    deps.stderr(e.message);
+    return 2;
+  }
+  // The explore step budget is forced over the config's max-steps; --max-steps still wins.
+  const parsed = parseExploreArgs(argv, deps.prompts.defaultSkill, { ...runSettings(config), maxSteps: EXPLORE_MAX_STEPS });
+  if (parsed.kind === "help") {
+    deps.stdout(parsed.text.trimEnd());
+    return 0;
+  }
+  if (parsed.kind === "version") {
+    deps.stdout(`duckwright ${version()}`);
+    return 0;
+  }
+  const { url, writeTasks, run } = parsed.args;
+  const badSecret = secretProblem(deps.env);
+  if (badSecret !== null) {
+    deps.stderr(badSecret);
+    return 2;
+  }
+  const problem = preflightArgs(deps, run);
+  if (problem) {
+    deps.stderr(problem);
+    return 2;
+  }
+  const handle = startRun(
+    { task: exploreTask(url), taskFile: null, args: run, exportTest: false, consoleErrors: true },
+    {
+      ...deps,
+      humanFor: () => (deps.isTTY() ? deps.human("duckwright explore") : null),
+      env: deps.env,
+      onWarning: (m) => deps.stderr(`warning: ${m}`),
+      debugConsole: run.debug ? deps.stderr : undefined,
+    },
+  );
+  attachPlain(handle.events, deps.stdout);
+  const o = await handle.done;
+  printOutcome(o, deps.stdout, deps.stderr);
+  let code = o.exitCode;
+  if (o.historyPath === null) return code;
+
+  let data: ReturnType<typeof loadHistory>["data"];
+  try {
+    data = loadHistory(o.historyPath).data;
+  } catch (e) {
+    deps.stderr(`explore: cannot read history: ${errMsg(e)}`);
+    return code === 0 ? 1 : code;
+  }
+  const report = buildExploreReport(data, { url, runDir: handle.workdir, network: run.network });
+  const md = renderExploreMarkdown(report);
+  deps.stdout("");
+  deps.stdout(md.trimEnd());
+  let writeFailed = false;
+  try {
+    const w = writeExploreReport(handle.workdir, report);
+    deps.stdout(`Report: ${w.md}`);
+    deps.stdout(`Data: ${w.json}`);
+  } catch (e) {
+    writeFailed = true;
+    deps.stderr(`explore: cannot write report: ${errMsg(e)}`);
+  }
+  if (writeTasks) {
+    try {
+      const t = writeExploreTasks(report.working_flows, url, handle.workdir);
+      if (t === null) deps.stdout("Tasks: no working flows, no task files written");
+      else {
+        deps.stdout(`Tasks: ${t.files.length} task file(s) in ${t.folder}/`);
+        for (const f of t.files) deps.stdout(`  ${f}`);
+        deps.stdout(`Run them with: duckwright -p -f ${t.folder}/`);
+      }
+    } catch (e) {
+      writeFailed = true;
+      deps.stderr(`explore: cannot write task files: ${errMsg(e)}`);
+    }
+  }
+  if (writeFailed && code === 0) code = 1;
+  return code;
 }
 
 function usage(message: string): UsageError {

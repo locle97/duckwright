@@ -71,6 +71,7 @@ export interface HistoryStep {
   jev?: JevRecord | null;
   network?: NetworkEntry[];
   network_errors?: string[];
+  console_errors?: string[];
   request_origins?: (string | null)[];
   screenshot?: string;
   screenshot_error?: string;

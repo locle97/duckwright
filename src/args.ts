@@ -244,9 +244,16 @@ const VALUE_OPTIONS: readonly string[] = ["--max-steps", "--model", "--skill", "
 const PY_INT = /^\s*[+-]?\d+(?:_\d+)*\s*$/;
 
 /** Built-in defaults < task-file `settings` < flags in `argv`. */
-export function parseRunArgs(argv: string[], defaultSkill: string, settings: TaskSettings = {}): Parsed<RunArgs> {
-  const fail = (msg: string): never => {
-    throw new UsageError(msg, RUN_USAGE, "duckwright");
+export function parseRunArgs(
+  argv: string[],
+  defaultSkill: string,
+  settings: TaskSettings = {},
+  scan?: { firstError: UsageError | null; extras: string[] },
+): Parsed<RunArgs> {
+  // With `scan`, errors are recorded (the first one) and parsing goes on, for explore's ordered checks.
+  const fail = (msg: string): void => {
+    if (!scan) throw new UsageError(msg, RUN_USAGE, "duckwright");
+    scan.firstError ??= new UsageError(msg, EXPLORE_USAGE, "duckwright explore");
   };
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
@@ -279,14 +286,20 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     if (name === "-f" || name === "--file") {
       const files = inline !== null ? [inline] : [];
       while (inline === null && isValue(argv[i + 1], RUN_SPEC)) files.push(argv[++i]);
-      if (!files.length) fail("argument -f/--file: expected at least one argument");
+      if (!files.length) {
+        fail("argument -f/--file: expected at least one argument");
+        continue;
+      }
       args.file = [...(args.file ?? []), ...files];
       continue;
     }
     if (VALUE_OPTIONS.includes(name)) {
       let v = inline;
       if (v === null) {
-        if (!isValue(argv[i + 1], RUN_SPEC)) fail(`argument ${display}: expected one argument`);
+        if (!isValue(argv[i + 1], RUN_SPEC)) {
+          fail(`argument ${display}: expected one argument`);
+          continue;
+        }
         v = argv[++i];
       }
       if (name === "--max-steps") {
@@ -335,7 +348,10 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
       else args.state = v!;
       continue;
     }
-    if (inline !== null) fail(`argument ${display}: ignored explicit argument '${inline}'`);
+    if (inline !== null) {
+      fail(`argument ${display}: ignored explicit argument '${inline}'`);
+      continue;
+    }
     if (name === "-h" || name === "--help") return { kind: "help", text: RUN_HELP };
     if (name === "--version") return { kind: "version" };
     if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
@@ -348,14 +364,98 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     else if (name === "-p" || name === "--print") args.print = true;
     else if (name === "--web") args.web = true;
     else {
-      if (snapshotFlag !== null && snapshotFlag !== name) fail(`argument ${name}: not allowed with argument ${snapshotFlag}`);
+      if (snapshotFlag !== null && snapshotFlag !== name) {
+        fail(`argument ${name}: not allowed with argument ${snapshotFlag}`);
+        continue;
+      }
       snapshotFlag = name;
       args.snapshot = SNAPSHOT_FLAGS[name];
     }
   }
   if (args.env === ENV_NONE) args.env = null;
-  if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);
+  if (scan) scan.extras = extras;
+  else if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);
   return { kind: "args", args };
+}
+
+export interface ExploreArgs {
+  url: string;
+  writeTasks: boolean;
+  run: RunArgs;
+}
+
+export const EXPLORE_USAGE = "usage: duckwright explore [-h] [--write-tasks] [run options] url";
+
+export const EXPLORE_HELP = `${EXPLORE_USAGE}
+
+Explore a site with no fixed task: the agent follows links, menus and forms on
+the same host, avoids destructive actions, and reports the flows it tried.
+The harness also records failed requests and console errors. The report is
+printed and saved as explore.md and explore.json in the run folder.
+
+positional arguments:
+  url                   the http(s) URL to start from
+
+options:
+  -h, --help            show this help message and exit
+  --write-tasks         write one task file per working flow to
+                        tasks/explore-<host>/, runnable with
+                        duckwright -p -f tasks/explore-<host>/
+  --max-steps MAX_STEPS
+                        step budget (default 40)
+
+Other run options (--model, --env, --state, --session, --headed, --network,
+--screenshot, --video, --jev, --debug, --snapshot-*) work as for a task.
+Exploration runs never export a regression test.
+`;
+
+const EXPLORE_REJECTED: readonly (readonly [string[], string])[] = [
+  [["-f", "--file"], "explore takes a URL, not --file"],
+  [["--plan"], "--plan cannot be used with explore"],
+  [["--web"], "--web cannot be used with explore"],
+  [["--port"], "--port does not apply to explore"],
+  [["--max-parallel"], "--max-parallel does not apply to explore"],
+  [["--past"], "--past does not apply to explore"],
+  [["--theme"], "--theme does not apply to explore"],
+];
+
+/** `settings` should already hold the explore default (maxSteps 40); this applies none. */
+export function parseExploreArgs(argv: string[], defaultSkill: string, settings: TaskSettings = {}): Parsed<ExploreArgs> {
+  const fail = (msg: string): never => {
+    throw new UsageError(msg, EXPLORE_USAGE, "duckwright explore");
+  };
+  const dd = argv.indexOf("--");
+  const before = dd === -1 ? argv : argv.slice(0, dd);
+  const after = dd === -1 ? [] : argv.slice(dd);
+  let writeTasks = false;
+  let writeTasksValue: string | null = null;
+  const kept: string[] = [];
+  for (const a of before) {
+    if (a === "--write-tasks") writeTasks = true;
+    else if (a.startsWith("--write-tasks=")) writeTasksValue ??= a.slice("--write-tasks=".length);
+    else kept.push(a);
+  }
+  const scan = { firstError: null as UsageError | null, extras: [] as string[] };
+  const parsed = parseRunArgs([...kept, ...after], defaultSkill, settings, scan);
+  if (parsed.kind === "help" || parsed.kind === "version") {
+    if (scan.firstError) throw scan.firstError;
+    return parsed.kind === "help" ? { kind: "help", text: EXPLORE_HELP } : parsed;
+  }
+  const url = parsed.args.task;
+  if (url === null) fail("give a URL to explore");
+  let ok = false;
+  try {
+    const u = new URL(url!);
+    ok = u.protocol === "http:" || u.protocol === "https:";
+  } catch { /* not a URL */ }
+  if (!ok) fail(`not an http(s) URL: ${url}`);
+  if (scan.extras.length) fail(`unrecognized arguments: ${scan.extras.join(" ")}`);
+  for (const [flags, msg] of EXPLORE_REJECTED) {
+    if (kept.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`) || (f === "-f" && a.startsWith("-f"))))) fail(msg);
+  }
+  if (writeTasksValue !== null) fail(`argument --write-tasks: ignored explicit argument '${writeTasksValue}'`);
+  if (scan.firstError) throw scan.firstError;
+  return { kind: "args", args: { url: url!, writeTasks, run: parsed.args } };
 }
 
 const EXPORT_SPEC: OptionSpec = {

@@ -189,7 +189,7 @@ export function taskFileText(s: Scenario, source: string, setup: string | null, 
   return [...front, ...body].join("\n");
 }
 
-function freshFolder(root: string, slug: string): string {
+export function freshFolder(root: string, slug: string): string {
   fs.mkdirSync(root, { recursive: true });
   for (let n = 1; ; n++) {
     const p = path.join(root, n === 1 ? slug : `${slug}-${n}`);

@@ -863,3 +863,57 @@ test("JevAuthError stops the run", async () => {
   await assert.rejects(agent(pw, new FakeBrain([new JevAuthError()])).run(), JevAuthError);
   assert.equal(pw.closed, 1);
 });
+
+class ConsolePW extends FakePW {
+  consoleStdout = "### Result\nTypeError: boom\n";
+  consoleCode = 0;
+  consoleStderr = "";
+  override async run(cmd: string, args: string[]): Promise<ProcResult> {
+    if (cmd === "console") {
+      this.calls.push([cmd, [...args]]);
+      return { code: this.consoleCode, stdout: this.consoleStdout, stderr: this.consoleStderr };
+    }
+    return super.run(cmd, args);
+  }
+}
+
+test("console_errors_captured_after_network_per_acting_step", async () => {
+  const pw = new ConsolePW();
+  const r = await agent(pw, new FakeBrain([dec([["click", ["e1"]]]), dec([["done", ["success", "ok"]]])]), { network: true, consoleErrors: true }).run();
+  const c = cmds(pw);
+  const i = c.indexOf("console");
+  assert.ok(i > c.indexOf("requests"), "console after network capture");
+  assert.deepEqual(pw.calls.find(([k]) => k === "console"), ["console", ["error"]]);
+  assert.deepEqual(r.history[0].consoleErrors, ["TypeError: boom"]);
+});
+
+test("console_errors_scrubbed_with_twofa", async () => {
+  const pw = new ConsolePW();
+  pw.consoleStdout = `### Result\ncode ${TF_CODE} bad\n`;
+  const r = await agent(pw, new FakeBrain([dec([["twofa", ["totp", "e1"]]]), dec([["done", ["success", "ok"]]])]), { consoleErrors: true, twofa: twofa() }).run();
+  assert.deepEqual(r.history[0].consoleErrors, ["code [2FA CODE] bad"]);
+});
+
+test("console_capture_failure_warns_and_leaves_record_unset", async () => {
+  const pw = new ConsolePW();
+  pw.consoleCode = 1;
+  pw.consoleStderr = "no console";
+  const a = agent(pw, new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]), { consoleErrors: true });
+  const r = await a.run();
+  assert.equal("consoleErrors" in r.history[0], false);
+  assert.ok(a.evidence.warnings.includes("console capture failed at step 1: no console"));
+  assert.equal(r.success, true);
+});
+
+test("console_errors_no_call_on_brain_error_step", async () => {
+  const pw = new ConsolePW();
+  await agent(pw, new FakeBrain([new BrainError("k"), dec([["done", ["success", "ok"]]])]), { consoleErrors: true }).run();
+  assert.equal(pw.calls.filter(([k]) => k === "console").length, 1, "only the done step");
+});
+
+test("console_errors_off_makes_no_console_call", async () => {
+  const pw = new ConsolePW();
+  const r = await agent(pw, new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])])).run();
+  assert.equal(pw.calls.some(([k]) => k === "console"), false);
+  assert.equal("consoleErrors" in r.history[0], false);
+});

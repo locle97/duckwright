@@ -115,6 +115,7 @@ duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
                   [--debug | --no-debug]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright plan PLAN [-p] [options]
+duckwright explore URL [--write-tasks] [options]
 duckwright export [--api] RUN [-o FILE]
 duckwright init
 ```
@@ -153,7 +154,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--snapshot-grep` | off | Never paste the page snapshot: Claude always greps the saved file |
 
 > [!NOTE]
-> When the first argument is exactly `export` or `init`, it is read as that subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
+> When the first argument is exactly `export`, `init` or `explore`, it is read as that subcommand. Any longer task, such as `"export my report"`, runs normally; to run a task that is only the word `export`, write `duckwright -- export`.
 
 > [!IMPORTANT]
 > Two runs at the same time must use different `--session` names. Otherwise they drive the same browser. The same goes for two TUIs: give each its own `--session`. Inside one TUI, runs get their own sessions automatically.
@@ -261,6 +262,23 @@ The plan shows in the task list as a row with its tasks under it, in run order. 
 The editor opens the file as it is, front matter included: `⏎` starts a new line, `ctrl+s` saves, `esc` cancels. A file that no longer loads (a bad front-matter line, an empty task) is not saved, and the reason shows under the text. Moving and removing tasks is saved to `plan.json`, so `duckwright plan tasks/qa-plan/` (or `P` with `@tasks/qa-plan/`) opens the plan again as you left it, without planning it again.
 
 With `-p`, `duckwright plan docs/qa-plan.md -p` only writes the task files and prints where they are, the notes and the skipped scenarios; run them later with `duckwright -p -f tasks/qa-plan/`. The folder's files run in name order there, which is the plan's original order.
+
+### Exploration mode
+
+Exploration mode runs the agent with no fixed task. It starts at a URL, follows links, menus and forms, and reports what it found.
+
+```bash
+duckwright explore https://example.com
+duckwright explore https://example.com --write-tasks --max-steps 60
+```
+
+- **Budget**: 40 steps by default. Only `--max-steps` changes it; a `max-steps` in the [global config](#global-config) is ignored for `explore`. The other run options (`--model`, `--env`, `--state`, `--session`, `--headed`, `--network`, `--screenshot`, `--video`, `--jev`, `--debug`, `--snapshot-*`) work as for a task. `--file`, `--plan`, `--web`, `--port`, `--max-parallel`, `--past` and `--theme` are rejected.
+- **Rules**: the agent stays on the start URL's host and avoids destructive actions (deleting, paying, sending). These rules are given to the agent in its prompt; the harness does not enforce them.
+- **Evidence**: network capture is on by default, so failed requests are recorded. Console errors are recorded after each step from `playwright-cli console error`. Console capture is on only for explore runs.
+- **Report**: printed at the end and saved in the run folder as `explore.md` and `explore.json`, with the sections *Broken links and failed requests*, *Console errors*, *Dead ends and broken flows* and *Flows that worked*. `Report:` and `Data:` lines give the paths once they are written.
+- **`--write-tasks`**: writes one [task file](#task-files) per working flow to `tasks/explore-<host>/` (never overwriting an existing folder) and prints the paths. Run them with `duckwright -p -f tasks/explore-<host>/`, adding `--env` or `--state` as needed. With no working flow, no files are written.
+- **No test export**: an exploration run never writes `duckwright.spec.ts`, so no `Test:` line is printed, whether the run succeeded or failed.
+- **Exit codes**: the usual [exit codes](#exit-codes) for the run (`0` when the agent finished with `done success`, `1` on failure, `2` for bad input, `130` when interrupted). A report or task-file write failure turns a `0` into `1`.
 
 ### Authenticated pages
 
@@ -424,11 +442,13 @@ Each step's history line is printed as it happens, followed by the result, answe
 - `history.json`: the task, the task file it came from (`task_file`, `null` for a task given on the command line), the outcome, the total cost, and every step's decision and results. Each action also records the Playwright `code` that `playwright-cli` ran for it (`null` when the action was rejected, skipped, failed, timed out, was `done`, or printed no code; a timed-out `goto` may still have navigated). For an `expect` action that passed, `code` is the assertion line, such as `await expect(page.getByText('Hello, Linh!')).toHaveText("Hello, Linh!");`.
 - `network/<request id>/`: with network capture on (the default), one folder per captured API call, numbered `0001`, `0002`, … across the run. It holds `request.json` (id, step, method, redacted URL and headers), `response.json` (status, status text, type, MIME type, duration and redacted headers), and, only when non-empty, `request-body.txt` and `response-body.txt` (redacted) or `response-body.bin` (a binary response, copied unredacted). Nothing is created with `--no-network`.
 - Per step, `history.json` also records `cost_usd` (what that step cost), `source` (`"claude"` or `"jev"`, who made the decision) and `jev` (`null` when Jev was not asked, else its `action`, `action_confidence`, `target`, `target_confidence` and `routed`: `accepted`, `needs_text`, `done`, `low_confidence`, or `error: <message>` when the Jev call failed and Claude took over). These per-step fields are present on every run. The top level always has `jev_steps` (0 without `--jev`) and `claude_steps`. With `--jev`, `-p` prints a `Jev steps: n/m` line, unless the run ended in an error.
+- `console_errors`: in an [exploration](#exploration-mode) run, a step that logged console errors gets this list of redacted messages in `history.json`. Other runs never have it.
 - `events.jsonl`: every run event, one JSON object per line
 - `screenshots/step-NNN.png`: with `--screenshot`, the page after each step (`step-001.png`, `step-002.png`, …). Each step in `history.json` gains a `screenshot` path relative to the run folder, or a `screenshot_error` message when the capture failed
 - `video.webm`: with `--video`, one recording of the whole run. `history.json` gains a top-level `video` key (`"video.webm"`) when it was saved, and `-p` prints a `Video:` line with its path
 - `debug.log`: with `--debug`, every prompt and response of the run (see [Debug mode](#debug-mode)). Not created otherwise
-- `duckwright.spec.ts`: the generated regression test, written after every successful run
+- `duckwright.spec.ts`: the generated regression test, written after every successful run (not for [exploration](#exploration-mode) runs)
+- `explore.md`, `explore.json`: the report of an [exploration](#exploration-mode) run, as text and as data
 
 > [!CAUTION]
 > `code` contains whatever the agent typed, passwords included. Treat `history.json` and any exported spec like `auth.json`. 2FA codes are the exception: they are replaced by `[2FA CODE]`.
@@ -561,6 +581,8 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`config.ts`](https://github.com/locle97/duckwright/blob/main/src/config.ts) | Reads the per-user global config that sits under task-file settings and flags |
 | [`taskfile.ts`](https://github.com/locle97/duckwright/blob/main/src/taskfile.ts) | Reads task files (front-matter settings, the shared setup and the task text) and expands task folders for batch runs |
 | [`plan.ts`](https://github.com/locle97/duckwright/blob/main/src/plan.ts) | Plan mode: the planner call, its schema, and writing and reading planned folders |
+| [`console.ts`](https://github.com/locle97/duckwright/blob/main/src/console.ts) | Reads `playwright-cli console error` output into redacted messages |
+| [`explore/`](https://github.com/locle97/duckwright/tree/main/src/explore) | Exploration mode: the task text, the report, and the task files for working flows |
 | [`totp.ts`](https://github.com/locle97/duckwright/blob/main/src/totp.ts) | RFC 6238 one-time passwords from a user-supplied secret |
 | [`twofa.ts`](https://github.com/locle97/duckwright/blob/main/src/twofa.ts) | The per-run 2FA provider: env secret, human prompts, timeout and attempt cap |
 | [`scrub.ts`](https://github.com/locle97/duckwright/blob/main/src/scrub.ts) | Removes the secret and 2FA codes from everything a run keeps or sends |
@@ -627,7 +649,7 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [x] **Plan mode**: `duckwright plan <plan-file>` (or `--plan`) takes a plan written by the user, such as a QA test plan with environment setup, test data, and numbered scenarios like [this one](docs/superpowers/test-plans/2026-10-06-network-capture-redacted-history-test-plan.md). A planner agent (Claude) first breaks the plan into separate tasks and writes them as task files under `tasks/`, one per scenario, carrying over each scenario's preconditions, steps, and expected results and keeping shared setup out of the individual tasks. The tasks are then added to the TUI task list, where they can be reviewed, reordered, edited, or removed before running, and run one after another like a batch.
 - [ ] **Parallel batches**: `-j N` runs up to N task files at once, giving each its own `--session` name automatically so they never share a browser.
 - [ ] **HTML report**: a `report.html` next to each run's `history.json` with every step's goal, actions, results, screenshot, and cost, plus an index page for a batch.
-- [ ] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
+- [x] **Exploration mode**: `duckwright explore <url>` wanders a site with no fixed task and reports broken links, console errors, and dead-end flows. It can also write task files for the flows it finds.
 - [ ] **MCP server**: `duckwright mcp` exposes Duckwright as an MCP server, so Claude Code and other agents can call it as a tool to run a task, a task file, or an export, and get back the result, the run's `history.json`, and the generated spec.
 - [x] **Environment context**: a per-environment context file (for example `environments/staging.md`, chosen with `--env staging`) that is seeded into every task's prompt, so the agent starts each run knowing the basics of the environment under test: base URL, test accounts and where their credentials come from, seeded test data, feature flags, known quirks, and what is off-limits. Shared once instead of repeated in every task file, and never containing raw secrets (referenced by name, like `--state`).
 - [x] **Packaging**: a `duckwright` command that runs from any directory after a local or GitHub install.
