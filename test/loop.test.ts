@@ -917,3 +917,52 @@ test("console_errors_off_makes_no_console_call", async () => {
   assert.equal(pw.calls.some(([k]) => k === "console"), false);
   assert.equal("consoleErrors" in r.history[0], false);
 });
+
+class OrderPW extends FakePW {
+  order: string[] = [];
+  override async close(): Promise<void> {
+    this.order.push("close");
+    await super.close();
+  }
+}
+
+test("before_close_runs_after_success_before_close", async () => {
+  const pw = new OrderPW();
+  const seen: boolean[] = [];
+  const r = await agent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), {
+    beforeClose: async (res) => { seen.push(res.success); pw.order.push("before"); },
+  }).run();
+  assert.ok(r.success);
+  assert.deepEqual(seen, [true]);
+  assert.deepEqual(pw.order, ["before", "close"]);
+});
+
+test("before_close_not_called_on_failure_result", async () => {
+  const pw = new OrderPW();
+  let called = 0;
+  const r = await agent(pw, new FakeBrain([dec([["done", ["failure", "no"]]])]), {
+    beforeClose: async () => { called += 1; },
+  }).run();
+  assert.equal(r.success, false);
+  assert.equal(called, 0);
+  assert.equal(pw.closed, 1);
+});
+
+test("before_close_not_called_when_run_throws", async () => {
+  const pw = new FakePW({ openCode: 1 });
+  let called = 0;
+  await assert.rejects(agent(pw, new FakeBrain([dec()]), { beforeClose: async () => { called += 1; } }).run());
+  assert.equal(called, 0);
+  assert.equal(pw.closed, 1);
+});
+
+test("before_close_throw_propagates_and_browser_closes", async () => {
+  const pw = new FakePW();
+  await assert.rejects(
+    agent(pw, new FakeBrain([dec([["done", ["success", "ok"]]])]), {
+      beforeClose: async () => { throw new Error("check failed"); },
+    }).run(),
+    /check failed/,
+  );
+  assert.equal(pw.closed, 1);
+});

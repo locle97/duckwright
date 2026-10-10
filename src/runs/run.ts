@@ -9,6 +9,8 @@ import { Brain } from "../brain.ts";
 import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
+import { LoginError } from "../auth.ts";
+import type { AuthBroker } from "../auth.ts";
 import { EnvError, loadEnvironment } from "../environment.ts";
 import { HybridBrain, JevAuthError, JevClient, fetchTransport } from "../jev.ts";
 import type { JevTransport } from "../jev.ts";
@@ -80,6 +82,8 @@ export interface RunDeps {
   runner?: Runner;
   /** The inner Jev transport (default `fetchTransport`); a test seam. */
   jevTransport?: JevTransport;
+  /** Shared login broker; without it no auto-login is attempted. */
+  auth?: AuthBroker;
 }
 
 export interface RunHandle {
@@ -90,16 +94,25 @@ export interface RunHandle {
   done: Promise<RunOutcome>;
 }
 
+/** Relative POSIX path when `abs` is inside `cwd`, else the absolute path. */
+export function statePathForHistory(abs: string, cwd: string): string {
+  const rel = path.relative(cwd, abs);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return abs;
+  return rel.split(path.sep).join("/");
+}
+
 export function historyJson(
   task: string, success: boolean, answer: string, steps: number, costUsd: number,
   history: StepRecord[], taskFile: string | null = null, video: string | null = null,
   env: { name: string; path: string } | null = null,
+  state: { path: string; source: "file" | "login" } | null = null,
 ): HistoryData {
   const jevSteps = history.filter((r) => r.decision.source === "jev").length;
   return {
     task,
     task_file: taskFile,
     ...(env !== null ? { env } : {}),
+    ...(state !== null ? { state } : {}),
     success,
     answer,
     steps,
@@ -170,6 +183,38 @@ export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
   return { id: path.basename(workdir), workdir, events, control, done };
 }
 
+/**
+ * The brain for one run folder: Claude, or Jev in front of Claude. Shared by `execute` and the
+ * login agent. Prompts are scrubbed by the Agent itself, so no scrubber is needed here.
+ */
+export function makeBrain(
+  args: RunArgs, deps: RunDeps, workdir: string, signal: AbortSignal, log: DebugLog | null,
+): AgentOptions["brain"] {
+  const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
+  const claude = new Brain({
+    systemFiles: [
+      deps.prompts.system,
+      { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot],
+      args.skill,
+    ],
+    model: args.model,
+    snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
+    signal,
+    runner: log ? debugRunner(deps.runner ?? runProcess, log) : deps.runner,
+  });
+  if (!args.jev) return claude;
+  return new HybridBrain({
+    jev: new JevClient({
+      apiKey, signal,
+      transport: log ? debugTransport(deps.jevTransport ?? fetchTransport, log) : deps.jevTransport,
+    }),
+    claude, minConfidence: args.jevThreshold,
+    ...(log ? { onRoute: (r) => log.route(r) } : {}),
+  });
+}
+
+class LoginFailure extends Error {}
+
 async function execute(
   spec: RunSpec, deps: RunDeps, workdir: string, events: RunEvents, control: RunControl, signal: AbortSignal,
 ): Promise<RunOutcome> {
@@ -179,19 +224,39 @@ async function execute(
   let agent: AgentLike | null = null;
   let outcome: RunOutcome;
   let envRecord: { name: string; path: string } | null = null;
+  let stateRecord: { path: string; source: "file" | "login" } | null = null;
+  let loginState: string | null = null;
   // Let the caller subscribe before anything is emitted.
   await Promise.resolve();
   try {
     const env = args.env ? loadEnvironment(args.env) : null;
     if (env) envRecord = { name: env.name, path: env.path };
+    const statePath = args.state ? resolvePath(args.state) : null;
+    if (statePath) stateRecord = { path: statePathForHistory(statePath, resolvePath(process.cwd())), source: "file" };
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
-    const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const twofa = createTwoFactor({
       secret: (deps.env ?? process.env)[SECRET_ENV] ?? null,
       human: deps.humanFor?.({ signal, events }) ?? null,
       timeoutSec: args.twofaTimeout,
       signal, events,
     });
+    if (!statePath && env?.login && deps.auth) {
+      const login = env.login;
+      try {
+        const got = await deps.auth.ensure({
+          env: { name: env.name, login, text: env.text },
+          signal, headed: args.headed,
+          run: { args, deps, makeBrain: (wd) => makeBrain(args, deps, wd, signal, null) },
+        });
+        loginState = got.path;
+        stateRecord = { path: statePathForHistory(got.path, resolvePath(process.cwd())), source: "login" };
+      } catch (e) {
+        if (e instanceof LoginError) throw new LoginFailure(`login failed: ${env.name}: ${e.message}`);
+        throw e;
+      }
+      const pass = ((deps.env ?? process.env)[login.passwordEnv] ?? "").trim();
+      if (pass !== "") twofa.scrubber.addSecret(pass);
+    }
     const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
     let log: DebugLog | null = null;
     if (args.debug) {
@@ -201,27 +266,11 @@ async function execute(
       });
       log.attach(events);
     }
-    const claude = new Brain({
-      systemFiles: [deps.prompts.system, modeMd, args.skill],
-      model: args.model,
-      snapshotDir: args.snapshot === "full" ? null : pageDir(workdir),
-      signal,
-      runner: log ? debugRunner(deps.runner ?? runProcess, log) : deps.runner,
-    });
-    const brain = args.jev
-      ? new HybridBrain({
-        jev: new JevClient({
-          apiKey, signal,
-          transport: log ? debugTransport(deps.jevTransport ?? fetchTransport, log) : deps.jevTransport,
-        }),
-        claude, minConfidence: args.jevThreshold,
-        ...(log ? { onRoute: (r) => log.route(r) } : {}),
-      })
-      : claude;
+    const brain = makeBrain(args, deps, workdir, signal, log);
     const pw = new PlaywrightCLI({ session: args.session, allowFileAccess: args.allowFileAccess, signal });
     agent = deps.createAgent({
       task, pw, brain, workdir,
-      maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
+      maxSteps: args.maxSteps, headed: args.headed, state: statePath ?? loginState,
       snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa, environment: env?.text ?? null,
     });
@@ -240,7 +289,7 @@ async function execute(
       code = 130;
     } else if (e instanceof PlaywrightError) {
       message = `playwright error: ${e.message}`;
-    } else if (e instanceof EnvError) {
+    } else if (e instanceof EnvError || e instanceof LoginFailure) {
       message = e.message;
     } else if (e instanceof JevAuthError) {
       message = "jev error: invalid TYPESAFE_API_KEY";
@@ -250,7 +299,7 @@ async function execute(
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     let written: string | null = historyPath;
     try {
-      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video, envRecord));
+      writeHistory(historyPath, historyJson(task, false, message, collected.length, cost, collected, taskFile, ev.video, envRecord, stateRecord));
     } catch {
       written = null;
     }
@@ -263,7 +312,7 @@ async function execute(
   async function finish(result: RunResult): Promise<RunOutcome> {
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     writeHistory(historyPath, historyJson(
-      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video, envRecord,
+      task, result.success, result.answer, result.steps, result.costUsd, result.history, taskFile, ev.video, envRecord, stateRecord,
     ));
     const warnings: string[] = [];
     let exported: ExportOutcome = { kind: "off" };

@@ -102,10 +102,12 @@ async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[])
  * `requests` is what expect-request checks against; null or absent means capture is off.
  * `call` is the request context for running request actions.
  * `twofa` supplies 2FA codes for `twofa` actions.
+ * `fillValues` maps placeholders to values substituted into `fill`/`type` args just before running.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
   requests?: RequestContext | null, call?: RequestCallContext | null, twofa?: TwoFactor | null,
+  fillValues?: Record<string, string>,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
@@ -165,7 +167,12 @@ export async function execute(
       if (changed) skip = "skipped: page may have changed";
       return;
     }
-    const res = await pw.run(a.cmd, a.args);
+    let args = a.args;
+    if (fillValues && (a.cmd === "fill" || a.cmd === "type")) {
+      // Only the text argument; flags like --submit are never placeholders. The recorded action keeps them.
+      args = a.args.map((x) => Object.entries(fillValues).reduce((t, [k, v]) => t.split(k).join(v), x));
+    }
+    const res = await pw.run(a.cmd, args);
     if (res.code === 0) {
       results.push("ok");
       const code = extractCode(res.stdout);

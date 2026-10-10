@@ -62,6 +62,8 @@ export interface AgentOptions {
   video?: boolean;
   screenshot?: boolean;
   environment?: string | null;
+  fillValues?: Record<string, string>;
+  beforeClose?: (result: RunResult) => Promise<void>;
 }
 
 export class Agent {
@@ -83,6 +85,8 @@ export class Agent {
   readonly video: boolean;
   readonly screenshot: boolean;
   readonly environment: string | null;
+  readonly fillValues: Record<string, string> | undefined;
+  readonly beforeClose: ((result: RunResult) => Promise<void>) | undefined;
   evidence: Evidence = { video: null, warnings: [] };
   private nextNetworkId = 1;
   private pendingNetworkErrors: string[] = [];
@@ -108,6 +112,8 @@ export class Agent {
     this.video = opts.video ?? false;
     this.screenshot = opts.screenshot ?? false;
     this.environment = opts.environment ?? null;
+    this.fillValues = opts.fillValues;
+    this.beforeClose = opts.beforeClose;
     const onStep = opts.onStep;
     if (onStep) this.events.subscribe((e) => { if (e.type === "step:end") onStep(e.record); });
   }
@@ -145,7 +151,9 @@ export class Agent {
         const err = await clearRequests(this.pw);
         if (err) this.pendingNetworkErrors = [`initial ${err}`];
       }
-      return await this.loop();
+      const result = await this.loop();
+      if (result.success) await this.beforeClose?.(result);
+      return result;
     } finally {
       if (videoStarted) {
         const stopped = await stopVideo(this.pw, this.workdir);
@@ -235,7 +243,7 @@ export class Agent {
         result: (index, result, code) => this.events.emit({
           type: "action:result", step, index, result: this.scrub(result), code: code === null ? null : this.scrub(code),
         }),
-      }, requestCtx, callCtx, this.twofa ?? null);
+      }, requestCtx, callCtx, this.twofa ?? null, this.fillValues);
       const rec: StepRecord = {
         step, decision, results: results.map(this.scrub), codes: codes.map((c) => (c === null ? null : this.scrub(c))),
         costUsd: cost,

@@ -1,3 +1,15 @@
+---
+login:
+  method: script
+  url: https://staging.example.com/login
+  username-env: STAGING_USER
+  password-env: STAGING_PASSWORD
+  username-selector: "#email"
+  password-selector: "#password"
+  submit-selector: "button[type=submit]"
+  check-url: https://staging.example.com/account
+  check-text: Sign out
+---
 <!-- Sample environment context. Copy to environments/staging.md and edit.
      Use it with: duckwright --env staging "<task>"
      Delete this comment after copying.
@@ -11,8 +23,8 @@ https://staging.example.com (the API is at https://api.staging.example.com)
 
 ## Test accounts
 
-- admin: admin@example.com, password in the env var STAGING_ADMIN_PASSWORD
-- member: member@example.com, already logged in by `--state auth.json`
+- admin: the account in STAGING_USER; Duckwright logs in with it automatically (see the `login:` block at the top). Its password is in STAGING_PASSWORD
+- member: member@example.com, not used by the automatic login
 
 ## Seeded data
 

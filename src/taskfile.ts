@@ -92,10 +92,10 @@ function readUtf8(p: string, label: string): string {
 }
 
 /** A problem on one front-matter line; becomes a TaskFileError with its location. */
-class LineError extends Error {}
+export class LineError extends Error {}
 
 /** `raw` is the text after the colon, unstripped: only whitespace then `#` starts a comment. */
-function value(raw: string): string {
+export function value(raw: string): string {
   const v = raw.trim();
   if (v[0] === "'" || v[0] === '"') {
     const end = v.indexOf(v[0], 1);

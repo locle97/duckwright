@@ -2,8 +2,10 @@
 // recorded code contains everything the agent typed, passwords included.
 import { test, expect } from '@playwright/test';
 
-test("tabs", async ({ page }) => {
+test("tabs", async ({ page: firstPage }) => {
+  let page = firstPage;
   await page.goto('https://example.com/form');
-  // TODO(duckwright): tab-new needs a hand edit; this test assumes a single page
+  page = await page.context().newPage();
+  await page.goto("https://x\nawait evil();");
   await page.getByRole('button', { name: 'Submit' }).click();
 });

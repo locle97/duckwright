@@ -562,3 +562,29 @@ test("dblclick_is_allowed_and_page_changing", async () => {
   assert.deepEqual(results, ["ok", "skipped: page may have changed"]);
   assert.deepEqual(calls, [["dblclick", "e5"]]);
 });
+
+const FILL_VALUES = { "{{username}}": "u@x.com", "{{password}}": "s3cret" };
+
+test("fill_values_substituted_in_fill_and_type", async () => {
+  const [pw, calls] = makePw();
+  const actions = [A("fill", "#p", "{{password}}"), A("type", "{{username}}:{{password}}:{{password}}")];
+  await execute(pw, actions, undefined, undefined, null, null, null, FILL_VALUES);
+  assert.deepEqual(calls, [["fill", "#p", "s3cret"], ["type", "u@x.com:s3cret:s3cret"]]);
+  assert.deepEqual(actions[0].args, ["#p", "{{password}}"]);
+  assert.deepEqual(actions[1].args, ["{{username}}:{{password}}:{{password}}"]);
+});
+
+test("fill_values_not_applied_to_other_commands", async () => {
+  const [pw, calls] = makePw();
+  await execute(pw, [A("click", "{{password}}")], undefined, undefined, null, null, null, FILL_VALUES);
+  assert.deepEqual(calls, [["click", "{{password}}"]]);
+  const [pw2, calls2] = makePw();
+  await execute(pw2, [A("goto", "http://x/{{password}}")], undefined, undefined, null, null, null, FILL_VALUES);
+  assert.deepEqual(calls2, [["goto", "http://x/{{password}}"]]);
+});
+
+test("no_fill_values_leaves_placeholders", async () => {
+  const [pw, calls] = makePw();
+  await execute(pw, [A("fill", "#p", "{{password}}")]);
+  assert.deepEqual(calls, [["fill", "#p", "{{password}}"]]);
+});

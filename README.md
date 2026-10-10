@@ -136,7 +136,7 @@ Run `duckwright --version` to print the installed version. Runs are written to `
 | `--screenshot` | off | Save a screenshot of the page after every step to `runs/<id>/screenshots/` (`--no-screenshot` overrides a task file). See [Evidence](#evidence-screenshots-and-video) |
 | `--skill` | bundled `prompts/playwright-cli.md` | Path to the playwright-cli skill appended to the system prompt |
 | `--session` | `duckwright` | playwright-cli session name |
-| `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login |
+| `--state` | none | Storage state JSON loaded with `playwright-cli state-load` before the first step, for pages that need a login. Any explicit state turns off the [automatic login](#automatic-login) |
 | `--env` | none | Environment context: the text of `environments/ENV.md` (or of the `.md` file at path ENV) is put into every step's prompt; `none` = no environment (see [Environment context](#environment-context)) |
 | `--allow-file-access` | off | Allow `file://` URLs, which playwright-cli blocks by default |
 | `--network` | on | Record the API calls the page makes each step, redacted, under `runs/<id>/network/` (see [Output](#output)); `--no-network` turns it off or overrides a task file |
@@ -296,6 +296,8 @@ duckwright "Open https://app.example.com/settings and report my plan" --state au
 > [!CAUTION]
 > `auth.json` holds live session tokens. Keep it out of git, and remember the agent can act as you on every site in the file.
 
+To skip the manual step, describe the login once in an environment file: see [Automatic login](#automatic-login).
+
 ### Two-factor verification
 
 When a login asks for a second factor, the agent uses a `twofa` action: the harness gets the code and types it, so the model never sees one.
@@ -336,6 +338,48 @@ duckwright -p "Open the dashboard and report the plan name" --env staging
 - **TUI and web**: in the TUI the `environment` field of the global Options pane (`O`) and of each task's `o` options form cycles through `none` and the files in `environments/` (`ctrl+r` goes back to inherited); the task detail shows an `environment` row. In the web UI the Options dialog has an `environment` select (inherit, `none`, each listed file), both globally (`O` or the options strip) and per task (`o` or the task's Options button), and the options strip shows an `env:` chip, marked ✱ when overridden; the effective environment is shown only on the global options strip, not per task. A global choice applies to every task's next run, a per-task one to that task, both above the command line.
 - **Plan mode**: `duckwright plan PLAN --env ENV` writes `env: ENV` into every task file it creates (a path is written relative to the planned folder).
 - **Never put raw secrets in it**: it goes into every prompt. Name where a credential comes from (an environment variable, or the `--state` file) instead of writing the value.
+- **Front matter**: a file whose first line is exactly `---` (trailing spaces allowed) has front matter, closed by the next line that is exactly `---`. Only the key `login` is allowed there (see [Automatic login](#automatic-login)); the prompt gets only the text after it. Gotcha: if your environment text itself starts with a `---` line (a Markdown rule), it is read as front matter, so put a heading or a line of text first.
+
+#### Automatic login
+
+An environment file can start with a `login:` front-matter block. When `--env` names it and no state is given, Duckwright logs in once, saves the storage state, loads it into every task and reuses it until it expires.
+
+```markdown
+---
+login:
+  method: script
+  url: https://staging.example.com/login
+  username-env: STAGING_USER
+  password-env: STAGING_PASSWORD
+  username-selector: "#email"
+  password-selector: "#password"
+  submit-selector: "button[type=submit]"
+  check-url: https://staging.example.com/account
+  check-text: Sign out
+---
+# Staging
+```
+
+The block is `login:` alone on its line, then indented `key: value` lines (task-file rules for quotes and ` #` comments; no lists or nesting).
+
+| Key | Methods | Required | Value |
+| --- | --- | --- | --- |
+| `method` | both | yes | `script` or `agent` |
+| `username-env`, `password-env` | both | yes | Names of environment variables (letters, digits, `_`). The values are read when a login runs, never from the file |
+| `url` | script | yes | Absolute `http` or `https` login page |
+| `username-selector`, `password-selector`, `submit-selector` | script | yes | CSS selector or Playwright locator |
+| `task` | agent | yes | Login instructions, one line |
+| `check-url`, `check-text` | both | no, set together | After login (and when reusing a saved state) the page at `check-url` must contain `check-text` (case-sensitive) |
+
+- **`script`** opens a fresh playwright-cli session, goes to `url`, fills both fields, clicks submit, runs the optional check and saves the state. No model is used (cost `0.0000`).
+- **`agent`** runs a login agent with your `task`. It types the placeholders `{{username}}` and `{{password}}`; Duckwright swaps in the real values just before calling playwright-cli, so the model never sees them, and both values are scrubbed from results, recorded code, snapshots on disk and errors.
+- **Cache**: the state is saved to `.duckwright/auth/<env>.json` (characters outside `A-Za-z0-9._-` in the name become `_`), file mode `0600`. Duckwright writes `.duckwright/.gitignore` containing `*`, and this repository's `.gitignore` lists `.duckwright/`, so the cache is not committed. A saved state is reused when it parses, has no expired cookie and passes the check; otherwise Duckwright logs in again.
+- **When it applies**: only when the effective environment has `login:` and no state is set. Any state, from `--state`, a task file, the global config or the TUI/web option, skips auto-login entirely (no cache read, no login). There is no `--no-login`; use `--state FILE` or an environment file without `login:`.
+- **Output**: in print mode the login happens before the first task, at most once per environment in a batch, with lines such as `Login: staging: using saved state .duckwright/auth/staging.json` or `Login: staging: logging in (script), no saved state` then `Login: staging: saved state .duckwright/auth/staging.json  Cost: $0.0000`. In the TUI, the web UI and `explore` runs just wait for the shared login. The login cost is not added to a run's cost.
+- **Errors**: an invalid `login:` block fails preflight with exit `2`, for example `environment file invalid: PATH:N: unknown key "KEY" (only login is allowed)`, or `environment file invalid: PATH:N: login: must be followed by indented "key: value" lines` when you write `login: foo` on one line. A failed login prints `login failed: ENV: REASON` and exits `1` before any task runs; in the TUI and web the run ends as failed with that message. A missing credential variable is only an error when a login actually has to run.
+- **Passwords on the command line**: the `script` method passes the password to `playwright-cli fill ...` as an argument, so it is visible in the process list (`ps`) on that machine while the step runs. Use a throwaway test account.
+- **History**: `history.json` records `"state": {"path": ..., "source": "login"}` (`"file"` for `--state`), the path only, never the content or the password.
+- **Exports**: a run that loaded a state exports `test.use({ storageState })` (see [exports](#turning-a-run-into-a-regression-test)). The state file is not part of the export, so CI must supply it.
 
 ### Task files
 
@@ -500,8 +544,8 @@ Limits:
 | Code | Meaning |
 | --- | --- |
 | `0` | The agent finished with `done success` |
-| `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error. In a batch, at least one task failed |
-| `2` | Bad input or a preflight check failed: an unreadable or invalid task file, a folder with no task files, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
+| `1` | Failure: `done failure`, max steps reached, repeated brain failures, a playwright error, or a failed [automatic login](#automatic-login). In a batch, at least one task failed |
+| `2` | Bad input or a preflight check failed: an unreadable or invalid task file, a folder with no task files, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli`, or an invalid `login:` block in an environment file |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written; a batch stops at the interrupted task) |
 
 ## Turning a run into a regression test
@@ -535,9 +579,9 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
    ```
    `expect-request` checks only the calls from the step before it, takes a path or URL without a query string, and cannot assert a field that was redacted in the capture. The `waitForResponse` predicate includes the status (and the field value), so the test waits for the first response that satisfies them all, matching what the harness verified. Expected values in recorded assertions are always written in double quotes; that is intended. Screenshots are left out. If the agent recorded no assertions, the export prints a warning.
 
-   A `request` is exported as a setup call, `page.request.fetch(...)` followed by a status check, in the order it ran. It is for setup only: the export refuses a run where a `request` comes after any interaction other than `goto`. The JSON body the agent sent is written into the call (re-serialised as JSON), so check it for secrets, as with `fill`. The call uses the test's own context, so for a run that used `--state` add `test.use({ storageState: 'auth.json' })` or the cookies will be missing. `request` cannot send headers (an endpoint that needs a CSRF header will not work), a query string, or a call to another origin.
+   A `request` is exported as a setup call, `page.request.fetch(...)` followed by a status check, in the order it ran. It is for setup only: the export refuses a run where a `request` comes after any interaction other than `goto`. The JSON body the agent sent is written into the call (re-serialised as JSON), so check it for secrets, as with `fill`. The call uses the test's own context, so a run that loaded a state exports `test.use({ storageState })` and the cookies are there. `request` cannot send headers (an endpoint that needs a CSRF header will not work), a query string, or a call to another origin.
 
-   **API-only spec.** `duckwright export --api` replays the run's captured `fetch`/`xhr` calls with the `request` fixture and asserts each call's status, so the backend flow runs without the UI. It needs network capture. Only the `content-type` and `accept` headers are kept, and captured values are redacted, so the export warns wherever `[REDACTED]` appears; supply auth by hand, and for a `--state` run add `test.use({ storageState: 'auth.json' })`. It exits `1` when there are no captured API calls. A run itself still writes the UI spec only.
+   **API-only spec.** `duckwright export --api` replays the run's captured `fetch`/`xhr` calls with the `request` fixture and asserts each call's status, so the backend flow runs without the UI. It needs network capture. Only the `content-type` and `accept` headers are kept, and captured values are redacted, so the export warns wherever `[REDACTED]` appears; supply auth by hand; a run that loaded a state gets the same `test.use({ storageState })` block as the UI spec. It exits `1` when there are no captured API calls. A run itself still writes the UI spec only.
 2. Add any further assertions the agent did not record.
 3. Run it with `npx playwright test` and fix any locator that fails. To watch the spec step by step first, press `R` in the TUI or click **Replay spec** in the web UI. [`test-generation.md`](https://github.com/locle97/duckwright/blob/main/.claude/skills/playwright-cli/references/test-generation.md) in the playwright-cli skill covers that workflow.
 
@@ -546,7 +590,9 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
 Only successful runs can be exported. `duckwright export` exits with `0` when the test was written, `1` when it refused (the run did not succeed, or it recorded no Playwright code), and `2` when the path or `history.json` cannot be used. When a run exports its test automatically, a failed export is reported on stderr but does not change the run's exit code.
 
 > [!IMPORTANT]
-> Some setup leaves no `code` behind. If the run used `--state FILE`, load the same state in the test with `test.use({ storageState: 'auth.json' })`. If it used `tab-new`, `tab-select` or `tab-close`, the export marks the spot with a `// TODO(duckwright)` line and prints a warning: edit that part by hand, because the test assumes a single `page`.
+> Some setup is exported from the run's metadata instead of its `code`:
+> - **Storage state.** If the run loaded a state (`--state FILE` or [automatic login](#automatic-login)), the spec has `test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || "<path>" })`. `<path>` is the recorded path, relative to the folder Duckwright ran in (Playwright resolves it against where `npx playwright test` runs, normally the project root), or absolute if the file was outside it. Set `DUCKWRIGHT_STORAGE_STATE` to use another file. The state file itself is not exported and is git-ignored: for runs from auto-login, supply it in CI (for example by logging in there and saving it to that path, or by pointing `DUCKWRIGHT_STORAGE_STATE` at a secret file), and treat it like `auth.json`.
+> - **Tabs.** `tab-new`, `tab-select` and `tab-close` become real multi-page code: the test keeps a `page` variable that follows the current tab, with small `selectTab`/`closeTab` helpers (0-based indexes, like playwright-cli). A bad tab index in the history fails the export (exit `1`).
 
 ## How it works
 
@@ -574,6 +620,7 @@ The loop ends when the model sends a `done` action, when max steps is reached, o
 | [`brain.ts`](https://github.com/locle97/duckwright/blob/main/src/brain.ts) | Calls `claude -p`, enforces the decision schema, tracks cost |
 | [`actions.ts`](https://github.com/locle97/duckwright/blob/main/src/actions.ts) | Command and flag allow-lists, action execution, Playwright code capture |
 | [`export.ts`](https://github.com/locle97/duckwright/blob/main/src/export.ts) | Renders `history.json` as a `@playwright/test` spec |
+| [`auth.ts`](https://github.com/locle97/duckwright/blob/main/src/auth.ts) | Automatic login: `AuthBroker` logs in once per environment (script or agent), checks and caches the storage state in `.duckwright/auth/` |
 | [`exportApi.ts`](https://github.com/locle97/duckwright/blob/main/src/exportApi.ts) | Renders captured API calls as a `request`-fixture spec (`export --api`) |
 | [`expect.ts`](https://github.com/locle97/duckwright/blob/main/src/expect.ts) | `expect` checks: verified against the live page and recorded as assertions |
 | [`expectRequest.ts`](https://github.com/locle97/duckwright/blob/main/src/expectRequest.ts) | `expect-request` checks: verified against the captured network calls and rendered as `waitForResponse` assertions |
@@ -613,7 +660,8 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 - [x] **Automatic test export**: `duckwright export runs/<id>`, or any successful run, writes a ready-to-run `.spec.ts` from `history.json`, replacing the manual [regression test](#turning-a-run-into-a-regression-test) steps.
 - [x] **Agent-recorded assertions**: an `expect` action, so the checks the agent makes become `expect(...)` lines instead of being written by hand from `answer`.
 - [x] **Direct API requests**: a `request` action for fast test setup, replayed in exports as `page.request.fetch(...)`.
-- [ ] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that currently need hand edits.
+- [x] **Multi-tab and storage state in exports**: generate code for `tab-*` commands and `--state` runs, the two cases that used to need hand edits.
+- [x] **Automatic login**: a `login:` block in an environment file (script or agent) logs in once per environment, caches the storage state in `.duckwright/auth/` and loads it into every task.
 - [ ] **Verified exports**: `duckwright verify runs/<id>`, run automatically after each run, runs the generated spec headless a few times and only reports success when every run passes, so a flaky or broken spec never counts as done.
 
 **Reliability and cost**

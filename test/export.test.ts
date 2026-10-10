@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { ExportError, NO_ASSERTIONS, SPEC_NAME, TOTP_HELPER, TOTP_IMPORT, exportRun, loadHistory, renderSpec } from "../src/export.ts";
+import { CLOSE_TAB_HELPER, ExportError, NO_ASSERTIONS, SELECT_TAB_HELPER, SPEC_NAME, TOTP_HELPER, TOTP_IMPORT, exportRun, loadHistory, renderSpec, stateBlock } from "../src/export.ts";
 import type { HistoryData } from "../src/export.ts";
 import { ROOT, tmpDir } from "./helpers.ts";
 
@@ -16,7 +16,6 @@ const GOTO = "await page.goto('https://example.com/form');";
 const FILL = "await page.getByRole('textbox', { name: 'Name' }).fill('Linh');";
 const CLICK = "await page.getByRole('button', { name: 'Submit' }).click();";
 const EXPECT = "await expect(page.getByText('Hello, Linh!')).toHaveText(\"Hello, Linh!\");";
-const TAB_TODO = "  // TODO(duckwright): tab-new needs a hand edit; this test assumes a single page\n";
 
 type Act = [cmd: string, args: string[], code: string | null];
 
@@ -93,26 +92,142 @@ test("no_assertions_warns", () => {
   assert.ok(warnings.includes("no assertions recorded; add expect(...) lines by hand"));
 });
 
-test("tab_command_marks_todo_without_args", () => {
+const TAB_SIG = 'test("greet", async ({ page: firstPage }) => {\n  let page = firstPage;\n';
+
+test("tab_new_with_url_emits_new_page_and_goto", () => {
   const { spec, warnings } = renderSpec(run([
     step([["goto", ["u"], GOTO]]),
-    step([["tab-new", ["https://x\nawait evil();"], null]]),
-    step([["tab-new", ["y"], null]]),
+    step([["tab-new", ["https://x/\"y"], null]]),
     step([["expect", [], EXPECT]]),
   ]));
-  assert.ok(spec.includes(TAB_TODO));
-  assert.ok(!spec.includes("evil"));
-  assert.deepEqual(warnings, ["run used tab-new; edit the test by hand, it assumes a single page"]);
+  assert.equal(spec, HEADER + "\n" + TAB_SIG + `  ${GOTO}\n  page = await page.context().newPage();\n`
+    + '  await page.goto("https://x/\\"y");\n' + `  ${EXPECT}\n` + "});\n");
+  assert.ok(!spec.includes("TODO"));
+  assert.ok(!spec.includes("selectTab") && !spec.includes("closeTab"));
+  assert.deepEqual(warnings, []);
+});
+
+test("tab_new_without_url_emits_only_new_page", () => {
+  const { spec } = renderSpec(run([step([["goto", ["u"], GOTO]]), step([["tab-new", [], null]]), step([["tab-new", [""], null]])]));
+  assert.equal((spec.match(/newPage\(\)/g) ?? []).length, 2);
+  assert.equal(spec.split("goto").length, 2); // only the recorded goto
+});
+
+for (const arg of ["1", 1]) {
+  test(`tab_select_accepts_${JSON.stringify(arg)}`, () => {
+    const { spec } = renderSpec(run([step([["goto", ["u"], GOTO]]), step([["tab-select", [arg as string], null]])]));
+    assert.ok(spec.includes("  page = await selectTab(page, 1);\n"));
+    assert.ok(spec.includes(SELECT_TAB_HELPER));
+    assert.ok(!spec.includes(CLOSE_TAB_HELPER));
+    assert.ok(spec.includes(HEADER + "\n" + SELECT_TAB_HELPER + "\n" + TAB_SIG));
+  });
+}
+
+test("tab_close_with_and_without_index", () => {
+  const { spec } = renderSpec(run([
+    step([["goto", ["u"], GOTO]]),
+    step([["tab-close", [], null]]),
+    step([["tab-close", ["0"], null]]),
+  ]));
+  assert.ok(spec.includes("  page = await closeTab(page);\n  page = await closeTab(page, 0);\n"));
+  assert.ok(spec.includes(CLOSE_TAB_HELPER));
+  assert.ok(!spec.includes(SELECT_TAB_HELPER));
+});
+
+test("both_helpers_are_emitted_in_order_when_used", () => {
+  const { spec } = renderSpec(run([
+    step([["goto", ["u"], GOTO]]),
+    step([["tab-new", [], null]]),
+    step([["tab-select", [0 as unknown as string], null]]),
+    step([["tab-close", [], null]]),
+  ]));
+  assert.ok(spec.includes(HEADER + "\n" + SELECT_TAB_HELPER + "\n" + CLOSE_TAB_HELPER + "\n" + TAB_SIG));
+});
+
+test("tab_helpers_state_and_totp_order", () => {
+  const totp = run([
+    step([["twofa", ["totp"], "await page.getByLabel('Code').fill('[2FA CODE]');"]]),
+    step([["tab-select", ["1"], null]]),
+  ]);
+  const { spec } = renderSpec({ ...totp, state: STATE_LOGIN });
+  assert.ok(spec.includes(TOTP_HELPER + "\n" + SELECT_TAB_HELPER + "\n" + LOGIN_BLOCK + "\n" + TAB_SIG));
+});
+
+test("tab_helpers_and_state_without_totp", () => {
+  const { spec } = renderSpec({ ...run([step([["goto", ["u"], GOTO]]), step([["tab-close", [], null]])]), state: STATE_LOGIN });
+  assert.ok(spec.includes(HEADER + "\n" + CLOSE_TAB_HELPER + "\n" + LOGIN_BLOCK + "\n" + TAB_SIG));
 });
 
 test("failed_tab_command_adds_nothing", () => {
-  const { spec, warnings } = renderSpec(run([
+  const plain = renderSpec(run([step([["goto", ["u"], GOTO]]), step([["expect", [], EXPECT]])]));
+  const withFailed = renderSpec(run([
     step([["goto", ["u"], GOTO]]),
-    step([["tab-new", ["x"], null]], ["error: boom"]),
+    step([["tab-new", ["x"], null], ["tab-select", ["x"], null]], ["error: boom", "error: no tab"]),
     step([["expect", [], EXPECT]]),
   ]));
-  assert.ok(!spec.includes("TODO"));
-  assert.deepEqual(warnings, []);
+  assert.deepEqual(withFailed, plain);
+});
+
+for (const [cmd, args] of [["tab-select", []], ["tab-select", ["x"]], ["tab-select", ["-1"]], ["tab-select", [1.5]], ["tab-close", ["abc"]]] as const) {
+  test(`bad_tab_index ${cmd} ${JSON.stringify(args)}`, () => {
+    const want = `${cmd} in step 2 has no valid tab index (expected a whole number, got ${JSON.stringify(args[0] ?? null)})`;
+    assert.throws(
+      () => renderSpec(run([step([["goto", ["u"], GOTO]]), step([[cmd, args as unknown as string[], null]])])),
+      (e: unknown) => e instanceof ExportError && e.exitCode === 1 && e.message === want,
+    );
+  });
+}
+
+interface FakePage { name: string; context: () => { pages: () => FakePage[] }; bringToFront: () => Promise<void>; close: () => Promise<void> }
+
+function fakeContext(names: string[]): { pages: FakePage[]; front: string[] } {
+  const pages: FakePage[] = [];
+  const front: string[] = [];
+  const ctx = { pages: () => [...pages] };
+  for (const name of names) {
+    const page: FakePage = {
+      name,
+      context: () => ctx,
+      bringToFront: async () => { front.push(name); },
+      close: async () => { pages.splice(pages.indexOf(page), 1); },
+    };
+    pages.push(page);
+  }
+  return { pages, front };
+}
+
+const helpers = new Function(`${SELECT_TAB_HELPER}\n${CLOSE_TAB_HELPER}\nreturn { selectTab, closeTab };`)() as {
+  selectTab: (current: FakePage, index: number) => Promise<FakePage>;
+  closeTab: (current: FakePage, index?: number) => Promise<FakePage>;
+};
+
+test("select_tab_helper_brings_the_page_to_front", async () => {
+  const { pages, front } = fakeContext(["a", "b", "c"]);
+  assert.equal(await helpers.selectTab(pages[0], 2), pages[2]);
+  assert.deepEqual(front, ["c"]);
+  await assert.rejects(helpers.selectTab(pages[0], 5), /no tab 5/);
+});
+
+test("close_tab_helper_picks_the_current_tab", async () => {
+  let f = fakeContext(["a", "b", "c"]);
+  let [, mid, last] = f.pages;
+  assert.equal(await helpers.closeTab(mid), last); // middle: the page now at the same index
+  assert.deepEqual(f.front, ["c"]);
+  f = fakeContext(["a", "b", "c"]);
+  [, mid, last] = f.pages;
+  assert.equal(await helpers.closeTab(last), mid); // last: the new last
+  f = fakeContext(["a", "b", "c"]);
+  const current = f.pages[2];
+  assert.equal(await helpers.closeTab(current, 0), current); // another tab: current stays
+  assert.deepEqual(f.pages.map((p) => p.name), ["b", "c"]);
+  assert.deepEqual(f.front, []);
+});
+
+test("close_tab_helper_throws_on_the_last_tab_and_bad_index", async () => {
+  const { pages } = fakeContext(["a"]);
+  await assert.rejects(helpers.closeTab(pages[0]), /closed the last tab/);
+  const two = fakeContext(["a", "b"]);
+  await assert.rejects(helpers.closeTab(two.pages[0], 9), /no tab 9/);
 });
 
 test("load_history_accepts_dir_and_file", () => {
@@ -182,7 +297,8 @@ for (const results of [undefined, "ok", ["ok"]]) {
     else rec.results = results;
     const { spec } = renderSpec(run([rec]));
     assert.ok(spec.includes(GOTO));
-    assert.ok(!spec.includes("TODO")); // a tab command with no "ok" result is not marked
+    assert.ok(!spec.includes("TODO")); // a tab command with no "ok" result adds nothing
+    assert.ok(!spec.includes("newPage"));
   });
 }
 
@@ -533,4 +649,53 @@ test("export accepts history with jev fields", () => {
   const plain = run([step([["goto", ["https://example.com/form"], GOTO], ["click", ["e1"], CLICK]])]);
   const withJev = { ...run([jevStep]), jev_steps: 1, claude_steps: 0 } as HistoryData;
   assert.equal(renderSpec(withJev).spec, renderSpec(plain).spec);
+});
+
+const STATE_LOGIN = { path: ".duckwright/auth/staging.json", source: "login" as const };
+const LOGIN_BLOCK = "// The run started from the storage state in .duckwright/auth/staging.json (auto-login).\n"
+  + "// Set DUCKWRIGHT_STORAGE_STATE to use another file; in CI, supply one.\n"
+  + 'test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || ".duckwright/auth/staging.json" });\n';
+
+test("state_login_renders_test_use_block", () => {
+  const { spec } = renderSpec({ ...GREET, state: STATE_LOGIN });
+  assert.equal(stateBlock(STATE_LOGIN), LOGIN_BLOCK);
+  assert.equal(spec, HEADER + "\n" + LOGIN_BLOCK + "\n" + 'test("greet", async ({ page }) => {\n'
+    + `  ${GOTO}\n  ${FILL}\n  ${CLICK}\n  ${EXPECT}\n` + "});\n");
+});
+
+test("state_file_says_state_flag", () => {
+  const { spec } = renderSpec({ ...GREET, state: { path: "a.json", source: "file" } });
+  assert.ok(spec.includes("// The run started from the storage state in a.json (--state).\n"));
+  assert.ok(spec.includes('test.use({ storageState: process.env.DUCKWRIGHT_STORAGE_STATE || "a.json" });\n'));
+});
+
+test("state_block_goes_after_totp_helper", () => {
+  const totp = run([step([["twofa", ["totp"], "await page.getByLabel('Code').fill('[2FA CODE]');"]]), step([["goto", ["u"], GOTO]])]);
+  const { spec } = renderSpec({ ...totp, state: STATE_LOGIN });
+  assert.ok(spec.includes(TOTP_HELPER + "\n" + LOGIN_BLOCK + "\ntest("));
+});
+
+test("state_path_with_newline_is_left_out_of_the_comment", () => {
+  const block = stateBlock({ path: "a\nb.json", source: "file" });
+  assert.equal(block.split("\n")[0], "// The run started from a storage state (--state).");
+  assert.ok(block.includes('storageState: process.env.DUCKWRIGHT_STORAGE_STATE || "a\\nb.json"'));
+  assert.equal(block.split("\n").length, 4);
+});
+
+test("state_replaces_the_cookies_note", () => {
+  const steps = [reqStep(["POST", "/api/items", "{}"], "ok 201"), step([["goto", ["u"], GOTO]])];
+  assert.ok(renderSpec(run(steps)).warnings.some((w) => /storageState/.test(w)));
+  assert.ok(!renderSpec({ ...run(steps), state: STATE_LOGIN }).warnings.some((w) => /storageState/.test(w)));
+});
+
+for (const [i, state] of ["x", { path: 1 }, null, [], {}].entries()) {
+  test(`load_history_rejects_bad_state ${i}`, () => {
+    const runDir = writeRun(tmpDir(), { ...GREET, state });
+    assert.throws(() => loadHistory(runDir), exportError(2, /^not a duckwright history: .*history\.json: 'state' must be an object with a string 'path'$/));
+  });
+}
+
+test("load_history_accepts_state", () => {
+  const runDir = writeRun(tmpDir(), { ...GREET, state: STATE_LOGIN });
+  assert.deepEqual(loadHistory(runDir).data.state, STATE_LOGIN);
 });

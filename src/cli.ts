@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { AuthBroker, LoginError, authLabel } from "./auth.ts";
 import { RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
@@ -11,6 +12,7 @@ import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
 import { writeExploreTasks } from "./explore/tasks.ts";
 import { Agent } from "./loop.ts";
+import { AbortedError } from "./proc.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
 import { PlanError, isPlanFolder, runPlanner, writePlan } from "./plan.ts";
@@ -20,7 +22,7 @@ import { RunManager } from "./runs/manager.ts";
 import type { ManagerLike, Planner } from "./runs/manager.ts";
 import { loadPastRuns } from "./runs/past.ts";
 import type { PastRun } from "./runs/past.ts";
-import { PROMPTS, historyJson, startRun } from "./runs/run.ts";
+import { PROMPTS, historyJson, makeBrain, startRun, statePathForHistory } from "./runs/run.ts";
 import type { AgentLike, PromptPaths } from "./runs/run.ts";
 import { secretProblem } from "./twofa.ts";
 import type { Human } from "./twofa.ts";
@@ -69,6 +71,8 @@ export interface CliDeps {
   env: Record<string, string | undefined>;
   /** The person to ask for a 2FA code in print mode, named by `label`. Only used when `isTTY()` is true. */
   human(label: string): Human | null;
+  /** Shared automatic login; one broker per process. */
+  auth: AuthBroker;
 }
 
 const DEFAULT_DEPS: CliDeps = {
@@ -86,6 +90,7 @@ const DEFAULT_DEPS: CliDeps = {
   initConfig: () => initConfig(),
   env: process.env,
   human: (label) => createTtyHuman({ label }),
+  auth: new AuthBroker(),
 };
 
 function isFile(p: string): boolean {
@@ -202,6 +207,51 @@ function exportMain(deps: CliDeps, argv: string[]): number {
 }
 
 /**
+ * Log in once per environment before any task runs (print mode). Tasks with an explicit state
+ * and environments without a login block are skipped. Returns an exit code on failure, else null.
+ */
+export async function loginUpFront(deps: CliDeps, runs: RunArgs[]): Promise<number | null> {
+  const seen = new Set<string>();
+  for (const args of runs) {
+    if (args.state || !args.env) continue;
+    let env: ReturnType<typeof loadEnvironment>;
+    try {
+      env = loadEnvironment(args.env);
+    } catch (e) {
+      if (e instanceof EnvError) {
+        deps.stderr(e.message);
+        return 2;
+      }
+      throw e;
+    }
+    const login = env.login;
+    if (!login || seen.has(authLabel(env.name))) continue;
+    seen.add(authLabel(env.name));
+    const runDeps = { ...deps, humanFor: () => (deps.isTTY() ? deps.human(`Login ${env.name}`) : null), onWarning: (m: string) => deps.stderr(`warning: ${m}`) };
+    try {
+      const got = await deps.auth.ensure({
+        env: { name: env.name, login, text: env.text },
+        signal: deps.signal, headed: args.headed,
+        onReason: (r) => deps.stdout(`Login: ${env.name}: logging in (${login.method}), ${r}`),
+        run: { args, deps: runDeps, makeBrain: (wd) => makeBrain(args, runDeps, wd, deps.signal, null) },
+      });
+      const shown = statePathForHistory(got.path, resolvePath(process.cwd()));
+      deps.stdout(got.reused
+        ? `Login: ${env.name}: using saved state ${shown}`
+        : `Login: ${env.name}: saved state ${shown}  Cost: $${fixed4(got.costUsd)}`);
+    } catch (e) {
+      if (e instanceof AbortedError || deps.signal.aborted) return 130;
+      if (e instanceof LoginError) {
+        deps.stderr(`login failed: ${env.name}: ${e.message}`);
+        return 1;
+      }
+      throw e;
+    }
+  }
+  return null;
+}
+
+/**
  * Run one task whose preflight has passed; returns the exit code, its history.json
  * and what it cost, including what was spent before a crash or Ctrl-C.
  */
@@ -234,6 +284,8 @@ async function runBatch(deps: CliDeps, runs: [string, RunArgs][]): Promise<numbe
     deps.stderr(errors.join("\n"));
     return 2;
   }
+  const loginCode = await loginUpFront(deps, runs.map(([, a]) => a));
+  if (loginCode !== null) return loginCode;
   const rows: [string, string, string, string][] = [];
   let total = 0;
   let interrupted = false;
@@ -281,7 +333,7 @@ async function interactiveMain(
     maxParallel: args.maxParallel ?? config.maxParallel ?? 3,
     settings: runSettings(config),
     startRun: (s, human) => startRun(s, {
-      prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent, env: deps.env,
+      prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent, env: deps.env, auth: deps.auth,
       humanFor: () => human,
       onWarning: (m) => manager.notify("error", m),
     }),
@@ -438,6 +490,8 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
       deps.stderr(err);
       return 2;
     }
+    const loginCode = await loginUpFront(deps, [args]);
+    if (loginCode !== null) return loginCode;
     return (await runOne(deps, args, null, "duckwright"))[0];
   }
 
@@ -471,6 +525,8 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
     deps.stderr(err);
     return 2;
   }
+  const loginCode = await loginUpFront(deps, [fileArgs]);
+  if (loginCode !== null) return loginCode;
   return (await runOne(deps, fileArgs, p, p))[0];
 }
 

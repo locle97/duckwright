@@ -145,3 +145,25 @@ test("evidence_commands_throw_on_nonzero", async () => {
     );
   }
 });
+
+test("state_save_argv", async () => {
+  const fake = fakeRunner(ok());
+  await new PlaywrightCLI({ session: "t", runner: fake }).stateSave("/tmp/s.json");
+  assert.deepEqual(fake.calls[0].argv, ["playwright-cli", "-s=t", "state-save", "/tmp/s.json"]);
+});
+
+test("state_save_failure_raises", async () => {
+  const fake = fakeRunner({ code: 1, stdout: "out", stderr: "nope" });
+  await assert.rejects(
+    new PlaywrightCLI({ runner: fake }).stateSave("/tmp/s.json"),
+    (e: Error) => e instanceof PlaywrightError && e.message === "nope",
+  );
+});
+
+test("state_save_with_empty_output_reports_exit_code", async () => {
+  const fake = fakeRunner({ code: 4, stdout: "", stderr: "" });
+  await assert.rejects(
+    new PlaywrightCLI({ runner: fake }).stateSave("/tmp/s.json"),
+    (e: Error) => e.message === "exit 4",
+  );
+});

@@ -13,7 +13,7 @@ import type { Human } from "../../src/twofa.ts";
 import { Brain } from "../../src/brain.ts";
 import type { JevRecord } from "../../src/brain.ts";
 import { HybridBrain, JevAuthError, JevClient } from "../../src/jev.ts";
-import { PROMPTS, historyJson, startRun } from "../../src/runs/run.ts";
+import { PROMPTS, historyJson, makeBrain, startRun, statePathForHistory } from "../../src/runs/run.ts";
 import type { AgentLike, RunDeps, RunSpec } from "../../src/runs/run.ts";
 import { tmpDir } from "../helpers.ts";
 
@@ -681,4 +681,204 @@ test("start_run_passes_console_errors", async () => {
   assert.notEqual(seen[0], undefined);
   assert.equal(seen[0], true);
   assert.notEqual(seen[1], true);
+});
+
+test("history_json_records_explicit_state_after_env", async () => {
+  await inEnvDir(async () => {
+    const inside = path.join(process.cwd(), "auth", "s.json");
+    const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside, env: "staging" });
+    const h = startRun(spec, deps);
+    await h.done;
+    const j = readHistory(h.workdir);
+    assert.equal(j.env.name, "staging");
+    assert.equal(j.state.source, "file");
+    const keys = Object.keys(j);
+    assert.equal(keys.indexOf("state"), keys.indexOf("env") + 1);
+  });
+});
+
+test("history_json_records_explicit_state_after_task_file", async () => {
+  const inside = path.join(process.cwd(), "auth", "s.json");
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside });
+  const h = startRun(spec, deps);
+  await h.done;
+  const j = readHistory(h.workdir);
+  assert.deepEqual(j.state, { path: "auth/s.json", source: "file" });
+  const keys = Object.keys(j);
+  assert.ok(keys.indexOf("state") === keys.indexOf("task_file") + 1);
+});
+
+test("history_json_state_outside_cwd_is_absolute", async () => {
+  const outside = path.join(tmpDir(), "s.json");
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: outside });
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.equal(readHistory(h.workdir).state.path, fs.realpathSync(path.dirname(outside)) + "/s.json");
+});
+
+test("history_json_no_state_has_no_key", async () => {
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])));
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.equal("state" in readHistory(h.workdir), false);
+});
+
+test("failing_run_still_records_state", async () => {
+  const inside = path.join(process.cwd(), "auth", "s.json");
+  const { spec, deps } = setup(agentWith(async () => { throw new Error("boom"); }), { state: inside });
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.deepEqual(readHistory(h.workdir).state, { path: "auth/s.json", source: "file" });
+});
+
+test("history_with_state_exports_test_use", async () => {
+  const inside = path.join(process.cwd(), "auth", "s.json");
+  const { spec, deps } = setup(agentWith(async () => result(true, [rec()])), { state: inside });
+  const h = startRun(spec, deps);
+  const o = await h.done;
+  assert.equal(o.export.kind, "written");
+  if (o.export.kind === "written") assert.match(fs.readFileSync(o.export.path, "utf8"), /test\.use\(/);
+});
+
+test("state_path_for_history", () => {
+  assert.equal(statePathForHistory("/w/a/b.json", "/w"), "a/b.json");
+  assert.equal(statePathForHistory("/x/b.json", "/w"), "/x/b.json");
+  assert.equal(statePathForHistory("/w", "/w"), "/w");
+  assert.equal(statePathForHistory("/wx/b.json", "/w"), "/wx/b.json");
+});
+
+test("make_brain_builds_claude_or_hybrid_brain", () => {
+  const dir = tmpDir();
+  const deps = { prompts: PROMPTS, signal: new AbortController().signal, createAgent: () => { throw new Error("no"); } } as RunDeps;
+  const plain = makeBrain(args(), deps, dir, deps.signal, null);
+  assert.ok(plain instanceof Brain);
+  const hybrid = makeBrain(args({ jev: true }), { ...deps, env: { TYPESAFE_API_KEY: "k" } }, dir, deps.signal, null);
+  assert.ok(hybrid instanceof HybridBrain);
+});
+
+// ---- auto-login (Task 8) ----
+
+const LOGIN_FM = [
+  "---", "login:", "  method: script", "  url: https://s/login", "  username-selector: 'input#u'",
+  "  password-selector: 'input#p'", "  submit-selector: 'button#go'", "  username-env: U_VAR", "  password-env: P_VAR", "---",
+  "Base: https://s", "",
+].join("\n");
+
+function inLoginEnv<T>(body: (dir: string) => Promise<T>): Promise<T> {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "environments"));
+  fs.writeFileSync(path.join(dir, "environments", "staging.md"), LOGIN_FM);
+  const prev = process.cwd();
+  process.chdir(dir);
+  return body(dir).finally(() => process.chdir(prev));
+}
+
+function fakeAuth(ensure: (o: any) => Promise<any>) {
+  const calls: any[] = [];
+  return { calls, broker: { ensure: (o: any) => { calls.push(o); return ensure(o); } } as unknown as RunDeps["auth"] };
+}
+
+test("login_env_uses_broker_state_and_records_source_login", async () => {
+  await inLoginEnv(async (dir) => {
+    const stateFile = path.join(fs.realpathSync(dir), ".duckwright", "auth", "staging.json");
+    const fa = fakeAuth(async () => ({ path: stateFile, reused: false, costUsd: 0 }));
+    const states: (string | null | undefined)[] = [];
+    const envs: (string | null | undefined)[] = [];
+    const s = setup(agentWith(async (opts) => { states.push(opts.state); envs.push(opts.environment); return result(true, [rec()]); }),
+      { env: "staging" }, undefined, { U_VAR: "alice", P_VAR: "hunter2-secret" });
+    s.deps.auth = fa.broker;
+    const h = startRun(s.spec, s.deps);
+    await h.done;
+    assert.equal(fa.calls.length, 1);
+    assert.equal(fa.calls[0].env.name, "staging");
+    assert.equal(fa.calls[0].env.login.method, "script");
+    assert.equal(fa.calls[0].env.text, "Base: https://s");
+    assert.equal(typeof fa.calls[0].run.makeBrain, "function");
+    assert.deepEqual(states, [stateFile]);
+    assert.equal(envs[0], "Base: https://s");
+    assert.deepEqual(readHistory(h.workdir).state, { path: ".duckwright/auth/staging.json", source: "login" });
+  });
+});
+
+test("login_password_never_reaches_history_debug_or_results", async () => {
+  await inLoginEnv(async (dir) => {
+    const pw = "hunter2-secret";
+    const fa = fakeAuth(async () => ({ path: path.join(dir, "st.json"), reused: false, costUsd: 0 }));
+    const s = setup(agentWith(async (opts) => {
+      assert.equal(opts.twofa!.scrubber.scrub(`x ${pw} y alice`), "x [REDACTED] y alice");
+      return result(true, [rec()]);
+    }), { env: "staging", debug: true }, undefined, { U_VAR: "alice", P_VAR: pw });
+    s.deps.auth = fa.broker;
+    const h = startRun(s.spec, s.deps);
+    assert.equal((await h.done).status, "pass");
+    for (const f of fs.readdirSync(h.workdir)) {
+      const p = path.join(h.workdir, f);
+      if (fs.statSync(p).isFile()) assert.ok(!fs.readFileSync(p, "utf8").includes(pw), f);
+    }
+  });
+});
+
+test("login_explicit_state_skips_broker", async () => {
+  await inLoginEnv(async (dir) => {
+    const fa = fakeAuth(async () => { throw new Error("must not be called"); });
+    const file = path.join(dir, "mine.json");
+    const s = setup(agentWith(async () => result(true, [rec()])), { env: "staging", state: file });
+    s.deps.auth = fa.broker;
+    const h = startRun(s.spec, s.deps);
+    await h.done;
+    assert.equal(fa.calls.length, 0);
+    assert.equal(readHistory(h.workdir).state.source, "file");
+  });
+});
+
+test("login_not_attempted_without_login_block_or_broker", async () => {
+  await inEnvDir(async () => {
+    const fa = fakeAuth(async () => { throw new Error("no"); });
+    const s = setup(agentWith(async () => result(true, [rec()])), { env: "staging" });
+    s.deps.auth = fa.broker;
+    await startRun(s.spec, s.deps).done;
+    assert.equal(fa.calls.length, 0);
+  });
+  await inLoginEnv(async () => {
+    const states: (string | null | undefined)[] = [];
+    const s = setup(agentWith(async (opts) => { states.push(opts.state); return result(true, [rec()]); }), { env: "staging" });
+    const h = startRun(s.spec, s.deps);
+    await h.done;
+    assert.deepEqual(states, [null]);
+    assert.ok(!("state" in readHistory(h.workdir)));
+  });
+});
+
+test("login_error_fails_run_before_start", async () => {
+  await inLoginEnv(async () => {
+    const { LoginError } = await import("../../src/auth.ts");
+    const fa = fakeAuth(async () => { throw new LoginError("x"); });
+    let created = 0;
+    const s = setup(agentWith(async () => { created++; return result(true); }), { env: "staging" });
+    s.deps.auth = fa.broker;
+    const h = startRun(s.spec, s.deps);
+    const types: string[] = [];
+    h.events.subscribe((e: RunEvent) => types.push(e.type));
+    const o = await h.done;
+    assert.equal(o.exitCode, 1);
+    assert.equal(o.status, "fail");
+    assert.equal(o.answer, "login failed: staging: x");
+    assert.equal(o.error, "login failed: staging: x");
+    assert.equal(created, 0);
+    assert.ok(!types.includes("run:start"));
+    const hist = readHistory(h.workdir);
+    assert.equal(hist.steps, 0);
+    assert.ok(!("state" in hist));
+  });
+});
+
+test("login_abort_is_interrupted", async () => {
+  await inLoginEnv(async () => {
+    const fa = fakeAuth(async () => { throw new AbortedError(); });
+    const s = setup(agentWith(async () => result(true)), { env: "staging" });
+    s.deps.auth = fa.broker;
+    const o = await startRun(s.spec, s.deps).done;
+    assert.equal(o.exitCode, 130);
+    assert.equal(o.answer, "interrupted");
+  });
 });
