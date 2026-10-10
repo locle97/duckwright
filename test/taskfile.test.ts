@@ -411,3 +411,17 @@ test("jev invalid bool", () => {
 test("settingValue jev", () => {
   assert.equal(settingValue("jev", "true"), true);
 });
+
+test("debug key", () => {
+  assert.equal(loadTaskFile(w(tmpDir(), "---\ndebug: true\n---\nGo\n")).settings.debug, true);
+});
+
+test("debug invalid bool", () => {
+  const p = w(tmpDir(), "---\ndebug: yes\n---\nGo\n");
+  assert.equal(err(p), `${p}:2: debug must be true or false, got "yes"`);
+});
+
+test("debug set twice", () => {
+  const p = w(tmpDir(), "---\ndebug: true\ndebug: false\n---\nGo\n");
+  assert.equal(err(p), `${p}:3: "debug" is set twice`);
+});

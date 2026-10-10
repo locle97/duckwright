@@ -23,7 +23,7 @@ const EXPECT = "await expect(page).toHaveURL(\"https://example.com/\");";
 function args(over: Partial<RunArgs> = {}): RunArgs {
   return {
     task: "task", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill,
-    session: "s-1", state: null, env: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, ...over,
+    session: "s-1", state: null, env: null, allowFileAccess: false, snapshot: "full", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, debug: false, ...over,
   };
 }
 
@@ -521,4 +521,122 @@ test("outcome jevSteps only with --jev", async () => {
   assert.equal((await startRun(a.spec, a.deps).done).jevSteps, 1);
   const b = setup(agentWith(async () => result(true, [jr])));
   assert.equal("jevSteps" in (await startRun(b.spec, b.deps).done), false);
+});
+
+// ---- debug logging ----
+
+const SNAP = '- button "Submit" [ref=e12]\n- link "" [ref=e13] [cursor=pointer]';
+const stepInput = (n: number) => ({
+  obs: { tabs: "tabs", snapshot: SNAP, truncated: false, lines: 2, chars: 10 },
+  ctx: { step: n, task: "T", memory: "M", historyLines: [], nudged: false, previousFailed: false },
+});
+const CLAUDE_ENV = JSON.stringify({
+  total_cost_usd: 0.01, usage: { input_tokens: 5, output_tokens: 6 },
+  structured_output: { evaluation_previous_goal: "", memory: "", next_goal: "g", actions: [{ cmd: "snapshot", args: [] }] },
+});
+const JEV_RESP = JSON.stringify({
+  usage: { input_tokens: 100, output_tokens: 20 },
+  answers: { action: { choice: "click", confidence: 0.95 }, target: { choice: "e12", confidence: 0.95 } },
+});
+const debugAgent = agentWith(async (opts) => {
+  const brain = opts.brain as unknown as { decide(p: string, g: boolean, s: unknown): Promise<unknown> };
+  await brain.decide("prompt", true, stepInput(2));
+  await brain.decide("prompt", true, stepInput(1));
+  step(opts, rec());
+  return result(true, [rec()]);
+});
+
+test("debug_on_writes_log_and_console_matches_file", async () => {
+  const on = setup(agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()]); }), { debug: true });
+  const texts: string[] = [];
+  on.deps.debugConsole = (t) => texts.push(t);
+  const h = startRun(on.spec, on.deps);
+  await h.done;
+  const file = fs.readFileSync(path.join(h.workdir, "debug.log"), "utf8");
+  assert.ok(file.startsWith(`===== [debug ${h.id}] run =====`));
+  const blocks = file.trimEnd().split(/\n\n(?======)/);
+  assert.ok(blocks[blocks.length - 1].startsWith(`===== [debug ${h.id}] summary =====`));
+  assert.equal(texts.join(""), file);
+
+  const quiet = setup(agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()]); }), { debug: true });
+  const hq = startRun(quiet.spec, quiet.deps);
+  await hq.done;
+  assert.ok(fs.existsSync(path.join(hq.workdir, "debug.log")));
+
+  const off = setup(agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()]); }));
+  const ho = startRun(off.spec, off.deps);
+  await ho.done;
+  assert.equal(fs.existsSync(path.join(ho.workdir, "debug.log")), false);
+  assert.equal(
+    fs.readFileSync(path.join(ho.workdir, "history.json"), "utf8"),
+    fs.readFileSync(path.join(h.workdir, "history.json"), "utf8"),
+  );
+});
+
+test("debug_unwritable_log_warns_once_and_keeps_outcome", async () => {
+  const tmp = tmpDir();
+  const warnings: string[] = [];
+  const runsDir = path.join(tmp, "runs");
+  const deps: RunDeps = {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir, onWarning: (m) => warnings.push(m),
+    createAgent: agentWith(async (opts) => {
+      // The folder exists by now; make debug.log unwritable before the log is first used.
+      step(opts, rec());
+      return result(true, [rec()]);
+    }),
+  };
+  // Pre-create debug.log as a directory by hooking the first run:start (the log is created before it).
+  const spec: RunSpec = { task: "task", taskFile: null, args: args({ debug: true }) };
+  const baseline = setup(agentWith(async (opts) => { step(opts, rec()); return result(true, [rec()]); }));
+  const expected = await startRun(baseline.spec, baseline.deps).done;
+  const h = startRun(spec, deps);
+  fs.mkdirSync(path.join(h.workdir, "debug.log"), { recursive: true });
+  const o = await h.done;
+  assert.equal(o.status, expected.status);
+  assert.equal(o.exitCode, expected.exitCode);
+  assert.equal(warnings.filter((m) => m.includes("debug log: cannot write")).length, 1);
+});
+
+test("debug_jev_wiring_logs_blocks_and_redacts_key", async () => {
+  const seen: string[] = [];
+  const { spec, deps } = setup(debugAgent, { jev: true, debug: true }, undefined, { TYPESAFE_API_KEY: "sk-test-key" });
+  const texts: string[] = [];
+  deps.debugConsole = (t) => texts.push(t);
+  deps.runner = async () => ({ code: 0, stdout: CLAUDE_ENV, stderr: "" });
+  deps.jevTransport = async (_u, init) => {
+    seen.push(String((init.headers as Record<string, string>).Authorization));
+    return { status: 200, text: async () => JEV_RESP };
+  };
+  const h = startRun(spec, deps);
+  await h.done;
+  const file = fs.readFileSync(path.join(h.workdir, "debug.log"), "utf8");
+  assert.deepEqual(seen, ["Bearer sk-test-key"]);
+  assert.ok(file.includes("jev request"));
+  assert.ok(file.includes("outcome: accepted"));
+  assert.ok(file.includes("outcome: skipped"));
+  assert.ok(/claude/.test(file));
+  assert.ok(!file.includes("sk-test-key"));
+  assert.ok(!texts.join("").includes("sk-test-key"));
+});
+
+test("debug_off_still_uses_injected_seams", async () => {
+  let runnerCalls = 0;
+  let jevCalls = 0;
+  const { spec, deps } = setup(debugAgent, { jev: true }, undefined, { TYPESAFE_API_KEY: "k" });
+  deps.runner = async () => { runnerCalls++; return { code: 0, stdout: CLAUDE_ENV, stderr: "" }; };
+  deps.jevTransport = async () => { jevCalls++; return { status: 200, text: async () => JEV_RESP }; };
+  const h = startRun(spec, deps);
+  await h.done;
+  assert.equal(runnerCalls, 1);
+  assert.equal(jevCalls, 1);
+  assert.equal(fs.existsSync(path.join(h.workdir, "debug.log")), false);
+});
+
+test("debug_without_jev_never_calls_jev_transport", async () => {
+  let jevCalls = 0;
+  const { spec, deps } = setup(debugAgent, { debug: true });
+  deps.runner = async () => ({ code: 0, stdout: CLAUDE_ENV, stderr: "" });
+  deps.jevTransport = async () => { jevCalls++; return { status: 200, text: async () => JEV_RESP }; };
+  await startRun(spec, deps).done;
+  assert.equal(jevCalls, 0);
 });

@@ -27,6 +27,7 @@ export interface RunArgs {
   twofaTimeout: number;
   jev: boolean;
   jevThreshold: number;
+  debug: boolean;
   snapshot: SnapshotMode;
   print: boolean;
   maxParallel: number | null;
@@ -68,6 +69,7 @@ export const RUN_USAGE = "usage: duckwright [-h] [--version] [-p] [-f FILE [FILE
   + "                  [--video | --no-video] [--screenshot | --no-screenshot]\n"
   + "                  [--twofa-timeout SEC]\n"
   + "                  [--jev | --no-jev] [--jev-threshold FLOAT]\n"
+  + "                  [--debug | --no-debug]\n"
   + "                  [--snapshot-hybrid | --snapshot-full | --snapshot-grep]\n"
   + "                  [--max-parallel N] [--past N] [--theme {auto,dark,light}]\n"
   + "                  [--web] [--port PORT]\n"
@@ -130,6 +132,11 @@ options:
                         with --jev: the confidence Jev needs for its choice
                         to be used, greater than 0 and at most 1 (default
                         0.8)
+  --debug, --no-debug   log every prompt sent to Claude and Jev, the raw
+                        responses, tokens, cost and timing to
+                        runs/<id>/debug.log, and with -p also to stderr
+                        (default off). The log holds full page snapshots;
+                        credentials are redacted
   --snapshot-hybrid     default: paste page snapshots of up to 5,000
                         characters into the prompt, and let Claude grep larger
                         ones from the saved file
@@ -219,7 +226,7 @@ const RUN_SPEC: OptionSpec = {
     "--max-steps": "--max-steps", "--model": "--model", "--skill": "--skill",
     "--session": "--session", "--state": "--state", "--env": "--env",
     "--headed": "--headed/--no-headed", "--no-headed": "--headed/--no-headed",
-    "--twofa-timeout": "--twofa-timeout", "--jev": "--jev/--no-jev", "--no-jev": "--jev/--no-jev",
+    "--twofa-timeout": "--twofa-timeout", "--jev": "--jev/--no-jev", "--no-jev": "--jev/--no-jev", "--debug": "--debug/--no-debug", "--no-debug": "--debug/--no-debug",
     "--jev-threshold": "--jev-threshold", "--network": "--network/--no-network", "--no-network": "--network/--no-network",
     "--video": "--video/--no-video", "--no-video": "--video/--no-video",
     "--screenshot": "--screenshot/--no-screenshot", "--no-screenshot": "--screenshot/--no-screenshot",
@@ -245,7 +252,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
     session: "duckwright", state: null, env: null, allowFileAccess: false, snapshot: "hybrid", network: true, video: false, screenshot: false,
     print: false, maxParallel: null, web: false, port: null, plan: null, twofaTimeout: 300,
-    jev: false, jevThreshold: 0.8,
+    jev: false, jevThreshold: 0.8, debug: false,
     ...settings,
   };
   const extras: string[] = [];
@@ -333,6 +340,7 @@ export function parseRunArgs(argv: string[], defaultSkill: string, settings: Tas
     if (name === "--version") return { kind: "version" };
     if (name === "--headed" || name === "--no-headed") args.headed = name === "--headed";
     else if (name === "--jev" || name === "--no-jev") args.jev = name === "--jev";
+    else if (name === "--debug" || name === "--no-debug") args.debug = name === "--debug";
     else if (name === "--network" || name === "--no-network") args.network = name === "--network";
     else if (name === "--video" || name === "--no-video") args.video = name === "--video";
     else if (name === "--screenshot" || name === "--no-screenshot") args.screenshot = name === "--screenshot";

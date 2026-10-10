@@ -14,10 +14,11 @@ import {
   currentFocus,
   currentTabUrl,
   extractTargets,
+  fetchTransport,
   targetCandidates,
   targetDescription,
 } from "../src/jev.ts";
-import type { JevAnswer, JevQuestion, JevTransport } from "../src/jev.ts";
+import type { JevAnswer, JevQuestion, JevTransport, RouteInfo } from "../src/jev.ts";
 import { BrainError } from "../src/brain.ts";
 import type { Decision, StepInput } from "../src/brain.ts";
 import { AbortedError } from "../src/proc.ts";
@@ -572,4 +573,82 @@ test("HybridBrain sends a target outside the list to claude", async () => {
   const [d] = await new HybridBrain({ jev: f.jev, claude: f.claude }).decide("P", true, mkStep());
   assert.equal(d.source, "claude");
   assert.equal(d.jev?.routed, "low_confidence");
+});
+
+// ---- onRoute ----
+
+function routed(answers: Record<string, JevAnswer> | undefined, step: StepInput | undefined, jevErr?: Error) {
+  const f = fakes(answers, jevErr);
+  const infos: RouteInfo[] = [];
+  const order: string[] = [];
+  const claude = {
+    async decide(p: string, g?: boolean): Promise<[Decision, number]> {
+      order.push("claude");
+      return f.claude.decide(p, g);
+    },
+  };
+  const hb = new HybridBrain({ jev: f.jev, claude, onRoute: (r) => (order.push("route"), infos.push(r)) });
+  return { hb, infos, order, step };
+}
+
+const routeCases: [string, Record<string, JevAnswer> | undefined, StepInput | undefined, Error | undefined, RouteInfo][] = [
+  ["no step", undefined, undefined, undefined, { step: 0, outcome: "skipped", reason: "no step context" }],
+  ["step 1", undefined, mkStep({ step: 1 }), undefined, { step: 1, outcome: "skipped", reason: "step 1 always uses Claude" }],
+  ["nudged", undefined, mkStep({ nudged: true }), undefined, { step: 2, outcome: "skipped", reason: "repeat nudge in the prompt" }],
+  ["failed", undefined, mkStep({ previousFailed: true }), undefined, { step: 2, outcome: "skipped", reason: "previous step failed" }],
+  ["no targets", undefined, mkStep({}, '- textbox "Q" [ref=e1]'), undefined, { step: 2, outcome: "skipped", reason: "no clickable targets on the page" }],
+  ["too many", undefined, mkStep({}, many), undefined, { step: 2, outcome: "skipped", reason: "too many targets (256 > 255)" }],
+  ["jev error", undefined, mkStep(), new JevError("jev http 500", 0.002), { step: 2, outcome: "error", reason: "jev error: jev http 500" }],
+  ["needs_text", ans("needs_text", 0.99), mkStep(), undefined, { step: 2, outcome: "needs_text", reason: "jev says the next move needs typed text" }],
+  ["done", ans("done", 0.99), mkStep(), undefined, { step: 2, outcome: "done", reason: "jev says the task is done; Claude writes the answer" }],
+  ["low action", ans("click", 0.5), mkStep(), undefined, { step: 2, outcome: "low_confidence", reason: "action confidence 0.50 < threshold 0.80" }],
+  ["missing target", ans("click", 0.9, "e99"), mkStep(), undefined, { step: 2, outcome: "low_confidence", reason: "target e99 is not on the page" }],
+  ["low target", ans("click", 0.9, "e12", 0.5), mkStep(), undefined, { step: 2, outcome: "low_confidence", reason: "target confidence 0.50 < threshold 0.80" }],
+];
+for (const [name, answers, step, err, want] of routeCases) {
+  test(`onRoute reports ${name}`, async () => {
+    const r = routed(answers, step, err);
+    await r.hb.decide("P", true, step);
+    assert.deepEqual(r.infos, [want]);
+    assert.deepEqual(r.order, ["route", "claude"]);
+  });
+}
+
+test("onRoute reports accepted click and press_enter", async () => {
+  const a = routed(ans("click", 0.95, "e12", 0.9), mkStep());
+  await a.hb.decide("P", true, a.step);
+  assert.deepEqual(a.infos, [{ step: 2, outcome: "accepted", reason: "jev chose click e12 (confidence 0.90)" }]);
+  assert.deepEqual(a.order, ["route"]);
+  const b = routed(ans("press_enter", 0.9, "e12", 0.1), mkStep());
+  await b.hb.decide("P", true, b.step);
+  assert.deepEqual(b.infos, [{ step: 2, outcome: "accepted", reason: "jev chose press_enter (confidence 0.90)" }]);
+});
+
+test("onRoute does not change decisions and a throwing onRoute is ignored", async () => {
+  const f1 = fakes(ans("click", 0.9));
+  const f2 = fakes(ans("click", 0.9));
+  const plain = await new HybridBrain({ jev: f1.jev, claude: f1.claude }).decide("P", true, mkStep());
+  const thrower = await new HybridBrain({
+    jev: f2.jev,
+    claude: f2.claude,
+    onRoute: () => {
+      throw new Error("boom");
+    },
+  }).decide("P", true, mkStep());
+  assert.deepEqual(thrower, plain);
+  const f3 = fakes(ans("click", 0.3));
+  const f4 = fakes(ans("click", 0.3));
+  const p2 = await new HybridBrain({ jev: f3.jev, claude: f3.claude }).decide("P", true, mkStep());
+  const t2 = await new HybridBrain({
+    jev: f4.jev,
+    claude: f4.claude,
+    onRoute: () => {
+      throw new Error("boom");
+    },
+  }).decide("P", true, mkStep());
+  assert.deepEqual(t2, p2);
+});
+
+test("fetchTransport is exported", () => {
+  assert.equal(typeof fetchTransport, "function");
 });

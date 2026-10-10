@@ -212,6 +212,7 @@ async function runOne(
       humanFor: () => (deps.isTTY() ? deps.human(label) : null),
       env: deps.env,
       onWarning: (m) => deps.stderr(`warning: ${m}`),
+      debugConsole: args.debug ? deps.stderr : undefined,
     },
   );
   attachPlain(handle.events, deps.stdout);

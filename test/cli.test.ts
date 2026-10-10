@@ -1623,3 +1623,27 @@ test("jev steps line", async () => {
   assert.equal(await main(["-p", ...e2.argv], e2.deps({ createAgent })), 0);
   assert.ok(!e2.out.some((l) => l.startsWith("Jev steps:")));
 });
+
+test("debug_print_mode_logs_to_stderr_only", async () => {
+  const mk = () => agentWith(async () => result(true));
+  const e1 = env();
+  assert.equal(await main(["-p", "--debug", ...e1.argv], e1.deps({ createAgent: mk() })), 0);
+  assert.ok(e1.err.some((l) => l.includes("[debug ")));
+  assert.ok(e1.err.some((l) => l.includes("summary")));
+  assert.ok(!e1.out.some((l) => l.includes("[debug ")));
+
+  const e2 = env();
+  assert.equal(await main(["-p", ...e2.argv], e2.deps({ createAgent: mk() })), 0);
+  assert.ok(!e2.err.some((l) => l.includes("[debug ")));
+  assert.deepEqual(e1.out.map((l) => l.replace(/runs[\\/][^\s]*/g, "R")), e2.out.map((l) => l.replace(/runs[\\/][^\s]*/g, "R")));
+});
+
+test("debug_tui_prints_nothing_to_console", async () => {
+  const e = env();
+  const fake = fakeTui();
+  const code = await main(["--debug", "--skill", e.argv[2]],
+    e.deps({ isTTY: () => true, loadTui: fake.load, createAgent: tuiAgent }));
+  assert.equal(code, 0);
+  assert.ok(!e.err.some((l) => l.includes("[debug ")));
+  assert.ok(!e.out.some((l) => l.includes("[debug ")));
+});

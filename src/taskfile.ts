@@ -26,6 +26,7 @@ export type TaskSettings = Partial<{
   twofaTimeout: number;
   jev: boolean;
   jevThreshold: number;
+  debug: boolean;
   snapshot: SnapshotMode;
   /** "none", an environment name, or an absolute resolved path to an environment file. */
   env: string;
@@ -49,6 +50,7 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   screenshot: ["screenshot", "bool"],
   "twofa-timeout": ["twofaTimeout", "int"],
   jev: ["jev", "bool"],
+  debug: ["debug", "bool"],
   "jev-threshold": ["jevThreshold", "threshold"],
   snapshot: ["snapshot", "snapshot"],
   env: ["env", "env"],
@@ -182,7 +184,7 @@ function convert(key: string, kind: Kind, v: string, baseDir: string): string | 
  * Throws TaskFileError with the front-matter message, minus the file and line prefix.
  */
 export function settingValue(
-  key: "max-steps" | "model" | "headed" | "jev" | "snapshot" | "video" | "screenshot", raw: string,
+  key: "max-steps" | "model" | "headed" | "jev" | "debug" | "snapshot" | "video" | "screenshot", raw: string,
 ): string | number | boolean {
   try {
     if (!raw) throw new LineError(`"${key}" has no value`);

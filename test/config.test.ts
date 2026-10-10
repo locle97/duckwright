@@ -143,3 +143,10 @@ test("config accepts jev keys", () => {
 test("default config lists jev", () => {
   assert.ok(DEFAULT_CONFIG.includes("# snapshot: hybrid\n# jev: false\n# jev-threshold: 0.8\n"));
 });
+
+test("config accepts debug key", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "duckwright.conf"), "debug: true\n");
+  assert.deepEqual(loadConfig(dir), { debug: true });
+  assert.ok(DEFAULT_CONFIG.includes("# env: staging\n# debug: false\n"));
+});
