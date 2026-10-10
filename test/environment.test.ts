@@ -156,3 +156,10 @@ test("env_login_errors", () => {
   envFile(tmp, "a.md", "---\n" + "x".repeat(20000));
   assert.match(loadError("a", tmp), /too large/);
 });
+test("sample staging environment parses with a script login", () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  const env = loadEnvironment(path.join(root, "examples", "environments", "staging.md"), root);
+  assert.equal(env.login?.method, "script");
+  assert.ok(env.text.trim().length > 0);
+  assert.ok(!env.text.includes("--state auth.json"));
+});
