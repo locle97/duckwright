@@ -93,7 +93,7 @@ test("manager_layering_flags_then_overrides", () => {
 });
 
 test("manager_globals_layering", () => {
-  const { mgr, events } = setup({ argv: ["--model", "opus", "--max-steps", "9"] });
+  const { mgr, events } = setup({ cwd: tmpDir(), argv: ["--model", "opus", "--max-steps", "9"] });
   const a = mgr.addTyped("a");
   const b = mgr.addTyped("b");
   mgr.setOverrides(b, { model: "haiku" });
