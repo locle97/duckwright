@@ -11,7 +11,7 @@ export const TOOL_TIMEOUT = 120;
 
 export const ALLOWED_COMMANDS = [
   "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
-  "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
+  "dblclick", "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
   "screenshot", "expect", "expect-request", "request", "twofa", "done",
 ] as const;
 

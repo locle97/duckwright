@@ -152,7 +152,7 @@ test("system_md_documents_twofa", () => {
   assert.ok(md.includes('"args": ["totp", "e15"]'));
   assert.ok(md.includes('"args": ["passkey"]'));
   assert.ok(md.includes("never type or guess a code"));
-  assert.ok(md.includes("A page-changing action (goto, click, press, tab-new, tab-select, tab-close, go-back, twofa)"));
+  assert.ok(md.includes("A page-changing action (goto, click, dblclick, press, tab-new, tab-select, tab-close, go-back, twofa)"));
 });
 
 test("stepline_ignores_evidence_fields", () => {
