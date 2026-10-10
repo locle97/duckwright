@@ -44,7 +44,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Recorded assertions**: before finishing, the agent checks the outcome with `expect` actions. The harness verifies each check against the live page and records the passing ones as `expect(...)` lines.
 - **API assertions**: with network capture on, the agent can also check the calls its last step made with `expect-request`: method, path or URL, and status, optionally a field of the JSON response. The harness verifies it against the captured traffic and exports it as a `page.waitForResponse(...)` check.
 - **Direct API calls for setup**: with network capture on, the agent can call an endpoint it has already seen (same origin, the session's cookies) with a `request` action to seed data faster than the UI. The harness only sends a method and path it captured earlier, never follows redirects, and returns the status with a redacted excerpt. `duckwright export` replays it as a `page.request.fetch(...)` setup call, and refuses a run where one comes after a UI action other than `goto`.
-- **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run one after another.
+- **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run in parallel up to `--max-parallel`.
 - **Web mode**: `duckwright --web` serves the same workspace as the TUI in a browser, in a shadcn-style UI: task list, plans, past runs, a live timeline of every step with its network calls, pause/step/stop, options, editing, and 2FA prompts. It listens on `127.0.0.1` only, behind a random per-launch token.
 - **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p`, in the TUI and in the web UI. Codes and the secret never reach `history.json`, the prompts or an exported test.
 - **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink; `@playwright/test` is a runtime dependency, used for spec replay; the web UI is built with React and Vite, which are development dependencies. TypeScript and the test tools are development dependencies.
@@ -248,7 +248,7 @@ The plan shows in the task list as a row with its tasks under it, in run order. 
 | Key | On the plan's row | On one of its tasks |
 | --- | --- | --- |
 | `⏎` | the plan: state, shared setup, notes, tasks, skipped scenarios | the task |
-| `space` | run every task, one after another, in order | run just this task |
+| `space` | run every task in order, up to `--max-parallel` at once | run just this task |
 | `F` | run the failed and stopped tasks again, in order | the same, for its plan |
 | `e` | edit the shared setup | edit the task file |
 | `J` / `K` | | move the task down / up |
