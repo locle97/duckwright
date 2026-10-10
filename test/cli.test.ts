@@ -1946,7 +1946,31 @@ test("login_batch_shares_one_login", async () => {
   assert.ok(e.out.findIndex((l) => l.startsWith("Login:")) < e.out.findIndex((l) => l.startsWith("[1/3]")));
   assert.equal(states.length, 3);
   assert.equal(new Set(states).size, 1);
-  assert.equal(fa.opts.filter((o) => o.onReason !== undefined && o.env.name === "staging").length >= 1, true);
+  assert.equal(fa.opts.filter((o) => o.onReason !== undefined && o.env.name === "staging").length, 1);
+  assert.equal(fa.calls[0], "staging");
+});
+
+test("login_up_front_gets_human_only_on_tty", async () => {
+  for (const tty of [true, false]) {
+    const e = env();
+    envFile(e.tmp, "staging", LOGIN_FM());
+    const fa = fakeAuth();
+    const createAgent = agentWith(async () => result(true));
+    assert.equal(await main(["-p", ...e.argv, "--env", "staging"],
+      e.deps({ createAgent, auth: fa.broker, isTTY: () => tty, human: () => ({ code: async () => "1", approve: async () => {} }) })), 0);
+    const hf = fa.opts[0].run!.deps.humanFor!;
+    assert.equal(hf({} as never) !== null, tty);
+  }
+});
+
+test("login_explore_has_no_up_front_step_and_failure_fails_run", async () => {
+  const e = exploreEnv();
+  envFile(e.tmp, "staging", LOGIN_FM());
+  const fa = fakeAuth(() => { throw new LoginError("bad creds"); });
+  const code = await main([...e.argv, "--env", "staging"], e.deps({ createAgent: exploreAgent(), auth: fa.broker }));
+  assert.ok(!e.out.some((l) => l.startsWith("Login:")));
+  assert.equal(code, 1);
+  assert.ok([...e.out, ...e.err].some((l) => l.includes("login failed: staging: bad creds")));
 });
 
 test("login_two_envs_in_first_seen_order_and_explicit_state_excluded", async () => {
@@ -1960,6 +1984,7 @@ test("login_two_envs_in_first_seen_order_and_explicit_state_excluded", async () 
   const createAgent = agentWith(async () => result(true));
   assert.equal(await main(["-p", "-f", dir, "--skill", e.argv[2]], e.deps({ createAgent, auth: fa.broker })), 0);
   assert.deepEqual(fa.calls.slice(0, 2), ["b", "a"]);
+  assert.ok(!fa.calls.includes("c"));
   const lines = e.out.filter((l) => l.startsWith("Login:") && l.includes("logging in"));
   assert.deepEqual(lines.map((l) => l.split(":")[1].trim()), ["b", "a"]);
 });

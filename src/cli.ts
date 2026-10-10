@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { AuthBroker, LoginError } from "./auth.ts";
+import { AuthBroker, LoginError, authLabel } from "./auth.ts";
 import { RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
@@ -225,9 +225,9 @@ export async function loginUpFront(deps: CliDeps, runs: RunArgs[]): Promise<numb
       throw e;
     }
     const login = env.login;
-    if (!login || seen.has(env.name)) continue;
-    seen.add(env.name);
-    const runDeps = { ...deps, humanFor: () => null, env: deps.env, onWarning: (m: string) => deps.stderr(`warning: ${m}`) };
+    if (!login || seen.has(authLabel(env.name))) continue;
+    seen.add(authLabel(env.name));
+    const runDeps = { ...deps, humanFor: () => (deps.isTTY() ? deps.human(`Login ${env.name}`) : null), onWarning: (m: string) => deps.stderr(`warning: ${m}`) };
     try {
       const got = await deps.auth.ensure({
         env: { name: env.name, login, text: env.text },
@@ -563,8 +563,6 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stderr(problem);
     return 2;
   }
-  const loginCode = await loginUpFront(deps, [run]);
-  if (loginCode !== null) return loginCode;
   const handle = startRun(
     { task: exploreTask(url), taskFile: null, args: run, exportTest: false, consoleErrors: true },
     {
