@@ -49,6 +49,28 @@ export const TOTP_HELPER = `function totp() {
   return String(value % 1000000).padStart(6, '0');
 }
 `;
+// Plain JavaScript that is also valid TypeScript, like the TOTP helper.
+export const SELECT_TAB_HELPER = `async function selectTab(current, index) {
+  const page = current.context().pages()[index];
+  if (!page) throw new Error(\`no tab \${index}\`);
+  await page.bringToFront();
+  return page;
+}
+`;
+export const CLOSE_TAB_HELPER = `async function closeTab(current, index) {
+  const pages = current.context().pages();
+  const i = index === undefined ? pages.indexOf(current) : index;
+  const target = pages[i];
+  if (!target) throw new Error(\`no tab \${index}\`);
+  await target.close();
+  if (target !== current) return current;
+  const rest = current.context().pages();
+  if (rest.length === 0) throw new Error('closed the last tab');
+  const next = rest[Math.min(i, rest.length - 1)];
+  await next.bringToFront();
+  return next;
+}
+`;
 const MANUAL_NOTE = "// NOTE: this test has manual 2FA steps (marked MANUAL) and cannot run unattended.\n";
 const MASKED_CODE = new RegExp(`(['"\`])${CODE_MASK.replace(/[[\]]/g, "\\$&")}\\1`, "g");
 
@@ -165,7 +187,9 @@ export function loadHistory(p: string): { runDir: string; data: HistoryData } {
 /** Render a successful run as a @playwright/test spec. */
 export function renderSpec(data: HistoryData): { spec: string; warnings: string[] } {
   if (!data.success) throw new ExportError("run did not succeed; only successful runs can be exported", 1);
-  const tabs: string[] = [];
+  let hasTab = false;
+  let usesSelect = false;
+  let usesClose = false;
   const warnings: string[] = [];
   // Per history step: lines to run before its actions (the waitForResponse arms of the next
   // step's expect-requests, which must exist before the request is made) and its own lines.
@@ -250,11 +274,29 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
       }
       if (firstUi === null && UI_COMMANDS.has(cmd) && result === "ok") firstUi = index + 1;
       if (TAB_COMMANDS.has(cmd)) {
-        if (result === "ok") {
-          // Command name only: args could break out of the comment.
-          lines[index].push(`  // TODO(duckwright): ${cmd} needs a hand edit; this test assumes a single page`);
-          if (!tabs.includes(cmd)) tabs.push(cmd);
+        if (result !== "ok") continue;
+        const args = Array.isArray(a.args) ? a.args : [];
+        if (cmd === "tab-new") {
+          lines[index].push("  page = await page.context().newPage();");
+          if (typeof args[0] === "string" && args[0] !== "") lines[index].push(`  await page.goto(${JSON.stringify(args[0])});`);
+        } else {
+          const raw: unknown = args[0];
+          const given = raw !== undefined || cmd === "tab-select";
+          const n = typeof raw === "number" ? raw : typeof raw === "string" && /^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+          if (given && !(Number.isInteger(n) && n >= 0)) {
+            throw new ExportError(
+              `${cmd} in step ${index + 1} has no valid tab index (expected a whole number, got ${JSON.stringify(raw ?? null)})`, 1);
+          }
+          if (cmd === "tab-select") {
+            lines[index].push(`  page = await selectTab(page, ${n});`);
+            usesSelect = true;
+          } else {
+            lines[index].push(given ? `  page = await closeTab(page, ${n});` : "  page = await closeTab(page);");
+            usesClose = true;
+          }
         }
+        hasTab = true;
+        hasCode = true;
         continue;
       }
       if (typeof code !== "string" || !code.trim() || cmd === "screenshot") continue;
@@ -282,14 +324,15 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   }
   const body = data.history.flatMap((_, index) => [...arms[index], ...lines[index]]);
   if (!hasCode) throw new ExportError("nothing to export: the run recorded no Playwright code", 1);
-  warnings.unshift(...tabs.map((t) => `run used ${t}; edit the test by hand, it assumes a single page`));
   if (setups > 0 && data.state === undefined) warnings.push(COOKIES_NOTE);
   if (!asserted) warnings.push(NO_ASSERTIONS);
   warnings.push(...manual);
-  const head = HEADER + (manual.length > 0 ? MANUAL_NOTE : "") + (usesTotp ? `${TOTP_IMPORT}\n${TOTP_HELPER}` : "");
+  const head = HEADER + (manual.length > 0 ? MANUAL_NOTE : "") + (usesTotp ? `${TOTP_IMPORT}\n${TOTP_HELPER}` : "")
+    + [usesSelect ? SELECT_TAB_HELPER : "", usesClose ? CLOSE_TAB_HELPER : ""].filter(Boolean).map((h) => `\n${h}`).join("");
   const spec = head + "\n"
     + (data.state !== undefined ? stateBlock(data.state) + "\n" : "")
-    + `test(${JSON.stringify(data.task)}, async ({ page }) => {\n`
+    + `test(${JSON.stringify(data.task)}, async (${hasTab ? "{ page: firstPage }" : "{ page }"}) => {\n`
+    + (hasTab ? "  let page = firstPage;\n" : "")
     + body.map((line) => line + "\n").join("")
     + "});\n";
   return { spec, warnings };
