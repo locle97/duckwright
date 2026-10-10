@@ -16,6 +16,7 @@ import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightError } from "../src/pw.ts";
 import { JevAuthError } from "../src/jev.ts";
 import { TwoFactorError } from "../src/twofa.ts";
+import { TaskFileError } from "../src/taskfile.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
 
@@ -1646,4 +1647,202 @@ test("debug_tui_prints_nothing_to_console", async () => {
   assert.equal(code, 0);
   assert.ok(!e.err.some((l) => l.includes("[debug ")));
   assert.ok(!e.out.some((l) => l.includes("[debug ")));
+});
+
+// ---- explore ----
+
+const FLOWS = JSON.stringify({ flows: [
+  { title: "Search", start_url: "https://x.test/", steps: ["Type mug"], expected: "Results", status: "ok", notes: "" },
+  { title: "About", start_url: "https://x.test/about", steps: ["Click About"], expected: "A page", status: "broken", notes: "404" },
+] });
+
+function exploreEntry(over: Partial<StepRecord> = {}): StepRecord {
+  return {
+    ...rec([{ cmd: "goto", args: ["https://x.test/"] }], ["ok"], [GOTO]),
+    network: [{ id: "1", method: "GET", url: "https://x.test/missing", status: 404, statusText: "Not Found", type: null, durationMs: 1 }],
+    consoleErrors: ["TypeError: boom"],
+    ...over,
+  };
+}
+
+function exploreAgent(answer = FLOWS, success = true, seen: AgentOptions[] = []) {
+  return agentWith(async (opts) => {
+    seen.push(opts);
+    const r = exploreEntry();
+    opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
+    return { success, answer, steps: 1, costUsd: 0, history: [r] };
+  });
+}
+
+function exploreEnv() {
+  const e = env();
+  const base = e.deps;
+  e.deps = (over = {}) => base({ loadConfig: () => ({}), ...over });
+  return { ...e, argv: ["explore", "https://x.test/", "--skill", e.argv[2]] };
+}
+
+test("explore_success_prints_report_and_writes_files", async () => {
+  const e = exploreEnv();
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0);
+  const [dir] = runDirs(e.tmp);
+  const md = fs.readFileSync(path.join(dir, "explore.md"), "utf8");
+  const json = fs.readFileSync(path.join(dir, "explore.json"), "utf8");
+  assert.ok(e.out.includes("Result: success"));
+  assert.ok(!e.out.some((l) => l.startsWith("Test:")));
+  const at = e.out.indexOf("");
+  assert.ok(at > 0);
+  assert.equal(e.out.slice(at + 1, at + 1 + md.trimEnd().split("\n").length).join("\n"), md.trimEnd());
+  assert.equal(e.out[e.out.length - 2], `Report: ${path.relative(e.tmp, path.join(dir, "explore.md"))}`);
+  assert.equal(e.out[e.out.length - 1], `Data: ${path.relative(e.tmp, path.join(dir, "explore.json"))}`);
+  const data = JSON.parse(json);
+  assert.equal(data.failed_requests[0].status, 404);
+  assert.equal(data.console_errors[0].message, "TypeError: boom");
+  assert.equal(data.working_flows.length, 1);
+  assert.equal(data.broken_flows.length, 1);
+  assert.equal(fs.existsSync(path.join(dir, "duckwright.spec.ts")), false);
+  assert.equal(seen[0].maxSteps, 40);
+  assert.equal(seen[0].consoleErrors, true);
+});
+
+test("explore_max_steps_config_ignored_flag_wins", async () => {
+  const e = exploreEnv();
+  const seen: AgentOptions[] = [];
+  const deps = { createAgent: exploreAgent(FLOWS, true, seen), loadConfig: () => ({ maxSteps: 7 }) };
+  assert.equal(await main(e.argv, e.deps(deps)), 0);
+  assert.equal(seen[0].maxSteps, 40);
+  assert.equal(await main([...e.argv, "--max-steps", "10"], e.deps(deps)), 0);
+  assert.equal(seen[1].maxSteps, 10);
+});
+
+test("explore_unreadable_answer_still_reports_harness_findings", async () => {
+  const e = exploreEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent("not json") })), 0);
+  const text = e.out.join("\n");
+  assert.match(text, /could not be read as a flow list/);
+  assert.match(text, /missing/);
+});
+
+test("explore_failed_and_thrown_runs_still_report", async () => {
+  let e = exploreEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent(FLOWS, false) })), 1);
+  assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore.md")));
+  e = exploreEnv();
+  const thrown = agentWith(async (opts) => {
+    opts.events!.emit({ type: "step:end", record: exploreEntry(), cost: 0, durationMs: 0 });
+    throw new PlaywrightError("snapshot died");
+  });
+  assert.equal(await main(e.argv, e.deps({ createAgent: thrown })), 1);
+  assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore.md")));
+  e = exploreEnv();
+  const aborted = agentWith(async () => { throw new AbortedError(); });
+  assert.equal(await main(e.argv, e.deps({ createAgent: aborted })), 130);
+  assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore.md")));
+});
+
+test("explore_run_folder_not_created", async () => {
+  const e = exploreEnv();
+  fs.writeFileSync(path.join(e.tmp, "runs"), "file");
+  assert.equal(await main(e.argv, e.deps()), 1);
+  assert.equal(e.err.length > 0, true);
+  assert.ok(!e.out.some((l) => l.startsWith("Report:")));
+});
+
+test("explore_unreadable_history", async () => {
+  const e = exploreEnv();
+  const createAgent = agentWith(async (opts) => {
+    // history.json is written after the agent returns; remove it once the run has ended.
+    opts.events!.subscribe((ev) => {
+      if (ev.type === "run:end") fs.rmSync(path.join(runDirs(e.tmp)[0], "history.json"), { force: true });
+    });
+    return result(true);
+  });
+  assert.equal(await main(e.argv, e.deps({ createAgent })), 1);
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot read history: ")));
+  assert.ok(!e.out.some((l) => l.startsWith("Report:")));
+});
+
+test("explore_report_write_failure", async () => {
+  const e = exploreEnv();
+  const createAgent = agentWith(async () => {
+    fs.mkdirSync(path.join(runDirs(e.tmp)[0], "explore.md"));
+    return result(true);
+  });
+  assert.equal(await main(e.argv, e.deps({ createAgent })), 1);
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot write report: ")));
+  assert.ok(e.out.some((l) => l.startsWith("# Exploration report")));
+  assert.ok(!e.out.some((l) => l.startsWith("Report:")));
+  const f = exploreEnv();
+  const failing = agentWith(async () => {
+    fs.mkdirSync(path.join(runDirs(f.tmp)[0], "explore.md"));
+    return result(false);
+  });
+  assert.equal(await main(f.argv, f.deps({ createAgent: failing })), 1);
+});
+
+test("explore_write_tasks", async () => {
+  const e = exploreEnv();
+  assert.equal(await main([...e.argv, "--write-tasks"], e.deps({ createAgent: exploreAgent() })), 0);
+  const folder = path.join("tasks", "explore-x-test");
+  assert.ok(fs.existsSync(path.join(e.tmp, folder)));
+  const files = fs.readdirSync(path.join(e.tmp, folder));
+  assert.equal(files.length, 1);
+  assert.ok(e.out.includes(`Tasks: 1 task file(s) in ${folder}/`));
+  assert.ok(e.out.includes(`  ${path.join(folder, files[0])}`));
+  assert.equal(e.out[e.out.length - 1], `Run them with: duckwright -p -f ${folder}/`);
+});
+
+test("explore_write_tasks_none_and_failure", async () => {
+  let e = exploreEnv();
+  assert.equal(await main([...e.argv, "--write-tasks"], e.deps({ createAgent: exploreAgent("not json") })), 0);
+  assert.ok(e.out.includes("Tasks: no working flows, no task files written"));
+  assert.equal(fs.existsSync(path.join(e.tmp, "tasks")), false);
+  e = exploreEnv();
+  fs.writeFileSync(path.join(e.tmp, "tasks"), "file");
+  assert.equal(await main([...e.argv, "--write-tasks"], e.deps({ createAgent: exploreAgent() })), 1);
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot write task files: ")));
+});
+
+test("explore_usage_errors_and_preflight", async () => {
+  const e = exploreEnv();
+  assert.equal(await main(["explore"], e.deps()), 2);
+  assert.equal(e.err[0], "usage: duckwright explore [-h] [--write-tasks] [run options] url");
+  assert.equal(e.err[1], "duckwright explore: error: give a URL to explore");
+  const bad = exploreEnv();
+  assert.equal(await main(["explore", "ftp://x"], bad.deps()), 2);
+  assert.match(bad.err[1], /^duckwright explore: error: not an http\(s\) URL/);
+  const deferred = exploreEnv();
+  assert.equal(await main(["explore", "--max-steps", "x", "--help"], deferred.deps()), 2);
+  assert.match(deferred.err[1], /^duckwright explore: error: argument --max-steps/);
+  const cfg = exploreEnv();
+  assert.equal(await main(e.argv, cfg.deps({ loadConfig: () => { throw new TaskFileError("duckwright.conf:1: bad"); } })), 2);
+  assert.deepEqual(cfg.err, ["duckwright.conf:1: bad"]);
+  const sec = exploreEnv();
+  assert.equal(await main(sec.argv, sec.deps({ env: { DUCKWRIGHT_TOTP_SECRET: "!!!" } })), 2);
+  assert.equal(sec.err.length, 1);
+  const pre = exploreEnv();
+  assert.equal(await main(pre.argv, pre.deps({ which: () => null })), 2);
+  assert.equal(pre.err.length, 1);
+  assert.equal(runDirs(pre.tmp).length, 0);
+});
+
+test("explore_help_and_version", async () => {
+  const e = exploreEnv();
+  assert.equal(await main(["explore", "--help"], e.deps()), 0);
+  assert.ok(e.out[0].startsWith("usage: duckwright explore"));
+  const v = exploreEnv();
+  assert.equal(await main(["explore", "--version"], v.deps()), 0);
+  assert.deepEqual(v.out, [`duckwright ${version()}`]);
+});
+
+test("explore_after_double_dash_is_a_task_and_never_uses_tui", async () => {
+  const e = exploreEnv();
+  const [seen, createAgent] = recordRun();
+  assert.equal(await main(["--skill", e.argv[3], "--", "explore"], e.deps({ createAgent })), 0);
+  assert.equal(seen.task, "explore");
+  const t = exploreEnv();
+  let loaded = false;
+  const loadTui = async (): Promise<TuiModule> => { loaded = true; throw new Error("no"); };
+  assert.equal(await main(t.argv, t.deps({ isTTY: () => true, loadTui, createAgent: exploreAgent() })), 0);
+  assert.equal(loaded, false);
 });
