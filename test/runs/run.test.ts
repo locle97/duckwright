@@ -665,10 +665,10 @@ test("run_export_test_false_skips_export_and_spec", async () => {
   assert.equal((await hn.done).export.kind, "written");
 });
 
-test("run_export_test_false_failure_stays_skipped", async () => {
+test("run_export_test_false_failure_is_off", async () => {
   const { spec, deps } = setup(agentWith(async () => result(false, [rec()])));
   const o = await startRun({ ...spec, exportTest: false }, deps).done;
-  assert.equal(o.export.kind, "skipped");
+  assert.equal(o.export.kind, "off");
 });
 
 test("start_run_passes_console_errors", async () => {

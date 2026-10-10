@@ -1727,6 +1727,8 @@ test("explore_failed_and_thrown_runs_still_report", async () => {
   let e = exploreEnv();
   assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent(FLOWS, false) })), 1);
   assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore.md")));
+  assert.ok(e.out.some((l) => l.startsWith("Result: failure")));
+  assert.ok(!e.out.some((l) => l.startsWith("Test:")));
   e = exploreEnv();
   const thrown = agentWith(async (opts) => {
     opts.events!.emit({ type: "step:end", record: exploreEntry(), cost: 0, durationMs: 0 });
@@ -1734,10 +1736,12 @@ test("explore_failed_and_thrown_runs_still_report", async () => {
   });
   assert.equal(await main(e.argv, e.deps({ createAgent: thrown })), 1);
   assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore.md")));
+  assert.ok(e.out.some((l) => l.startsWith("Report:")));
   e = exploreEnv();
   const aborted = agentWith(async () => { throw new AbortedError(); });
   assert.equal(await main(e.argv, e.deps({ createAgent: aborted })), 130);
   assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore.md")));
+  assert.ok(e.out.some((l) => l.startsWith("Report:")));
 });
 
 test("explore_run_folder_not_created", async () => {
@@ -1746,6 +1750,7 @@ test("explore_run_folder_not_created", async () => {
   assert.equal(await main(e.argv, e.deps()), 1);
   assert.equal(e.err.length > 0, true);
   assert.ok(!e.out.some((l) => l.startsWith("Report:")));
+  assert.ok(!e.out.some((l) => l.startsWith("# Exploration report")));
 });
 
 test("explore_unreadable_history", async () => {

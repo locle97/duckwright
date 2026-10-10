@@ -268,10 +268,10 @@ async function execute(
     const warnings: string[] = [];
     let exported: ExportOutcome = { kind: "off" };
     let error: string | null = null;
-    if (!result.success) {
-      exported = { kind: "skipped" };
-    } else if (spec.exportTest === false) {
+    if (spec.exportTest === false) {
       exported = { kind: "off" };
+    } else if (!result.success) {
+      exported = { kind: "skipped" };
     } else {
       try {
         const r = exportRun(workdir);
