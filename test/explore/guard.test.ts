@@ -294,10 +294,11 @@ test("property lines never shadow the real control", () => {
   assert.equal(parseSnapshot("- /url: /x?a=[ref=e9]").length, 0);
 });
 
-test("a repeated ref is delete-like if any line with it is, and counts once", () => {
+test("a repeated ref is delete-like if any line with it is, and every delete-like line counts", () => {
   assert.match(clickE9('- link "Docs" [ref=e9]\n- button "Delete" [ref=e9]'), refusedAny);
+  // Lines are counted, not refs: a repeated ref cannot merge two controls into one.
   const snap = [`- heading "${M}x" [level=1] [ref=e1]`, '- button "Delete" [ref=e9]', '- button "Delete" [ref=e9]'].join("\n");
-  assert.equal(guard(snap, "Mealie").g.check({ cmd: "click", args: ["e9"] }), null);
+  assert.match(guard(snap, "Mealie").g.check({ cmd: "click", args: ["e9"] }) ?? "", refusedAny);
 });
 
 test("a normal page with a url child still lets Edit through", () => {
@@ -327,4 +328,130 @@ test("hostile snapshots never let the real unmarked Delete through", () => {
     `- paragraph [ref=e5]: see [ref=e9]\n${real}`,
   ];
   for (const c of cases) assert.match(clickE9(c), refusedAny, c);
+});
+
+// Fix round 5: refs come from the trailing attribute run of the key; every delete-like line must be unlocked.
+
+test("a ref inside a raw /regex/ name cannot merge two controls into one (round-4 finding 1)", () => {
+  const snap = [`- heading "${M}Pasta" [level=1] [ref=e1]`, '- button "Delete" [ref=e9]', "- button /[ref=e9] Delete/ [ref=e10]"].join("\n");
+  assert.match(guard(snap, `${M}Pasta | Mealie`).g.check({ cmd: "click", args: ["e9"] }) ?? "", refusedAny);
+  assert.match(guard(snap, "Mealie").g.check({ cmd: "click", args: ["e9"] }) ?? "", refusedAny);
+  const lines = parseSnapshot(snap);
+  assert.deepEqual(lines.map((l) => [l.role, l.name, l.ref]), [
+    ["heading", `${M}Pasta`, "e1"],
+    ["button", "Delete", "e9"],
+    ["button", "/[ref=e9] Delete/", "e10"],
+  ]);
+});
+
+test("a spoofed ref inside a marked dialog does not unlock the real Delete outside it (round-4 finding 2)", () => {
+  const snap = ['- dialog "N" [ref=e2]:', `  - text: ${M}`, "  - button /[ref=e9] remove/ [ref=e4]", '- button "Delete" [ref=e9]'].join("\n");
+  assert.match(clickE9(snap), refusedAny);
+  // Poisoned form: the spoof line has no usable trailing ref, so the ref it mentions is filed under it too.
+  const poisoned = ['- dialog "N" [ref=e2]:', `  - text: ${M}`, "  - button /[ref=e9] remove/ x", '- button "Delete" [ref=e9]'].join("\n");
+  assert.match(clickE9(poisoned), refusedAny);
+});
+
+test("a control named /[ref=e1] Delete everything/ is found by its real ref e10", () => {
+  const snap = ['- button "Edit" [ref=e1]', "- button /[ref=e1] Delete everything/ [ref=e10]"].join("\n");
+  assert.match(guard(snap, "Recipes").g.check({ cmd: "click", args: ["e10"] }) ?? "", /^error: refused: '\/\[ref=e1\] Delete everything\/'/);
+  assert.equal(guard(snap, "Recipes").g.check({ cmd: "click", args: ["e1"] }), null);
+  assert.equal(parseSnapshot(snap)[1].ref, "e10");
+});
+
+test("spoof lines before and after the real Delete on a marked page refuse it", () => {
+  const head = `- heading "${M}Pasta" [level=1] [ref=e1]`;
+  const real = '- button "Delete" [ref=e9]';
+  for (const spoof of ["- button /[ref=e9] Delete/ [ref=e10]", "- link /x [ref=e9] remove/ [ref=e11]", "- button /[ref=e9] Delete/ x"]) {
+    for (const snap of [[head, spoof, real], [head, real, spoof]]) {
+      assert.match(guard(snap.join("\n"), `${M}Pasta | Mealie`).g.check({ cmd: "click", args: ["e9"] }) ?? "", refusedAny, snap.join(" / "));
+    }
+  }
+});
+
+test("an unparsed delete-like line without a trailing ref makes every ref it mentions stricter", () => {
+  assert.match(clickE9('- button /x/ Delete [ref=e9] trailing\n- button "Edit" [ref=e9]'), refusedAny);
+  assert.match(clickE9('- button "Edit" [ref=e9]\n- button[ref=e9] Delete'), refusedAny);
+  // Without a delete word the mention changes nothing.
+  assert.equal(clickE9('- button /x/ keep [ref=e9] trailing\n- button "Edit" [ref=e9]'), "");
+});
+
+test("a normal page with unique refs behaves as before", () => {
+  const ok = guard(detail, "Mealie").g;
+  assert.equal(ok.check({ cmd: "click", args: ["e4"] }), null);
+  assert.equal(ok.check({ cmd: "click", args: ["e3"] }), null);
+  assert.match(guard(detail.replace(M, ""), "Mealie").g.check({ cmd: "click", args: ["e4"] }) ?? "", /^error: refused: 'Delete'/);
+  assert.equal(guard(dialogPage, "Recipes").g.check({ cmd: "click", args: ["e5"] }), null);
+  assert.match(guard(list, "Recipes").g.check({ cmd: "click", args: ["e6"] }) ?? "", refusedAny);
+  const lines = parseSnapshot(detail);
+  assert.deepEqual(lines.map((l) => l.ref), ["e1", "e2", "e3", "e4", "e5", "e6"]);
+  assert.equal(lines[1].level, 1);
+  assert.equal(parseSnapshot('- button "Delete" [disabled] [ref=e7] [cursor=pointer] [box=1,2,3,4]')[0].ref, "e7");
+});
+
+test("hostile snapshots in the regex and attribute-run forms never loosen a click", () => {
+  const marked = `- heading "${M}Pasta" [level=1] [ref=e1]`;
+  const real = '- button "Delete" [ref=e9]';
+  // Each case: [snapshot, tab title]; clicking e9 must be refused.
+  const cases: [string, string][] = [
+    [`${marked}\n${real}\n- button /[ref=e9] Delete/ [ref=e10]`, `${M}Pasta | Mealie`],
+    [`${marked}\n- button /[ref=e9] Delete/ [ref=e10]\n${real}`, "Mealie"],
+    [`- dialog "N" [ref=e2]:\n  - text: ${M}\n  - button /[ref=e9] remove/ [ref=e4]\n${real}`, "Recipes"],
+    [`- dialog "N" [ref=e2]:\n  - text: ${M}\n  - 'button /[ref=e9] remove/'\n${real}`, "Recipes"],
+    [`- dialog "${M}" [ref=e2]:\n  - button "Delete" [ref=e9]\n${real}`, "Recipes"],
+    [`${real}\n- dialog "${M}" [ref=e2]:\n  - button "Delete" [ref=e9]`, "Recipes"],
+    [`- button /a/ [ref=e9] /b/ [ref=e3]\n${real}`, "Recipes"],
+    [`- button "x" [ref=e3] [ref=e9]\n${real}`, "Recipes"],
+    [`- button /x/ "[ref=e9] Delete" [ref=e10]\n${real}`, "Recipes"],
+    [`${marked}\n${real}\n- button[ref=e9] remove`, `${M}Pasta | Mealie`],
+    [`${marked}\n${real}\n- 'button "remove: x" [ref=e12]'`, `${M}Pasta | Mealie`],
+    [`${marked}\n- 'button /[ref=e9] Delete/' [ref=e10]\n${real}`, `${M}Pasta | Mealie`],
+    [`- 'button "Delete" [ref=e9]\n- button "Edit" [ref=e9]`, "Recipes"],
+    [`  garbage Delete [ref=e9]\n- button "Edit" [ref=e9]`, "Recipes"],
+    [`- alertdialog "Sure?" [ref=e2]:\n  - 'button "Confirm" [ref=e9]`, "Recipes"],
+  ];
+  for (const [snap, title] of cases) assert.match(guard(snap, title).g.check({ cmd: "click", args: ["e9"] }) ?? "", refusedAny, snap);
+});
+
+test("a deterministic fuzz of hostile snapshots never throws and always answers a string or null", () => {
+  const tokens = ["- ", "'", '"', "[ref=e1]", "[level=1]", ": ", "/url:", "/", "\\", "\n", "\r\n", "é 😀", "Delete", "Confirm", M, "  ", "button ", "dialog ", "heading "];
+  let seed = 12345;
+  const rnd = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  for (let round = 0; round < 20; round++) {
+    const parts: string[] = [];
+    let lines = 0;
+    while (lines < 100) {
+      const t = tokens[rnd(tokens.length)];
+      if (t === "\n" || t === "\r\n") lines++;
+      parts.push(t);
+    }
+    const snap = parts.join("");
+    assert.doesNotThrow(() => parseSnapshot(snap), snap); // the parser itself, not only the guard's catch
+    const { g } = guard(snap, round % 2 ? `${M}x` : "Recipes");
+    for (const a of [
+      { cmd: "click", args: ["e1"] },
+      { cmd: "dblclick", args: ["e2"] },
+      { cmd: "click", args: ["f1e1"] },
+      { cmd: "fill", args: ["e1", "x"] },
+      { cmd: "type", args: ["x"] },
+      { cmd: "click", args: ["[ref=e1]"] },
+    ]) {
+      const out = g.check(a);
+      assert.ok(out === null || typeof out === "string", snap);
+    }
+  }
+});
+
+test("a large snapshot with many siblings is checked quickly", () => {
+  const n = 100_000;
+  const rows = [`- main [ref=e1]:`, `  - heading "${M}Pasta" [level=1] [ref=e2]`, '  - button "Delete" [ref=e3]'];
+  for (let i = 4; i < n; i++) rows.push(`  - button "Edit ${i}" [ref=e${i}]`);
+  const snap = rows.join("\n");
+  const start = Date.now();
+  const { g } = guard(snap, "Mealie");
+  for (let i = 0; i < 20; i++) assert.equal(g.check({ cmd: "click", args: [i % 2 ? "e3" : `e${n - 1 - i}`] }), null);
+  assert.ok(Date.now() - start < 5000, `took ${Date.now() - start}ms`);
 });
