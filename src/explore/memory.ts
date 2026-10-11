@@ -11,8 +11,10 @@ import type { RunEvidence } from "./merge.ts";
 import { readNotes, readRejected } from "./notes.ts";
 import type { NoteLine } from "./notes.ts";
 import type { ExploreReport, FlowStatus } from "./report.ts";
+import { readLedger } from "./writes.ts";
+import type { CreatedEntry, LedgerItem } from "./writes.ts";
 import { MEMORY_KINDS, SITEMAP_VERSION, normalizeUrl, slugForHost } from "./site.ts";
-import type { PageStatus, SiteFlow, SitePage, Sitemap } from "./site.ts";
+import type { PageStatus, SiteFlow, SiteFunction, SitePage, Sitemap, StoredFunctionStatus } from "./site.ts";
 
 const PAGE_STATUSES: readonly PageStatus[] = ["ok", "broken", "stale", "gated", "external"];
 const FLOW_STATUSES: readonly FlowStatus[] = ["ok", "dead-end", "broken"];
@@ -42,8 +44,10 @@ function asSitemap(v: unknown): Sitemap | null {
   const urls = (xs: unknown): string[] => (Array.isArray(xs) ? xs.filter((x): x is string => typeof x === "string" && normalizeUrl(x) !== null) : []);
   const pages = v.pages.flatMap((p) => asPage(p) ?? []);
   const flows = v.flows.flatMap((f) => asFlow(f) ?? []);
+  const functions = Array.isArray(v.functions) ? v.functions.flatMap((f) => asFunction(f) ?? []) : [];
+  const created = Array.isArray(v.created) ? v.created.flatMap((c) => asCreated(c) ?? []) : [];
   return {
-    ...(v as unknown as Sitemap), pages, flows, notes, frontier: urls(v.frontier), external_links: urls(v.external_links),
+    ...(v as unknown as Sitemap), pages, flows, functions, created, notes, frontier: urls(v.frontier), external_links: urls(v.external_links),
   };
 }
 
@@ -76,6 +80,25 @@ function asFlow(f: unknown): SiteFlow | null {
     status: FLOW_STATUSES.includes(f.status as FlowStatus) ? (f.status as FlowStatus) : "ok",
     notes: str(f.notes), last_run: num(f.last_run, 0),
   };
+}
+
+const FUNCTION_STATUSES: readonly StoredFunctionStatus[] = ["untested", "ok", "broken", "blocked"];
+
+function asFunction(f: unknown): SiteFunction | null {
+  if (!isObject(f) || typeof f.name !== "string" || f.name.trim() === "") return null;
+  const area = typeof f.area === "string" ? normalizeUrl(f.area) : null;
+  return {
+    name: f.name, area,
+    status: FUNCTION_STATUSES.includes(f.status as StoredFunctionStatus) ? (f.status as StoredFunctionStatus) : "untested",
+    steps: Array.isArray(f.steps) ? f.steps.filter((s): s is string => typeof s === "string") : [],
+    expected: str(f.expected), notes: str(f.notes),
+    first_seen_run: num(f.first_seen_run, 0), last_run: num(f.last_run, 0),
+  };
+}
+
+function asCreated(c: unknown): CreatedEntry | null {
+  if (!isObject(c) || typeof c.name !== "string" || c.name.trim() === "") return null;
+  return { name: c.name, url: typeof c.url === "string" ? normalizeUrl(c.url) : null, removed: c.removed === true, run: num(c.run, 0) };
 }
 
 type SitemapRead = { sitemap: Sitemap | null; unreadable: string | null };
@@ -126,7 +149,7 @@ export function loadMemory(host: string, root: string = ENV_DIR) {
 /** What the run saw, or null when it never recorded a page (it never opened the site). */
 export function buildEvidence(
   data: HistoryData, report: ExploreReport, notes: NoteLine[],
-  o: { host: string; runName: string; startUrl: string },
+  o: { host: string; runName: string; startUrl: string; ledger?: LedgerItem[] },
 ): RunEvidence | null {
   const pages = data.history.flatMap((s) => (s.page ? [s.page] : []));
   if (pages.length === 0) return null;
@@ -143,6 +166,7 @@ export function buildEvidence(
     pages, notes, flows: [...report.working_flows, ...report.broken_flows],
     failedPages: [...failed].filter((u) => visited.has(u)),
     completed: data.success,
+    functions: report.functions ?? [], created: o.ledger ?? [],
   };
 }
 
@@ -181,7 +205,7 @@ export async function saveMemory(o: {
 }): Promise<{ md: string | null; sitemap: string | null; warnings: string[] }> {
   const p = memoryPaths(o.host, o.root);
   const ev = buildEvidence(o.data, o.report, readNotes(o.runDir), {
-    host: o.host, runName: path.basename(o.runDir), startUrl: o.startUrl,
+    host: o.host, runName: path.basename(o.runDir), startUrl: o.startUrl, ledger: readLedger(o.runDir),
   });
   if (ev === null) return { md: null, sitemap: null, warnings: [] };
   const warnings: string[] = [];

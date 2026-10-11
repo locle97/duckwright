@@ -45,3 +45,9 @@ test("emptySitemap has version 1 and empty collections", () => {
   assert.deepEqual(s.pages, []);
   assert.deepEqual(s.notes, { business: [], quirk: [], "off-limits": [], account: [] });
 });
+
+test("emptySitemap starts with no functions and an empty created ledger", () => {
+  const s = emptySitemap("s.test");
+  assert.deepEqual(s.functions, []);
+  assert.deepEqual(s.created, []);
+});

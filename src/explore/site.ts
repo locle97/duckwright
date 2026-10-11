@@ -1,7 +1,8 @@
 import type { FlowStatus } from "./report.ts";
+import type { CreatedEntry } from "./writes.ts";
 
 export const SITEMAP_VERSION = 1;
-export const CAPS = { pages: 500, flows: 100, frontier: 100, notesPerKind: 20, linksPerPage: 100 } as const;
+export const CAPS = { pages: 500, flows: 100, frontier: 100, notesPerKind: 20, linksPerPage: 100, functions: 200, created: 200 } as const;
 
 export type PageStatus = "ok" | "broken" | "stale" | "gated" | "external";
 export type NoteKind = "business" | "page" | "quirk" | "off-limits" | "account" | "flow" | "created" | "removed" | "function";
@@ -31,6 +32,19 @@ export interface SiteFlow {
   last_run: number;
 }
 
+export type StoredFunctionStatus = "untested" | "ok" | "broken" | "blocked";
+
+export interface SiteFunction {
+  name: string;
+  area: string | null;
+  status: StoredFunctionStatus;
+  steps: string[];
+  expected: string;
+  notes: string;
+  first_seen_run: number;
+  last_run: number;
+}
+
 export interface Sitemap {
   version: 1;
   host: string;
@@ -38,6 +52,8 @@ export interface Sitemap {
   runs: number;
   pages: SitePage[];
   flows: SiteFlow[];
+  functions: SiteFunction[];
+  created: CreatedEntry[];
   frontier: string[];
   external_links: string[];
   notes: Record<MemoryKind, string[]>;
@@ -45,7 +61,7 @@ export interface Sitemap {
 
 export function emptySitemap(host: string): Sitemap {
   return {
-    version: SITEMAP_VERSION, host, updated_run: "", runs: 0, pages: [], flows: [], frontier: [],
+    version: SITEMAP_VERSION, host, updated_run: "", runs: 0, pages: [], flows: [], functions: [], created: [], frontier: [],
     external_links: [], notes: { business: [], quirk: [], "off-limits": [], account: [] },
   };
 }

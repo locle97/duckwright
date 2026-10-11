@@ -240,3 +240,43 @@ test("malformed page and flow entries are dropped without making the file corrup
   assert.ok(r.md, "save must succeed");
   assert.equal(r.warnings.length, 0);
 });
+
+test("an older sitemap without functions or created loads and gains empty lists", async () => {
+  const root = tmpDir();
+  await run(data(), root);
+  const p = memoryPaths(HOST, root);
+  const old = JSON.parse(fs.readFileSync(p.sitemap, "utf8"));
+  delete old.functions;
+  delete old.created;
+  fs.writeFileSync(p.sitemap, JSON.stringify(old));
+  const mem = loadMemory(HOST, root);
+  assert.deepEqual(mem.sitemap?.functions, []);
+  assert.deepEqual(mem.sitemap?.created, []);
+  assert.deepEqual(mem.warnings, []);
+});
+
+test("malformed function and created entries are dropped, valid ones kept", async () => {
+  const root = tmpDir();
+  await run(data(), root);
+  const p = memoryPaths(HOST, root);
+  const sm = JSON.parse(fs.readFileSync(p.sitemap, "utf8"));
+  sm.functions = [{ name: "Create recipe", status: "ok" }, { name: "", status: "ok" }, 5, { name: "X", status: "weird" }];
+  sm.created = [{ name: "DW-1-A", url: "https://shop.example/r/1?x=1", removed: false, run: 1 }, { name: 5 }, null];
+  fs.writeFileSync(p.sitemap, JSON.stringify(sm));
+  const mem = loadMemory(HOST, root);
+  assert.deepEqual(mem.sitemap?.functions.map((f) => [f.name, f.status]), [["Create recipe", "ok"], ["X", "untested"]]);
+  assert.deepEqual(mem.sitemap?.created, [{ name: "DW-1-A", url: "https://shop.example/r/1", removed: false, run: 1 }]);
+});
+
+test("saveMemory merges the run's ledger, declared functions and reported functions", async () => {
+  const root = tmpDir();
+  const d = data({ answer: JSON.stringify({ flows: [], functions: [{ name: "Create recipe", area_url: "https://shop.example/r/create", status: "ok", steps: ["a"], expected: "e", notes: "" }] }) });
+  const runDir = fs.mkdtempSync(path.join(root, "run-"));
+  fs.writeFileSync(path.join(runDir, "notes.jsonl"), JSON.stringify({ step: 1, kind: "function", text: "Delete recipe", url: null }) + "\n");
+  fs.writeFileSync(path.join(runDir, "created.jsonl"), JSON.stringify({ step: 2, created: "DW-1-Pasta", url: "https://shop.example/r/1" }) + "\n");
+  const report = buildExploreReport(d, { url: "https://shop.example/", runDir, network: true });
+  await saveMemory({ host: HOST, runDir, data: d, report, startUrl: "https://shop.example/", root });
+  const sm = loadMemory(HOST, root).sitemap!;
+  assert.deepEqual(sm.functions.map((f) => [f.name, f.status]).sort(), [["Create recipe", "ok"], ["Delete recipe", "untested"]]);
+  assert.deepEqual(sm.created.map((c) => c.name), ["DW-1-Pasta"]);
+});

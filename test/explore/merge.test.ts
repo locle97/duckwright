@@ -225,3 +225,65 @@ test("created, removed and function notes never reach the memory notes", () => {
   assert.deepEqual(sitemap.notes, { business: [], quirk: [], "off-limits": [], account: [] });
   assert.equal(summary.notes_dropped, 0);
 });
+
+const fn = (name: string, status: "ok" | "broken" | "blocked" = "ok", over: object = {}) => ({
+  name, area_url: u("/r/create"), status, steps: ["Open", "Save"], expected: "It opens", notes: "", ...over,
+});
+const decl = (text: string, url: string | null = null) => ({ step: 1, kind: "function" as const, text, url });
+
+test("a declared function is untested; a reported one carries its verdict and steps", () => {
+  const a = mergeSitemap(null, ev({ pages: [page("/")], notes: [decl("Create recipe", u("/r/create")), decl("Delete recipe")] }));
+  assert.deepEqual(a.sitemap.functions.map((f) => [f.name, f.status, f.area]).sort(), [["Create recipe", "untested", u("/r/create")], ["Delete recipe", "untested", null]]);
+  assert.equal(a.summary.functions_added, 2);
+  const b = mergeSitemap(a.sitemap, ev({ runName: "r2", pages: [page("/")], functions: [fn("create recipe", "ok", { steps: ["a", "b"] })] }));
+  const created = b.sitemap.functions.find((f) => f.name === "Create recipe")!;
+  assert.equal(created.status, "ok");
+  assert.deepEqual(created.steps, ["a", "b"]);
+  assert.equal(created.first_seen_run, 1);
+  assert.equal(created.last_run, 2);
+  assert.equal(b.summary.functions_updated, 1);
+  assert.equal(b.sitemap.functions.find((f) => f.name === "Delete recipe")!.status, "untested");
+});
+
+test("names match case-insensitively and an untested function is never produced by a report", () => {
+  const a = mergeSitemap(null, ev({ pages: [page("/")], functions: [fn("Create Recipe")] })).sitemap;
+  const b = mergeSitemap(a, ev({ pages: [page("/")], notes: [decl("  create   recipe ")] })).sitemap;
+  assert.equal(b.functions.length, 1);
+  assert.equal(b.functions[0].status, "ok"); // a re-declaration never downgrades a verdict
+});
+
+test("a run that reports nothing keeps stored function verdicts (absence proves nothing)", () => {
+  const a = mergeSitemap(null, ev({ pages: [page("/")], functions: [fn("Create recipe", "broken")] })).sitemap;
+  const b = mergeSitemap(a, ev({ pages: [page("/")], completed: false })).sitemap;
+  assert.equal(b.functions[0].status, "broken");
+});
+
+test("the function inventory is capped and area urls are normalized and kept on-host", () => {
+  const many = Array.from({ length: 250 }, (_, i) => fn(`Function ${i}`));
+  assert.equal(mergeSitemap(null, ev({ pages: [page("/")], functions: many })).sitemap.functions.length, CAPS.functions);
+  const q = mergeSitemap(null, ev({ pages: [page("/")], functions: [fn("A", "ok", { area_url: `${u("/r/create")}?token=SECRET#x` })] })).sitemap;
+  assert.equal(q.functions[0].area, u("/r/create"));
+  const off = mergeSitemap(null, ev({ pages: [page("/")], notes: [decl("B", "https://other.test/x")] })).sitemap;
+  assert.equal(off.functions[0].area, null);
+});
+
+test("the ledger appends, dedupes, marks removed and caps; old sitemaps without it merge fine", () => {
+  const items = [{ name: "DW-1-Pasta", url: u("/r/1?x=1"), removed: false }, { name: "DW-1-Soup", url: null, removed: true }];
+  const a = mergeSitemap(null, ev({ pages: [page("/")], created: items }));
+  assert.deepEqual(a.sitemap.created, [
+    { name: "DW-1-Pasta", url: u("/r/1"), removed: false, run: 1 },
+    { name: "DW-1-Soup", url: null, removed: true, run: 1 },
+  ]);
+  assert.equal(a.summary.created_logged, 2);
+  const again = mergeSitemap(a.sitemap, ev({ runName: "r2", pages: [page("/")], created: [{ name: "DW-1-Pasta", url: u("/r/1"), removed: true }] }));
+  assert.equal(again.sitemap.created.length, 2);
+  assert.equal(again.sitemap.created.find((c) => c.name === "DW-1-Pasta")!.removed, true);
+  const many = Array.from({ length: 250 }, (_, i) => ({ name: `DW-1-${i}`, url: null, removed: false }));
+  assert.equal(mergeSitemap(null, ev({ pages: [page("/")], created: many })).sitemap.created.length, CAPS.created);
+  const legacy = { ...emptySitemap(H) } as Record<string, unknown>;
+  delete legacy.functions;
+  delete legacy.created;
+  const m = mergeSitemap(legacy as never, ev({ pages: [page("/")], functions: [fn("X")], created: items }));
+  assert.equal(m.sitemap.functions.length, 1);
+  assert.equal(m.sitemap.created.length, 2);
+});

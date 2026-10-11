@@ -2,11 +2,12 @@
 import { flat } from "../text.ts";
 import type { PageInfo } from "./pages.ts";
 import type { NoteLine } from "./notes.ts";
-import type { Flow } from "./report.ts";
+import type { Flow, ReportedFunction } from "./report.ts";
 import {
   CAPS, MEMORY_KINDS, collapsePatterns, emptySitemap, isIdSegment, normalizeUrl,
 } from "./site.ts";
-import type { MemoryKind, SiteFlow, SitePage, Sitemap } from "./site.ts";
+import type { MemoryKind, SiteFlow, SiteFunction, SitePage, Sitemap } from "./site.ts";
+import type { LedgerItem } from "./writes.ts";
 
 export const STALE_AFTER_RUNS = 3;
 const BROKEN_PRUNE_AFTER_RUNS = 10;
@@ -20,6 +21,9 @@ export interface RunEvidence {
   flows: Flow[];
   failedPages: string[];
   completed: boolean;
+  /** Absent means none. */
+  functions?: ReportedFunction[];
+  created?: LedgerItem[];
 }
 
 export interface MergeSummary {
@@ -32,6 +36,9 @@ export interface MergeSummary {
   /** Notes the note action refused (credential-looking, bad kind or url); set by saveMemory. */
   notes_rejected: number;
   flows_updated: number;
+  functions_added: number;
+  functions_updated: number;
+  created_logged: number;
 }
 
 const hostOf = (url: string) => new URL(url).host;
@@ -40,9 +47,12 @@ const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
 
 export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: Sitemap; summary: MergeSummary } {
   const base: Sitemap = old ? structuredClone(old) : emptySitemap(ev.host);
+  base.functions = base.functions ?? [];
+  base.created = base.created ?? [];
   const run = base.runs + 1;
   const summary: MergeSummary = {
     added_pages: 0, updated_pages: 0, broken_pages: 0, stale_pages: 0, notes_added: 0, notes_dropped: 0, notes_rejected: 0, flows_updated: 0,
+    functions_added: 0, functions_updated: 0, created_logged: 0,
   };
   const pages = new Map<string, SitePage>(base.pages.map((p) => [p.url, p]));
   const visited = new Set<string>();
@@ -124,10 +134,15 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
 
   // 4. Notes.
   for (const kind of MEMORY_KINDS) base.notes[kind] = base.notes[kind] ?? [];
+  const declared: { name: string; area: string | null }[] = [];
   for (const n of ev.notes) {
-    // The ledger and the function inventory are merged separately (Task 4); they are not memory notes.
-    if (n.kind === "created" || n.kind === "removed" || n.kind === "function") continue;
     const nurl = norm(n.url);
+    if (n.kind === "created" || n.kind === "removed") continue; // the ledger comes from ev.created
+    if (n.kind === "function") {
+      const area = nurl !== null && hostOf(nurl) === ev.host ? nurl : null;
+      declared.push({ name: n.text, area });
+      continue;
+    }
     if (n.kind === "page") {
       const p = nurl ? pages.get(nurl) : undefined;
       if (!p) { summary.notes_dropped++; continue; }
@@ -158,6 +173,47 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
     summary.flows_updated++;
   }
   base.flows = [...flows.values()].sort((a, b) => b.last_run - a.last_run).slice(0, CAPS.flows);
+
+  // 5b. Function inventory: declared names are untested; a report carries the verdict; silence changes nothing.
+  const fnKey = (name: string): string => noteKey(name);
+  const cap120 = (s: string): string => [...flat(s).trim()].slice(0, 120).join("");
+  const fns = new Map<string, SiteFunction>(base.functions.map((f) => [fnKey(f.name), f]));
+  for (const d of declared) {
+    const k = fnKey(d.name);
+    if (k === "" || fns.has(k)) continue;
+    fns.set(k, { name: cap120(d.name), area: d.area, status: "untested", steps: [], expected: "", notes: "", first_seen_run: run, last_run: run });
+    summary.functions_added++;
+  }
+  for (const f of ev.functions ?? []) {
+    const k = fnKey(f.name);
+    if (k === "") continue;
+    const prev = fns.get(k);
+    const area = f.area_url !== null ? norm(f.area_url) : prev?.area ?? null;
+    fns.set(k, {
+      name: prev?.name ?? cap120(f.name),
+      area: area !== null && hostOf(area) === ev.host ? area : null,
+      status: f.status, steps: [...f.steps], expected: f.expected, notes: f.notes,
+      first_seen_run: prev?.first_seen_run ?? run, last_run: run,
+    });
+    if (prev) summary.functions_updated++;
+    else summary.functions_added++;
+  }
+  base.functions = [...fns.values()].sort((a, b) => b.last_run - a.last_run).slice(0, CAPS.functions);
+
+  // 5c. Ledger of created items across runs (the agent's record; the harness never checks the items still exist).
+  const ledgerKey = (name: string, url: string | null) => `${noteKey(name)}|${url ?? ""}`;
+  const created = new Map(base.created.map((c) => [ledgerKey(c.name, c.url), c]));
+  for (const c of ev.created ?? []) {
+    const url = c.url === null ? null : norm(c.url);
+    const k = ledgerKey(c.name, url);
+    const prev = created.get(k);
+    if (prev) prev.removed = prev.removed || c.removed;
+    else {
+      created.set(k, { name: c.name, url, removed: c.removed, run });
+      summary.created_logged++;
+    }
+  }
+  base.created = [...created.values()].slice(-CAPS.created);
 
   // 6. Collapse parameterized urls (/product/1, /product/2, ...) into one page and one link target.
   const patterns = collapsePatterns([...pages.keys(), ...[...pages.values()].flatMap((p) => p.links), ...base.frontier]);
