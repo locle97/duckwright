@@ -917,3 +917,24 @@ test("console_errors_off_makes_no_console_call", async () => {
   assert.equal(pw.calls.some(([k]) => k === "console"), false);
   assert.equal("consoleErrors" in r.history[0], false);
 });
+
+class TabsPW extends FakePW {
+  override async run(cmd: string, args: string[]): Promise<ProcResult> {
+    if (cmd === "tab-list") {
+      this.calls.push([cmd, [...args]]);
+      return { code: 0, stdout: "### Result\n- 0: [Other](https://a.test/)\n- 1: (current) [Mugs | Shop](https://shop.example/mugs?utm=1#top)\n", stderr: "" };
+    }
+    return super.run(cmd, args);
+  }
+}
+
+test("page_info_records_the_current_page_per_step", async () => {
+  const r = await agent(new TabsPW(), new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])]), { pageInfo: true }).run();
+  assert.equal(r.history[0].page?.url, "https://shop.example/mugs");
+  assert.equal(r.history[0].page?.title, "Mugs | Shop");
+});
+
+test("page_info_off_leaves_page_unset", async () => {
+  const r = await agent(new TabsPW(), new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])])).run();
+  assert.equal(r.history[0].page, undefined);
+});

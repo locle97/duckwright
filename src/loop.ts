@@ -18,6 +18,7 @@ import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RequestCallContext } from "./request.ts";
 import { scrubTree } from "./scrub.ts";
+import { readPage } from "./explore/pages.ts";
 import type { NoteSink } from "./explore/notes.ts";
 import type { TwoFactor } from "./twofa.ts";
 
@@ -59,6 +60,7 @@ export interface AgentOptions {
   control?: RunControl;
   network?: boolean;
   consoleErrors?: boolean;
+  pageInfo?: boolean;
   twofa?: TwoFactor;
   notes?: NoteSink;
   video?: boolean;
@@ -81,6 +83,7 @@ export class Agent {
   readonly control: RunControl | undefined;
   readonly network: boolean;
   readonly consoleErrors: boolean;
+  readonly pageInfo: boolean;
   readonly twofa: TwoFactor | undefined;
   readonly notes: NoteSink | undefined;
   readonly video: boolean;
@@ -107,6 +110,7 @@ export class Agent {
     this.control = opts.control;
     this.network = opts.network ?? false;
     this.consoleErrors = opts.consoleErrors ?? false;
+    this.pageInfo = opts.pageInfo ?? false;
     this.twofa = opts.twofa;
     this.notes = opts.notes;
     this.video = opts.video ?? false;
@@ -246,6 +250,10 @@ export class Agent {
         costUsd: cost,
       };
       if (origins.some((o) => o !== null)) rec.requestOrigins = origins;
+      if (this.pageInfo) {
+        const page = readPage(obs.tabs, this.workdir);
+        if (page !== null) rec.page = page;
+      }
       if (this.network) {
         const cap = await captureStep(this.pw, this.workdir, step, this.nextNetworkId);
         this.nextNetworkId = cap.nextId;

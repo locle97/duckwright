@@ -1,6 +1,7 @@
 import type { Decision } from "./brain.ts";
 import { SNAPSHOT_FILE } from "./observe.ts";
 import type { Observation } from "./observe.ts";
+import type { PageInfo } from "./explore/pages.ts";
 import { networkSummary } from "./network.ts";
 import type { NetworkEntry } from "./network.ts";
 import { flat, neutralise } from "./text.ts";
@@ -16,6 +17,7 @@ export interface StepRecord {
   network?: NetworkEntry[];
   networkErrors?: string[];
   consoleErrors?: string[];
+  page?: PageInfo;
   requestOrigins?: (string | null)[];
   screenshot?: string;
   screenshotError?: string;

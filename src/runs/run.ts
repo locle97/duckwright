@@ -126,6 +126,7 @@ export function historyJson(
       ...(r.network ? { network: r.network } : {}),
       ...(r.networkErrors?.length ? { network_errors: [...r.networkErrors] } : {}),
       ...(r.consoleErrors?.length ? { console_errors: [...r.consoleErrors] } : {}),
+      ...(r.page ? { page: r.page } : {}),
       ...(r.requestOrigins?.some((o) => o !== null) ? { request_origins: [...r.requestOrigins] } : {}),
     })),
   };
