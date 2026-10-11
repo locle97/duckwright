@@ -1701,7 +1701,7 @@ test("explore_success_prints_report_and_writes_files", async () => {
   assert.equal(data.working_flows.length, 1);
   assert.equal(data.broken_flows.length, 1);
   assert.equal(fs.existsSync(path.join(dir, "duckwright.spec.ts")), false);
-  assert.equal(seen[0].maxSteps, 40);
+  assert.equal(seen[0].maxSteps, 60);
   assert.equal(seen[0].consoleErrors, true);
 });
 
@@ -1710,7 +1710,7 @@ test("explore_max_steps_config_ignored_flag_wins", async () => {
   const seen: AgentOptions[] = [];
   const deps = { createAgent: exploreAgent(FLOWS, true, seen), loadConfig: () => ({ maxSteps: 7 }) };
   assert.equal(await main(e.argv, e.deps(deps)), 0);
-  assert.equal(seen[0].maxSteps, 40);
+  assert.equal(seen[0].maxSteps, 60);
   assert.equal(await main([...e.argv, "--max-steps", "10"], e.deps(deps)), 0);
   assert.equal(seen[1].maxSteps, 10);
 });

@@ -1,16 +1,26 @@
-export const EXPLORE_MAX_STEPS = 40;
+export const EXPLORE_MAX_STEPS = 60;
 
-export function exploreTask(url: string): string {
+export function exploreTask(url: string, opts: { brief?: string } = {}): string {
   const u = new URL(url);
   const URL_ = u.href;
   const HOST = u.host;
-  return `Explore the website at ${URL_} like a curious first-time visitor. There is no fixed goal: find the site's main user flows and check whether they work.
+  const brief = opts.brief
+    ? `\n\nEarlier exploration of this site (automatic notes; they may be out of date, so trust the live page over them):\n${opts.brief}\n`
+    : "";
+  return `Explore the website at ${URL_} like a careful first-time visitor who wants to understand the business behind it, then check that its main flows work. There is no fixed goal beyond that.${brief}
+
+Work in four phases:
+1. Orient. In your first few steps work out what this site is for and who uses it (a shop, a SaaS app, a docs site...). Record it: {"cmd": "note", "args": ["business", "<one or two sentences>"]}.
+2. Plan. Pick the 3 to 5 business-critical flows for that kind of site (for a shop: browse, search, product page, cart, checkout up to the payment step) and do them first.
+3. Go deep. Follow each flow several steps in (a list, then a detail page, then the action you can safely take) instead of one click per flow. Then use what is left on the less important pages.
+4. Write down what you learn as you go with note actions: what a page is for ({"cmd": "note", "args": ["page", "<what it is for>", "<its URL>"]}), quirks ("quirk"), areas not to touch ("off-limits"), which test accounts exist and where their credentials come from ("account"). A login wall you cannot pass: {"cmd": "note", "args": ["page", "gated: <why>", "<its URL>"]}. Never write a password, token or other secret value into a note: name where it comes from instead. Notes are short (under 400 characters) and do not change the page.
 
 Rules:
 - Start with goto ${URL_}.
 - Stay on the host ${HOST}. Do not open links to other hosts; mention them in a flow's notes instead.
-- Follow navigation menus, links, buttons and forms. Try each distinct flow once and do not revisit pages you have already checked.
+- Do not revisit pages you have already checked, and do not re-check what the earlier exploration above already covered unless it is marked broken or dead-end.
 - Never do anything destructive or irreversible: do not delete, pay, buy, order, send messages, invite people, change passwords or settings, sign out, or submit a form that creates or changes real data. Search and filter forms are fine to submit.
+- Never open anything the environment context or the earlier exploration marks as off-limits.
 - Do not log in or sign up unless the environment context gives you a test account for it.
 - You do not need expect checks in this task.
 - Judge each flow: "ok" when it reaches the page or result it promises; "dead-end" when it leads nowhere useful (no way forward, an empty page, a link back to the same page, a form that does nothing); "broken" when it shows an error (a 404 or 500 page, an error message, a control that fails).
