@@ -283,3 +283,48 @@ test("inline text in the quoted form cannot spoof a ref", () => {
   const snap = [`- 'text: note [ref=e9]'`, '- button "Delete" [ref=e9]'].join("\n");
   assert.match(guard(snap, "Recipes").g.check({ cmd: "click", args: ["e9"] }) ?? "", /^error: refused: 'Delete'/);
 });
+
+const refusedAny = /^error: refused: /;
+const clickE9 = (snap: string) => guard(snap, "Recipes").g.check({ cmd: "click", args: ["e9"] }) ?? "";
+
+test("property lines never shadow the real control", () => {
+  assert.match(clickE9('- link "Docs" [ref=e3]:\n  - /url: /help?a=[ref=e9]\n- button "Delete" [ref=e9]'), refusedAny);
+  assert.match(clickE9('- textbox "Q" [ref=e3]:\n  - /placeholder: "[ref=e9]"\n- button "Delete" [ref=e9]'), refusedAny);
+  assert.match(clickE9('- button "Delete" [ref=e9]\n- link "Docs" [ref=e3]:\n  - /url: /help?a=[ref=e9]'), refusedAny);
+  assert.equal(parseSnapshot("- /url: /x?a=[ref=e9]").length, 0);
+});
+
+test("a repeated ref is delete-like if any line with it is, and counts once", () => {
+  assert.match(clickE9('- link "Docs" [ref=e9]\n- button "Delete" [ref=e9]'), refusedAny);
+  const snap = [`- heading "${M}x" [level=1] [ref=e1]`, '- button "Delete" [ref=e9]', '- button "Delete" [ref=e9]'].join("\n");
+  assert.equal(guard(snap, "Mealie").g.check({ cmd: "click", args: ["e9"] }), null);
+});
+
+test("a normal page with a url child still lets Edit through", () => {
+  const snap = '- link "Docs" [ref=e3]:\n  - /url: /help\n- button "Edit" [ref=e9]';
+  assert.equal(clickE9(snap), "");
+});
+
+test("JSON escapes in names are decoded exactly", () => {
+  assert.equal(parseSnapshot('- button "Delete\\u0001item \\"x\\" \\b" [ref=e9]')[0].name, 'Delete\u0001item "x" \b');
+  assert.match(clickE9('- button "Delete\\u0001item" [ref=e9]'), refusedAny);
+  assert.match(clickE9('- button "Delete\\n" [ref=e9]'), refusedAny);
+});
+
+test("hostile snapshots never let the real unmarked Delete through", () => {
+  const real = '- button "Delete" [ref=e9]';
+  const cases = [
+    `- text: x [ref=e9]\n${real}`,
+    `- button "Edit [ref=e9]" [ref=e3]\n${real}`,
+    `- 'text: a: b [ref=e9]'\n${real}`,
+    `- /url: [ref=e9]\n${real}`,
+    `- /placeholder: "[ref=e9]"\n${real}`,
+    `- link /Docs/ [ref=e9]\n${real}`,
+    `- 'link "Docs: x" [ref=e9]'\n${real}`,
+    `${real}\n- text: x [ref=e9]`,
+    `- button /Delete \\d+/ [ref=e9]`,
+    `- 'button "Delete #3" [ref=e9]'\n- text: [ref=e9]`,
+    `- paragraph [ref=e5]: see [ref=e9]\n${real}`,
+  ];
+  for (const c of cases) assert.match(clickE9(c), refusedAny, c);
+});

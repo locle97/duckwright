@@ -36,7 +36,18 @@ const ATTRS = /^(?:\s*\[[^\]]*\])*/;
 const REF_SHAPE = /^(?:f\d+)?e\d+$/;
 
 const QUOTED = /^(\s*)- '((?:[^']|'')*)'(.*)$/;
-const FIRST_REF = /\[ref=([^\]]+)\]/;
+const PROPERTY = /^\s*- \/\w+:/;
+
+/** Names are written with JSON.stringify; decode them exactly, falling back to dropping backslashes. */
+function unescapeName(inner: string): string {
+  try {
+    const v: unknown = JSON.parse(`"${inner}"`);
+    if (typeof v === "string") return v;
+  } catch {
+    // fall through
+  }
+  return inner.replace(/\\(.)/g, "$1");
+}
 
 /** One `role "name" [attrs]: text` body (after `- `), or null when it has another shape. */
 function parseBody(indent: number, body: string, tail: string): SnapLine | null {
@@ -47,11 +58,11 @@ function parseBody(indent: number, body: string, tail: string): SnapLine | null 
   const rest = all.slice(attrs.length);
   const role = m[1];
   const ref = REF.exec(attrs)?.[1] ?? null;
-  if (ref === null && !rest.trimStart().startsWith(":") && FIRST_REF.test(rest)) return null; // exotic name: fail closed below
+  if (ref === null && !rest.trimStart().startsWith(":") && REF.test(rest)) return null; // exotic name: fail closed below
   return {
     indent,
     role,
-    name: (m[2] ?? "").replace(/\\(.)/g, "$1"),
+    name: unescapeName(m[2] ?? ""),
     ref,
     level: role === "heading" ? Number(LEVEL.exec(attrs)?.[1] ?? NaN) || null : null,
     text: rest.trim().replace(/^:\s*/, ""),
@@ -67,6 +78,7 @@ function parseBody(indent: number, body: string, tail: string): SnapLine | null 
 export function parseSnapshot(snapshot: string): SnapLine[] {
   const out: SnapLine[] = [];
   for (const raw of snapshot.split(/\r?\n/)) {
+    if (PROPERTY.test(raw)) continue; // `- /url: x` is metadata, never a control
     const q = QUOTED.exec(raw);
     const plain = q ? null : /^(\s*)- (.*)$/.exec(raw);
     let line: SnapLine | null = null;
@@ -82,7 +94,7 @@ export function parseSnapshot(snapshot: string): SnapLine[] {
       line = parseBody(indent, text, "");
     }
     if (line === null && (q || plain)) {
-      const ref = FIRST_REF.exec(text)?.[1];
+      const ref = REF.exec(text)?.[1];
       if (ref !== undefined) line = { indent, role: "unknown", name: flat(text), ref, level: null, text: "" };
     }
     if (line !== null) out.push(line);
@@ -97,8 +109,12 @@ export interface Control {
 }
 
 export function findControl(lines: SnapLine[], ref: string): Control | null {
-  const index = lines.findIndex((l) => l.ref === ref);
-  return index < 0 ? null : { index, role: lines[index].role, name: lines[index].name };
+  // Every line carrying the ref counts; a delete-like one wins so no earlier look-alike line can shadow it.
+  const matches = lines.flatMap((l, index) => (l.ref === ref ? [index] : []));
+  if (matches.length === 0) return null;
+  const control = (index: number): Control => ({ index, role: lines[index].role, name: lines[index].name });
+  const pick = matches.find((i) => isDeleteLike(lines, control(i))) ?? matches[0];
+  return control(pick);
 }
 
 /** Indices of the enclosing lines, nearest first. */
@@ -132,12 +148,12 @@ export function isDeleteLike(lines: SnapLine[], c: Control): boolean {
 
 /** Delete-like controls with a ref that sit outside any dialog. */
 function deleteLikeOutsideDialogs(lines: SnapLine[]): number {
-  let n = 0;
+  const refs = new Set<string>();
   lines.forEach((l, index) => {
     if (l.ref === null || ancestorIndices(lines, index).some((i) => isDialog(lines[i].role))) return;
-    if (isDeleteLike(lines, { index, role: l.role, name: l.name })) n++;
+    if (isDeleteLike(lines, { index, role: l.role, name: l.name })) refs.add(l.ref);
   });
-  return n;
+  return refs.size;
 }
 
 /**
