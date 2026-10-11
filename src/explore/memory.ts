@@ -39,17 +39,24 @@ function asSitemap(v: unknown): Sitemap | null {
   return { ...(v as unknown as Sitemap), notes, external_links: Array.isArray(v.external_links) ? (v.external_links as string[]) : [] };
 }
 
-function readSitemap(file: string, warnings: string[]): Sitemap | null {
+type SitemapRead = { sitemap: Sitemap | null; unreadable: string | null };
+
+/** Only ENOENT means "no sitemap yet"; any other read error leaves the file alone and reports why. */
+function readSitemap(file: string, warnings: string[]): SitemapRead {
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { sitemap: null, unreadable: null };
+    const reason = `${code ?? "error"}: ${(e as Error).message}`;
+    warnings.push(`sitemap ${file} exists but could not be read (${reason}); leaving it untouched`);
+    return { sitemap: null, unreadable: reason };
   }
   try {
     const parsed: unknown = JSON.parse(raw);
     const sm = asSitemap(parsed);
-    if (sm) return sm;
+    if (sm) return { sitemap: sm, unreadable: null };
   } catch {
     // fall through to the backup
   }
@@ -57,16 +64,18 @@ function readSitemap(file: string, warnings: string[]): Sitemap | null {
   try {
     fs.renameSync(file, backup);
     warnings.push(`sitemap ${file} could not be read; moved it to ${backup} (backup) and starting fresh`);
-  } catch {
-    warnings.push(`sitemap ${file} could not be read and could not be backed up; starting fresh`);
+  } catch (e) {
+    const reason = `${(e as NodeJS.ErrnoException).code ?? "error"}: ${(e as Error).message}`;
+    warnings.push(`sitemap ${file} could not be read and could not be backed up (${reason}); leaving it untouched`);
+    return { sitemap: null, unreadable: reason };
   }
-  return null;
+  return { sitemap: null, unreadable: null };
 }
 
 export function loadMemory(host: string, root: string = ENV_DIR) {
   const p = memoryPaths(host, root);
   const warnings: string[] = [];
-  const sitemap = readSitemap(p.sitemap, warnings);
+  const { sitemap } = readSitemap(p.sitemap, warnings);
   return {
     sitemap,
     brief: sitemap ? frontierBrief(sitemap) : "",
@@ -89,7 +98,7 @@ export function buildEvidence(
       if (url !== null && e.status !== null && e.status >= 400) failed.add(url);
     }
   }
-  const visited = new Set(pages.map((p) => p.url));
+  const visited = new Set(pages.flatMap((p) => normalizeUrl(p.url) ?? []));
   return {
     host: o.host, runName: o.runName, start: normalizeUrl(o.startUrl) ?? o.startUrl,
     pages, notes, flows: [...report.working_flows, ...report.broken_flows],
@@ -139,7 +148,8 @@ export async function saveMemory(o: {
   const warnings: string[] = [];
   const { tries, delayMs } = o.lock ?? { tries: 50, delayMs: 100 };
   const res = await withLock(p.lock, tries, delayMs, () => {
-    const old = readSitemap(p.sitemap, warnings);
+    const { sitemap: old, unreadable } = readSitemap(p.sitemap, warnings);
+    if (unreadable !== null) return null;
     const { sitemap, summary } = mergeSitemap(old, ev);
     const tmp = `${p.sitemap}.tmp-${process.pid}`;
     try {
@@ -154,10 +164,16 @@ export async function saveMemory(o: {
     fs.writeFileSync(path.join(o.runDir, "explore-memory.json"), JSON.stringify(summary, null, 2) + "\n");
     return md;
   });
+  if (res.ok && res.value === null) {
+    const pending = path.join(o.runDir, "pending-merge.json");
+    fs.writeFileSync(pending, JSON.stringify(ev, null, 2) + "\n");
+    warnings.push(`left ${p.sitemap} untouched; saved this run's evidence to ${pending}`);
+    return { md: null, sitemap: null, warnings };
+  }
   if (!res.ok) {
     fs.writeFileSync(path.join(o.runDir, "pending-merge.json"), JSON.stringify(ev, null, 2) + "\n");
     warnings.push(`could not take the lock ${p.lock}; saved this run's evidence to ${path.join(o.runDir, "pending-merge.json")}`);
     return { md: null, sitemap: null, warnings };
   }
-  return { md: res.value, sitemap: p.sitemap, warnings };
+  return { md: res.value as string, sitemap: p.sitemap, warnings };
 }

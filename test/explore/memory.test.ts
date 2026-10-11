@@ -74,7 +74,12 @@ test("an unknown sitemap version is treated as corrupt", () => {
   const p = memoryPaths(HOST, root);
   fs.mkdirSync(path.dirname(p.sitemap), { recursive: true });
   fs.writeFileSync(p.sitemap, JSON.stringify({ version: 99 }));
-  assert.equal(loadMemory(HOST, root).sitemap, null);
+  const mem = loadMemory(HOST, root);
+  assert.equal(mem.sitemap, null);
+  assert.match(mem.warnings.join(), /backup|bak/);
+  const baks = fs.readdirSync(path.dirname(p.sitemap)).filter((f) => f.startsWith(`${p.slug}.sitemap.json.bak-`));
+  assert.equal(baks.length, 1);
+  assert.equal(fs.readFileSync(path.join(path.dirname(p.sitemap), baks[0]!), "utf8"), JSON.stringify({ version: 99 }));
 });
 
 test("a held lock saves pending-merge.json instead of losing the run", async () => {
@@ -153,7 +158,49 @@ test("wrong shapes are corrupt", () => {
 test("a throwing write propagates and releases the lock", async () => {
   const root = tmpDir();
   const p = memoryPaths(HOST, root);
+  const d = data();
+  const runDir = fs.mkdtempSync(path.join(root, "run-"));
+  const report = buildExploreReport(d, { url: "https://shop.example/", runDir, network: true });
+  fs.rmSync(runDir, { recursive: true });
+  await assert.rejects(saveMemory({ host: HOST, runDir, data: d, report, startUrl: "https://shop.example/", root }));
+  assert.equal(fs.existsSync(p.lock), false);
+});
+
+test("failed pages match visited pages after url normalisation", async () => {
+  const root = tmpDir();
+  const net = (url: string) => ({ network: [{ method: "GET", url, status: 500, type: "document" }] });
+  const d = data({
+    history: [
+      step(1, "https://shop.example/", [], {}),
+      step(2, "https://shop.example/cart/?sid=1", [], net("https://shop.example/cart/?sid=1")),
+      step(3, "https://shop.example/pricing/", [], net("https://shop.example/pricing/")),
+    ],
+  });
+  const report = buildExploreReport(d, { url: "https://shop.example/", runDir: "r", network: true });
+  const ev = buildEvidence(d, report, [], { host: HOST, runName: "r", startUrl: "https://shop.example/" });
+  assert.deepEqual([...ev!.failedPages].sort(), ["https://shop.example/cart", "https://shop.example/pricing"]);
+  await run(d, root);
+  const sm = loadMemory(HOST, root).sitemap!;
+  assert.equal(sm.pages.find((x) => x.url === "https://shop.example/cart")?.status, "broken");
+  assert.equal(sm.pages.find((x) => x.url === "https://shop.example/pricing")?.status, "broken");
+});
+
+test("an existing but unreadable sitemap is never overwritten; the run goes to pending-merge.json", async () => {
+  const root = tmpDir();
+  const p = memoryPaths(HOST, root);
   fs.mkdirSync(p.sitemap, { recursive: true });
-  await assert.rejects(run(data(), root));
+  const mem = loadMemory(HOST, root);
+  assert.equal(mem.sitemap, null);
+  assert.equal(mem.brief, "");
+  assert.match(mem.warnings.join(), /EISDIR/);
+  assert.ok(mem.warnings.join().includes(p.sitemap));
+  const r = await run(data(), root);
+  assert.equal(r.sitemap, null);
+  assert.equal(r.md, null);
+  assert.match(r.warnings.join(), /EISDIR/);
+  assert.ok(r.warnings.join().includes(p.sitemap));
+  assert.ok(fs.existsSync(path.join(r.runDir, "pending-merge.json")));
+  assert.ok(fs.statSync(p.sitemap).isDirectory());
+  assert.equal(fs.existsSync(p.md), false);
   assert.equal(fs.existsSync(p.lock), false);
 });
