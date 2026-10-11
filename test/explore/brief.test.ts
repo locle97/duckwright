@@ -101,3 +101,11 @@ test("pattern pages are not listed as stale or shallow URLs", () => {
   assert.ok(!brief.includes("Pages not seen"));
   assert.ok(!brief.includes("Shallow areas"));
 });
+
+test("pages with no pattern key are still listed as stale and shallow", () => {
+  const old = { url: "https://s.test/old", title: "old", purpose: "", status: "ok", http_status: null, depth: 1, first_seen_run: 1, last_seen_run: 1, links: ["https://s.test/unknown"] } as unknown as SitePage;
+  const brief = frontierBrief(sm({ runs: 10, pages: [pg("/", { depth: 0, last_seen_run: 10 }), old] }));
+  const at = (title: string) => brief.slice(brief.indexOf(title)).split("\n\n")[0];
+  assert.ok(at("Pages not seen").includes("https://s.test/old"));
+  assert.ok(at("Shallow areas").includes("https://s.test/old"));
+});

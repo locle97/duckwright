@@ -25,11 +25,11 @@ export function frontierBrief(sm: Sitemap, maxBytes: number = BRIEF_MAX_BYTES): 
     ],
     [
       `Pages not seen for ${STALE_AFTER_RUNS} or more runs`,
-      pages.filter((p) => p.pattern === null && p.status !== "external" && sm.runs - p.last_seen_run >= STALE_AFTER_RUNS).map((p) => `- ${safe(p.url)}`),
+      pages.filter((p) => !p.pattern && p.status !== "external" && sm.runs - p.last_seen_run >= STALE_AFTER_RUNS).map((p) => `- ${safe(p.url)}`),
     ],
     [
       "Shallow areas (visited, but links from them were not followed)",
-      pages.filter((p) => p.pattern === null && p.depth <= 1 && (p.links ?? []).some((l) => !known.has(l))).map((p) => `- ${safe(p.url)}`),
+      pages.filter((p) => !p.pattern && p.depth <= 1 && (p.links ?? []).some((l) => !known.has(l))).map((p) => `- ${safe(p.url)}`),
     ],
   ];
   const head = `Earlier runs mapped ${pages.length} pages on this site${broken ? ` (${broken} broken)` : ""}. Do not re-walk what is already mapped; use the budget to extend the map.`;
