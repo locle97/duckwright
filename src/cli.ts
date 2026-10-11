@@ -11,6 +11,7 @@ import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
 import { loadMemory, memoryPaths, saveMemory } from "./explore/memory.ts";
 import { writeExploreTasks } from "./explore/tasks.ts";
+import { makeMarker } from "./explore/writes.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
@@ -503,7 +504,7 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stdout(`duckwright ${version()}`);
     return 0;
   }
-  const { url, writeTasks, run } = parsed.args;
+  const { url, writeTasks, allowWrites, run } = parsed.args;
   const badSecret = secretProblem(deps.env);
   if (badSecret !== null) {
     deps.stderr(badSecret);
@@ -520,12 +521,14 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stderr(problem);
     return 2;
   }
-  const mem = loadMemory(host);
+  const writes = allowWrites ? { marker: makeMarker() } : undefined;
+  const mem = loadMemory(host, undefined, { writes: allowWrites });
   for (const w of mem.warnings) deps.stderr(`warning: ${w}`);
+  if (writes) deps.stdout(`Writes enabled. Marker: ${writes.marker}`);
   const handle = startRun(
     {
-      task: exploreTask(url, { brief: mem.brief }), taskFile: null, args: runArgs, exportTest: false,
-      consoleErrors: true, explore: { host },
+      task: exploreTask(url, { brief: mem.brief, writes }), taskFile: null, args: runArgs, exportTest: false,
+      consoleErrors: true, explore: { host, ...(writes ? { writes } : {}) },
     },
     {
       ...deps,
@@ -548,7 +551,10 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stderr(`explore: cannot read history: ${errMsg(e)}`);
     return code === 0 ? 1 : code;
   }
-  const report = buildExploreReport(data, { url, runDir: handle.workdir, network: run.network });
+  const report = buildExploreReport(data, {
+    url, runDir: handle.workdir, network: run.network,
+    ...(writes ? { writes: { marker: writes.marker, previous: mem.sitemap?.created ?? [] } } : {}),
+  });
   const md = renderExploreMarkdown(report);
   deps.stdout("");
   deps.stdout(md.trimEnd());
@@ -575,8 +581,9 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
   }
   if (writeTasks) {
     try {
-      const t = writeExploreTasks(report.working_flows, url, handle.workdir);
-      if (t === null) deps.stdout("Tasks: no working flows, no task files written");
+      const extra = allowWrites ? { functions: report.functions ?? [], env: fs.existsSync(paths.md) ? paths.slug : null } : undefined;
+      const t = writeExploreTasks(report.working_flows, url, handle.workdir, "tasks", extra);
+      if (t === null) deps.stdout(allowWrites ? "Tasks: no working flows or functions, no task files written" : "Tasks: no working flows, no task files written");
       else {
         deps.stdout(`Tasks: ${t.files.length} task file(s) in ${t.folder}/`);
         for (const f of t.files) deps.stdout(`  ${f}`);

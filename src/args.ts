@@ -1,5 +1,6 @@
 // The command line, parsed the way the Python version's argparse parser did: a greedy
 // -f/--file, negatable booleans, mutually exclusive snapshot flags, and argparse's messages.
+import { EXPLORE_WRITES_MAX_STEPS } from "./explore/task.ts";
 import { ENV_NONE, isEnvName, isEnvPath } from "./environment.ts";
 import { API_SPEC_NAME, SPEC_NAME } from "./export.ts";
 import type { SnapshotMode } from "./observe.ts";
@@ -381,10 +382,11 @@ export function parseRunArgs(
 export interface ExploreArgs {
   url: string;
   writeTasks: boolean;
+  allowWrites: boolean;
   run: RunArgs;
 }
 
-export const EXPLORE_USAGE = "usage: duckwright explore [-h] [--write-tasks] [run options] url";
+export const EXPLORE_USAGE = "usage: duckwright explore [-h] [--write-tasks] [--allow-writes] [run options] url";
 
 export const EXPLORE_HELP = `${EXPLORE_USAGE}
 
@@ -401,8 +403,14 @@ options:
   --write-tasks         write one task file per working flow to
                         tasks/explore-<host>/, runnable with
                         duckwright -p -f tasks/explore-<host>/
+  --allow-writes        for a disposable test instance only: the agent may
+                        create, edit and delete ordinary data. Everything it
+                        creates carries a per-run marker, it only touches
+                        items with that marker, and delete-like clicks are
+                        refused unless the page names the marker. Budget:
+                        100 steps by default (--max-steps wins)
   --max-steps MAX_STEPS
-                        step budget (default 60)
+                        step budget (default 60; default 100 with --allow-writes)
 
 Other run options (--model, --env, --state, --session, --headed, --network,
 --screenshot, --video, --jev, --debug, --snapshot-*) work as for a task.
@@ -429,10 +437,14 @@ export function parseExploreArgs(argv: string[], defaultSkill: string, settings:
   const after = dd === -1 ? [] : argv.slice(dd);
   let writeTasks = false;
   let writeTasksValue: string | null = null;
+  let allowWrites = false;
+  let allowWritesValue: string | null = null;
   const kept: string[] = [];
   for (const a of before) {
     if (a === "--write-tasks") writeTasks = true;
     else if (a.startsWith("--write-tasks=")) writeTasksValue ??= a.slice("--write-tasks=".length);
+    else if (a === "--allow-writes") allowWrites = true;
+    else if (a.startsWith("--allow-writes=")) allowWritesValue ??= a.slice("--allow-writes=".length);
     else kept.push(a);
   }
   const scan = { firstError: null as UsageError | null, extras: [] as string[] };
@@ -454,8 +466,11 @@ export function parseExploreArgs(argv: string[], defaultSkill: string, settings:
     if (kept.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`) || (f === "-f" && a.startsWith("-f"))))) fail(msg);
   }
   if (writeTasksValue !== null) fail(`argument --write-tasks: ignored explicit argument '${writeTasksValue}'`);
+  if (allowWritesValue !== null) fail(`argument --allow-writes: ignored explicit argument '${allowWritesValue}'`);
   if (scan.firstError) throw scan.firstError;
-  return { kind: "args", args: { url: url!, writeTasks, run: parsed.args } };
+  const explicitMax = kept.some((a) => a === "--max-steps" || a.startsWith("--max-steps="));
+  const run = allowWrites && !explicitMax ? { ...parsed.args, maxSteps: EXPLORE_WRITES_MAX_STEPS } : parsed.args;
+  return { kind: "args", args: { url: url!, writeTasks, allowWrites, run } };
 }
 
 const EXPORT_SPEC: OptionSpec = {

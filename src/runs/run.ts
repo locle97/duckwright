@@ -16,6 +16,7 @@ import { DebugLog, debugRunner, debugTransport } from "../debuglog.ts";
 import { ExportError, exportRun } from "../export.ts";
 import type { HistoryData } from "../export.ts";
 import type { Evidence } from "../evidence.ts";
+import { WriteGuard } from "../explore/guard.ts";
 import { NoteSink } from "../explore/notes.ts";
 import type { AgentOptions, RunResult } from "../loop.ts";
 import { pageDir } from "../observe.ts";
@@ -64,7 +65,7 @@ export interface RunSpec {
   exportTest?: boolean;
   consoleErrors?: boolean;
   /** Set by `explore`: the agent records notes and page info for the site memory. */
-  explore?: { host: string };
+  explore?: { host: string; writes?: { marker: string } };
 }
 
 export interface RunDeps {
@@ -228,7 +229,13 @@ async function execute(
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
       snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa, environment: env?.text ?? null,
-      ...(spec.explore ? { notes: new NoteSink(workdir, spec.explore.host), pageInfo: true } : {}),
+      ...(spec.explore
+        ? {
+          notes: new NoteSink(workdir, spec.explore.host, spec.explore.writes?.marker),
+          pageInfo: true,
+          ...(spec.explore.writes ? { guard: new WriteGuard(workdir, spec.explore.writes.marker) } : {}),
+        }
+        : {}),
     });
     events.emit({
       type: "run:start", task, maxSteps: args.maxSteps, model: args.model, snapshot: args.snapshot,
