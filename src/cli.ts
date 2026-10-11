@@ -9,7 +9,7 @@ import { EnvError, isEnvPath, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun, loadHistory } from "./export.ts";
 import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
-import { loadMemory, saveMemory } from "./explore/memory.ts";
+import { loadMemory, memoryPaths, saveMemory } from "./explore/memory.ts";
 import { writeExploreTasks } from "./explore/tasks.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
@@ -477,6 +477,12 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Whether argv names `--env` (or `--env=...`) before a standalone `--`; `--env none` parses to null like "not given". */
+function hasExplicitEnv(argv: string[]): boolean {
+  const dd = argv.indexOf("--");
+  return (dd === -1 ? argv : argv.slice(0, dd)).some((a) => a === "--env" || a.startsWith("--env="));
+}
+
 /** `duckwright explore URL`: one exploration run, then a report (and optionally task files) built from its history. */
 export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number> {
   let config: GlobalConfig;
@@ -504,15 +510,18 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     return 2;
   }
   const host = new URL(url).host;
-  const mem = loadMemory(host);
-  for (const w of mem.warnings) deps.stderr(`warning: ${w}`);
-  // An explicit --env wins; otherwise an earlier run's environment file for this host is used.
-  const runArgs = run.env === null && mem.envName !== null ? { ...run, env: mem.envName } : run;
+  // An explicit --env (even `none`) wins; otherwise an earlier run's environment file for this host is used.
+  // Nothing is written or renamed before preflight passes, so this only checks that the file exists.
+  const paths = memoryPaths(host);
+  const autoEnv = run.env === null && !hasExplicitEnv(argv) && fs.existsSync(paths.md) ? paths.slug : null;
+  const runArgs = autoEnv !== null ? { ...run, env: autoEnv } : run;
   const problem = preflightArgs(deps, runArgs);
   if (problem) {
     deps.stderr(problem);
     return 2;
   }
+  const mem = loadMemory(host);
+  for (const w of mem.warnings) deps.stderr(`warning: ${w}`);
   const handle = startRun(
     {
       task: exploreTask(url, { brief: mem.brief }), taskFile: null, args: runArgs, exportTest: false,

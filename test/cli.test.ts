@@ -1898,8 +1898,14 @@ test("explore_memory_files_are_written_and_printed", async () => {
 test("explore_second_run_loads_and_extends_the_map", async () => {
   const e = shopEnv();
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const first: AgentOptions[] = [];
+  fs.rmSync(path.join(e.tmp, "environments"), { recursive: true, force: true });
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, first) })), 0);
+  assert.doesNotMatch(first[0].task, /Earlier exploration of this site/);
+  const run1Md = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
   const seen: AgentOptions[] = [];
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent([{ url: SHOP, links: [`${SHOP}a`, `${SHOP}b`] }], seen) })), 0);
+  assert.equal(seen[0].environment, run1Md.trim());
   assert.match(seen[0].task, /Earlier exploration of this site/);
   assert.ok(seen[0].task.includes(`${SHOP}b`));
   const mdText = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
@@ -1925,8 +1931,8 @@ test("explore_explicit_env_wins_but_memory_files_still_update", async () => {
   assert.equal(fs.readFileSync(path.join(e.tmp, "environments", "other.md"), "utf8"), "OTHER ENV\n");
   const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
   assert.equal(sm.runs, 2);
-  assert.ok(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8").length > 0);
-  assert.ok(shopMd.length > 0);
+  assert.match(shopMd, /run=1 /);
+  assert.match(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8"), /run=2 /);
 });
 
 test("explore_env_path_receives_the_generated_environment", async () => {
@@ -1966,4 +1972,40 @@ test("explore_without_a_recorded_page_creates_no_memory_files", async () => {
   assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent() })), 0);
   assert.equal(fs.existsSync(path.join(e.tmp, "environments")), false);
   assert.ok(!e.out.some((l) => l.startsWith("Environment:") || l.startsWith("Sitemap:")));
+});
+
+test("explore_env_none_switches_the_auto_environment_off", async () => {
+  for (const flag of [["--env", "none"], ["--env=none"]]) {
+    const e = shopEnv();
+    assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+    const seen: AgentOptions[] = [];
+    assert.equal(await main([...e.argv, ...flag], e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
+    assert.equal(seen[0].environment, null);
+    assert.match(seen[0].task, /Earlier exploration of this site/);
+    const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+    assert.equal(sm.runs, 2);
+    assert.match(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8"), /run=2 /);
+  }
+});
+
+test("explore_failed_preflight_leaves_a_corrupt_sitemap_alone", async () => {
+  const e = shopEnv();
+  fs.mkdirSync(path.join(e.tmp, "environments"));
+  const sm = path.join(e.tmp, "environments", "shop.example.sitemap.json");
+  fs.writeFileSync(sm, "{ not json");
+  assert.equal(await main(e.argv, e.deps({ which: () => null })), 2);
+  assert.equal(fs.readFileSync(sm, "utf8"), "{ not json");
+  assert.deepEqual(fs.readdirSync(path.join(e.tmp, "environments")), ["shop.example.sitemap.json"]);
+  assert.ok(!e.err.some((l) => l.startsWith("warning:")));
+});
+
+test("explore_memory_write_failure_keeps_a_nonzero_exit_code", async () => {
+  const e = shopEnv();
+  fs.writeFileSync(path.join(e.tmp, "environments"), "file");
+  const aborted = agentWith(async (opts) => {
+    opts.events!.emit({ type: "step:end", record: exploreEntry({ page: { url: SHOP, title: "T", links: [] } }), cost: 0, durationMs: 0 });
+    throw new AbortedError();
+  });
+  assert.equal(await main(e.argv, e.deps({ createAgent: aborted })), 130);
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot save site memory")));
 });
