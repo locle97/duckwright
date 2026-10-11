@@ -54,7 +54,7 @@ Non-goals:
     "url": "<normalized, no query/fragment except allow-listed keys>",
     "title": "<string>",
     "purpose": "<string, from a page note, else ''>",
-    "status": "ok" | "broken" | "gated" | "external",
+    "status": "ok" | "broken" | "stale" | "gated" | "external",
     "http_status": <int|null>,
     "depth": <int, clicks from the start URL>,
     "first_seen_run": <int>, "last_seen_run": <int>,
@@ -136,7 +136,7 @@ The system prompt gains one line: the generated block of an environment comes fr
 2. Read the old sitemap (or start empty). Take the lock `environments/<slug>.lock`.
 3. Merge:
    - Pages: add or update from `history.json` evidence (visited URL, title, status, links seen in snapshots), update `last_seen_run`, compute `depth`, collapse patterns.
-   - A page that errors now becomes `broken` and keeps its history. A page only becomes stale-flagged by a run that finished normally (not by the step limit or a failure), because absence in a short run proves nothing.
+   - A page that errors now becomes `broken` and keeps its history. A page only becomes `stale` (not seen for 3 or more runs) in a run that finished normally (not by the step limit or a failure), because absence in a short run proves nothing.
    - Flows: latest verdict replaces the old one by title and start URL.
    - Notes: dedupe by normalized text, apply caps, `page` notes fill a page's `purpose`.
    - Frontier: remove visited URLs, add newly seen unvisited same-host links, and keep other hosts only in `external_links`.
