@@ -43,13 +43,18 @@ export function parsePage(tabs: string, snapshot: string | null): PageInfo | nul
   return { url, title, links };
 }
 
+/** The snapshot file the observer just wrote; null when missing or empty. */
+export function readSnapshot(workdir: string): string | null {
+  try {
+    const text = fs.readFileSync(path.join(pageDir(workdir), SNAPSHOT_FILE), "utf8");
+    return text.trim() === "" ? null : text;
+  } catch {
+    return null;
+  }
+}
+
 /** Like parsePage, reading the snapshot file the observer just wrote; never throws. */
 export function readPage(tabs: string, workdir: string): PageInfo | null {
-  let snapshot: string | null = null;
-  try {
-    snapshot = fs.readFileSync(path.join(pageDir(workdir), SNAPSHOT_FILE), "utf8");
-  } catch {
-    // no snapshot file: still record the page
-  }
+  const snapshot = readSnapshot(workdir);
   return parsePage(tabs, snapshot);
 }

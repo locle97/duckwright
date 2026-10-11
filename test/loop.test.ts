@@ -17,6 +17,7 @@ import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../src/pw.ts";
 import { createTwoFactor } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
+import { WriteGuard, readRefusals } from "../src/explore/guard.ts";
 
 class FakePW extends PlaywrightCLI {
   calls: [string, unknown[]][] = [];
@@ -937,4 +938,32 @@ test("page_info_records_the_current_page_per_step", async () => {
 test("page_info_off_leaves_page_unset", async () => {
   const r = await agent(new TabsPW(), new FakeBrain([dec([["hover", ["e1"]]]), dec([["done", ["success", "ok"]]])])).run();
   assert.equal(r.history[0].page, undefined);
+});
+class GuardPW extends TabsPW {
+  override async snapshot(p: string): Promise<string> {
+    const text = '- heading "Recipes" [level=1] [ref=e2]\n- button "Delete" [ref=e1]';
+    fs.writeFileSync(p, text);
+    return text;
+  }
+}
+
+test("a guard gets each step's tab list and snapshot and refuses an unmarked delete", async () => {
+  const workdir = tmpDir();
+  const guard = new WriteGuard(workdir, "DW-261011-a3f9-");
+  const pw = new GuardPW();
+  const brain = new FakeBrain([dec([["click", ["e1"]]]), dec([["done", ["success", "ok"]]])]);
+  const r = await agent(pw, brain, { workdir, guard }).run();
+  assert.match(r.history[0].results[0], /^error: refused: 'Delete'/);
+  assert.equal(pw.calls.some(([k]) => k === "click"), false);
+  assert.deepEqual(readRefusals(workdir).map((x) => x.control), ["Delete"]);
+});
+
+test("without a guard the same click runs and no refusal file is written", async () => {
+  const workdir = tmpDir();
+  const pw = new GuardPW();
+  const brain = new FakeBrain([dec([["click", ["e1"]]]), dec([["done", ["success", "ok"]]])]);
+  const r = await agent(pw, brain, { workdir }).run();
+  assert.equal(r.history[0].results[0], "ok");
+  assert.equal(pw.calls.some(([k]) => k === "click"), true);
+  assert.equal(fs.existsSync(path.join(workdir, "refused.jsonl")), false);
 });

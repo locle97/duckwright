@@ -9,6 +9,7 @@ import type { NetworkEntry } from "../src/network.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
 import { NoteSink } from "../src/explore/notes.ts";
+import { WriteGuard } from "../src/explore/guard.ts";
 import { createTwoFactor } from "../src/twofa.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
@@ -586,4 +587,35 @@ test("note after a page-changing action is skipped, and a note beginning with a 
   ], undefined, undefined, null, null, null, sink);
   assert.equal(r.results[0], "ok");
   assert.match(r.results[2], /^skipped:/);
+});
+const GUARD_TABS = "### Result\n- 0: (current) [Recipes](https://s.test/g/home)\n";
+const GUARD_SNAP = '- button "Delete" [ref=e9]\n- button "Edit" [ref=e3]';
+
+test("the write guard refuses a delete click without running it, and lets other actions through", async () => {
+  const g = new WriteGuard(tmpDir(), "DW-261011-a3f9-");
+  g.begin(1, GUARD_TABS, GUARD_SNAP);
+  const [pw, calls] = makePw();
+  const r = await execute(pw, [A("click", "e9")], undefined, undefined, null, null, null, null, g);
+  assert.match(r.results[0], /^error: refused: 'Delete' acts on a page that does not carry the marker DW-261011-a3f9-/);
+  assert.deepEqual(calls, []);
+  const ok = await execute(pw, [A("click", "e3")], undefined, undefined, null, null, null, null, g);
+  assert.deepEqual(ok.results, ["ok"]);
+  assert.deepEqual(calls, [["click", "e3"]]);
+});
+
+test("a refused click does not skip the actions after it", async () => {
+  const g = new WriteGuard(tmpDir(), "DW-261011-a3f9-");
+  g.begin(1, GUARD_TABS, GUARD_SNAP);
+  const [pw, calls] = makePw();
+  const r = await execute(pw, [A("click", "e9"), A("hover", "e3")], undefined, undefined, null, null, null, null, g);
+  assert.match(r.results[0], /^error: refused:/);
+  assert.equal(r.results[1], "ok");
+  assert.deepEqual(calls, [["hover", "e3"]]);
+});
+
+test("without a guard a delete click runs as before", async () => {
+  const [pw, calls] = makePw();
+  const r = await execute(pw, [A("click", "e9")]);
+  assert.deepEqual(r.results, ["ok"]);
+  assert.deepEqual(calls, [["click", "e9"]]);
 });

@@ -6,6 +6,7 @@ import type { RequestContext } from "./expectRequest.ts";
 import { checkRequestCallArgs, runRequest } from "./request.ts";
 import type { RequestCallContext } from "./request.ts";
 import { PlaywrightCLI } from "./pw.ts";
+import type { WriteGuard } from "./explore/guard.ts";
 import type { NoteSink } from "./explore/notes.ts";
 import { TwoFactorError, checkTwofaArgs } from "./twofa.ts";
 import type { TwoFactor } from "./twofa.ts";
@@ -105,11 +106,12 @@ async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[])
  * `call` is the request context for running request actions.
  * `twofa` supplies 2FA codes for `twofa` actions.
  * `notes` receives `note` actions; null or absent means this is not an explore run.
+ * `guard` vets each action before it runs (explore --allow-writes); a refused action reports its error and is not run.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
   requests?: RequestContext | null, call?: RequestCallContext | null, twofa?: TwoFactor | null,
-  notes?: NoteSink | null,
+  notes?: NoteSink | null, guard?: WriteGuard | null,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
@@ -172,6 +174,13 @@ export async function execute(
     if (a.cmd === "note") {
       results.push(notes ? clip(notes.add(a.args)) : "error: command 'note' not allowed outside explore runs");
       return;
+    }
+    if (guard) {
+      const refused = guard.check(a);
+      if (refused !== null) {
+        results.push(clip(refused));
+        return;
+      }
     }
     const res = await pw.run(a.cmd, a.args);
     if (res.code === 0) {
