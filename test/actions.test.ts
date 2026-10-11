@@ -8,6 +8,7 @@ import type { RequestCallContext } from "../src/request.ts";
 import type { NetworkEntry } from "../src/network.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { PlaywrightCLI } from "../src/pw.ts";
+import { NoteSink } from "../src/explore/notes.ts";
 import { createTwoFactor } from "../src/twofa.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
@@ -561,4 +562,28 @@ test("dblclick_is_allowed_and_page_changing", async () => {
   const { results } = await execute(pw, [A("dblclick", "e5"), A("fill", "e9", "hi")]);
   assert.deepEqual(results, ["ok", "skipped: page may have changed"]);
   assert.deepEqual(calls, [["dblclick", "e5"]]);
+});
+
+test("note runs only with a sink and never touches the browser", async () => {
+  const dir = tmpDir();
+  const sink = new NoteSink(dir, "shop.example");
+  const [pw, calls] = makePw();
+  const withSink = await execute(pw, [A("note", "business", "A mug shop")], undefined, undefined, null, null, null, sink);
+  assert.deepEqual(withSink.results, ["ok"]);
+  assert.deepEqual(calls, []);
+  const without = await execute(pw, [A("note", "business", "x")]);
+  assert.match(without.results[0], /^error: command 'note' not allowed outside explore runs/);
+});
+
+test("note after a page-changing action is skipped, and a note beginning with a dash is not a bad flag", async () => {
+  const dir = tmpDir();
+  const sink = new NoteSink(dir, "shop.example");
+  const [pw] = makePw();
+  const r = await execute(pw, [
+    A("note", "quirk", "--weird text"),
+    A("click", "e1"),
+    A("note", "quirk", "after"),
+  ], undefined, undefined, null, null, null, sink);
+  assert.equal(r.results[0], "ok");
+  assert.match(r.results[2], /^skipped:/);
 });

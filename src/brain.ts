@@ -12,7 +12,7 @@ export const TOOL_TIMEOUT = 120;
 export const ALLOWED_COMMANDS = [
   "goto", "click", "fill", "type", "press", "select", "check", "uncheck",
   "dblclick", "hover", "drag", "tab-new", "tab-select", "tab-close", "go-back",
-  "screenshot", "expect", "expect-request", "request", "twofa", "done",
+  "screenshot", "expect", "expect-request", "request", "twofa", "note", "done",
 ] as const;
 
 export const DECISION_SCHEMA = {
@@ -66,7 +66,7 @@ export const DECISION_SCHEMA = {
             properties: {
               cmd: {
                 type: "string",
-                enum: ALLOWED_COMMANDS.filter((c) => c !== "done" && c !== "expect" && c !== "expect-request" && c !== "request" && c !== "twofa"),
+                enum: ALLOWED_COMMANDS.filter((c) => c !== "done" && c !== "expect" && c !== "expect-request" && c !== "request" && c !== "twofa" && c !== "note"),
               },
               args: { type: "array", items: { type: "string" } },
             },
@@ -102,6 +102,15 @@ export const DECISION_SCHEMA = {
                 minItems: 1,
                 maxItems: 2,
               },
+            },
+          },
+          // note: kind, text, then an optional url on the explored host (explore runs only).
+          {
+            type: "object",
+            required: ["cmd", "args"],
+            properties: {
+              cmd: { const: "note" },
+              args: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 3 },
             },
           },
         ],

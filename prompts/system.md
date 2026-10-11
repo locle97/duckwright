@@ -8,7 +8,7 @@ When the prompt has an `<environment>` section, it is the user's description of 
 
 ## Commands
 
-Actions are playwright-cli commands, described in the appended playwright-cli skill. You may ONLY use these commands: goto, click, fill, type, press, select, check, uncheck, dblclick, hover, drag, tab-new, tab-select, tab-close, go-back, screenshot, expect, expect-request, request, twofa, done. Any other command is rejected, including other commands the skill documents. Use the skill only as a reference for how the allowed commands work.
+Actions are playwright-cli commands, described in the appended playwright-cli skill. You may ONLY use these commands: goto, click, fill, type, press, select, check, uncheck, dblclick, hover, drag, tab-new, tab-select, tab-close, go-back, screenshot, expect, expect-request, request, twofa, note, done. Any other command is rejected, including other commands the skill documents. Use the skill only as a reference for how the allowed commands work.
 
 The browser is already open. To visit a URL, use `goto <url>`; there is no `open` command, and never `close` the browser.
 
@@ -27,6 +27,10 @@ The snapshot lists elements with refs such as `[ref=e15]`. Pass the ref (`e15`) 
 ## Actions per step
 
 Return 1 to 3 actions. A page-changing action (goto, click, dblclick, press, tab-new, tab-select, tab-close, go-back, twofa) may invalidate refs, so any actions after it are skipped. Place a page-changing action last. Safe to batch before it: fill, type, select, check, uncheck, hover, expect, request.
+
+## Notes (explore runs only)
+
+In an exploration run you may also use `note`: `{"cmd": "note", "args": ["<kind>", "<text>"]}` or with a page URL on the explored host as a third argument. Kinds: business (what the site is for, who uses it), page (what one page is for; third arg is its URL), quirk, off-limits (areas not to touch), account (which test account exists and where its credential comes from, never the value), flow. Keep each note under 400 characters. Notes are saved even if the run is cut off. `note` does not change the page.
 
 ## Checking the outcome
 

@@ -6,6 +6,7 @@ import type { RequestContext } from "./expectRequest.ts";
 import { checkRequestCallArgs, runRequest } from "./request.ts";
 import type { RequestCallContext } from "./request.ts";
 import { PlaywrightCLI } from "./pw.ts";
+import type { NoteSink } from "./explore/notes.ts";
 import { TwoFactorError, checkTwofaArgs } from "./twofa.ts";
 import type { TwoFactor } from "./twofa.ts";
 import { sliceCodePoints } from "./text.ts";
@@ -52,6 +53,7 @@ function rejection(a: Action): string | null {
   if (a.cmd === "expect-request") return checkRequestArgs(a.args);
   if (a.cmd === "request") return checkRequestCallArgs(a.args);
   if (a.cmd === "twofa") return checkTwofaArgs(a.args);
+  if (a.cmd === "note") return null; // validated by the sink; its text may look like a flag
   const bad = badFlag(a.cmd, a.args);
   return bad !== null ? `error: flag '${bad}' not allowed` : null;
 }
@@ -102,10 +104,12 @@ async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[])
  * `requests` is what expect-request checks against; null or absent means capture is off.
  * `call` is the request context for running request actions.
  * `twofa` supplies 2FA codes for `twofa` actions.
+ * `notes` receives `note` actions; null or absent means this is not an explore run.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
   requests?: RequestContext | null, call?: RequestCallContext | null, twofa?: TwoFactor | null,
+  notes?: NoteSink | null,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
@@ -163,6 +167,10 @@ export async function execute(
       if (code !== null) ran.set(i, code);
       // The form was submitted (or may have been), so the page may have changed.
       if (changed) skip = "skipped: page may have changed";
+      return;
+    }
+    if (a.cmd === "note") {
+      results.push(notes ? clip(notes.add(a.args)) : "error: command 'note' not allowed outside explore runs");
       return;
     }
     const res = await pw.run(a.cmd, a.args);

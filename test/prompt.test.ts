@@ -149,7 +149,7 @@ test("system_md_mentions_network", () => {
 
 test("system_md_documents_twofa", () => {
   const md = fs.readFileSync(new URL("../prompts/system.md", import.meta.url), "utf8");
-  assert.match(md, /goto, click, .*request, twofa, done\./);
+  assert.match(md, /goto, click, .*request, twofa, note, done\./);
   assert.ok(md.includes("## Two-factor verification"));
   assert.ok(md.includes('"args": ["totp", "e15"]'));
   assert.ok(md.includes('"args": ["passkey"]'));

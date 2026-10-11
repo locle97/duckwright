@@ -18,6 +18,7 @@ import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RequestCallContext } from "./request.ts";
 import { scrubTree } from "./scrub.ts";
+import type { NoteSink } from "./explore/notes.ts";
 import type { TwoFactor } from "./twofa.ts";
 
 export const REPEAT_NUDGE = "You are repeating the same actions; try a different approach.";
@@ -59,6 +60,7 @@ export interface AgentOptions {
   network?: boolean;
   consoleErrors?: boolean;
   twofa?: TwoFactor;
+  notes?: NoteSink;
   video?: boolean;
   screenshot?: boolean;
   environment?: string | null;
@@ -80,6 +82,7 @@ export class Agent {
   readonly network: boolean;
   readonly consoleErrors: boolean;
   readonly twofa: TwoFactor | undefined;
+  readonly notes: NoteSink | undefined;
   readonly video: boolean;
   readonly screenshot: boolean;
   readonly environment: string | null;
@@ -105,6 +108,7 @@ export class Agent {
     this.network = opts.network ?? false;
     this.consoleErrors = opts.consoleErrors ?? false;
     this.twofa = opts.twofa;
+    this.notes = opts.notes;
     this.video = opts.video ?? false;
     this.screenshot = opts.screenshot ?? false;
     this.environment = opts.environment ?? null;
@@ -230,12 +234,13 @@ export class Agent {
       const callCtx: RequestCallContext | null = this.network
         ? { seen: history.flatMap((r) => r.network ?? []), origin: currentOrigin(obs.tabs) }
         : null;
+      if (this.notes) this.notes.step = step;
       const { results, done, origins } = await execute(this.pw, decision.actions, codes, {
         start: (index) => this.events.emit({ type: "action:start", step, index }),
         result: (index, result, code) => this.events.emit({
           type: "action:result", step, index, result: this.scrub(result), code: code === null ? null : this.scrub(code),
         }),
-      }, requestCtx, callCtx, this.twofa ?? null);
+      }, requestCtx, callCtx, this.twofa ?? null, this.notes ?? null);
       const rec: StepRecord = {
         step, decision, results: results.map(this.scrub), codes: codes.map((c) => (c === null ? null : this.scrub(c))),
         costUsd: cost,
