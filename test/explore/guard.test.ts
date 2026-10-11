@@ -227,3 +227,27 @@ test("a snapshot that parses to no lines is unreadable", () => {
   assert.match(g.check({ cmd: "click", args: ["e3"] }) ?? "", /cannot evaluate/);
   assert.deepEqual(readRefusals(dir).map((r) => r.control), ["(unreadable page)"]);
 });
+
+test("clicks by selector or locator are refused and recorded; ref-shaped unknown refs and target-less clicks pass", () => {
+  const { g, dir } = guard(detail, `${M}Pasta | Mealie`, "https://s.test/r/pasta");
+  const msg = "error: refused: click targets must be a ref from the snapshot; use the ref of the control";
+  assert.equal(g.check({ cmd: "click", args: ["#delete"] }), msg);
+  assert.equal(g.check({ cmd: "dblclick", args: ["--modifiers=Shift", "getByRole('button', { name: 'Delete' })"] }), msg);
+  assert.deepEqual(readRefusals(dir).map((r) => r.control), ["#delete", "getByRole('button', { name: 'Delete' })"]);
+  assert.equal(g.check({ cmd: "click", args: ["e99"] }), null);
+  assert.equal(g.check({ cmd: "click", args: ["f1e99"] }), null);
+  assert.equal(g.check({ cmd: "click", args: ["e3"] }), null);
+  assert.equal(g.check({ cmd: "click", args: [] }), null);
+});
+
+test("inline text cannot spoof a ref or a heading level", () => {
+  const snap = ["- text: note [ref=e9]", '- button "Delete" [ref=e9] [cursor=pointer]'].join("\n");
+  const { g } = guard(snap, "Recipes");
+  assert.match(g.check({ cmd: "click", args: ["e9"] }) ?? "", /^error: refused: 'Delete'/);
+  const lines = parseSnapshot(['- heading "T" [level=1] [ref=e2]', "- paragraph [ref=e3]: see [level=1] here"].join("\n"));
+  assert.equal(lines[0].level, 1);
+  assert.equal(lines[0].ref, "e2");
+  assert.equal(lines[1].level, null);
+  assert.equal(lines[1].text, "see [level=1] here");
+  assert.equal(parseSnapshot("- paragraph: [level=1] [ref=e5]")[0].ref, null);
+});

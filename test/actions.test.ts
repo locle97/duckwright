@@ -619,3 +619,12 @@ test("without a guard a delete click runs as before", async () => {
   assert.deepEqual(r.results, ["ok"]);
   assert.deepEqual(calls, [["click", "e9"]]);
 });
+
+test("the write guard stops a selector click before it reaches playwright", async () => {
+  const g = new WriteGuard(tmpDir(), "DW-261011-a3f9-");
+  g.begin(1, GUARD_TABS, GUARD_SNAP);
+  const [pw, calls] = makePw();
+  const r = await execute(pw, [A("click", "#delete")], undefined, undefined, null, null, null, null, g);
+  assert.match(r.results[0], /^error: refused: click targets must be a ref/);
+  assert.deepEqual(calls, []);
+});

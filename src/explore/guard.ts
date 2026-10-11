@@ -33,6 +33,8 @@ export interface SnapLine {
 const LINE = /^(\s*)- ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?(.*)$/;
 const REF = /\[ref=([^\]]+)\]/;
 const LEVEL = /\[level=(\d+)\]/;
+const ATTRS = /^(?:\s*\[[^\]]*\])*/;
+const REF_SHAPE = /^(?:f\d+)?e\d+$/;
 
 /** The accessibility snapshot as lines with role, name, ref and inline text (lines like `- /url: x` are skipped). */
 export function parseSnapshot(snapshot: string): SnapLine[] {
@@ -40,14 +42,16 @@ export function parseSnapshot(snapshot: string): SnapLine[] {
   for (const raw of snapshot.split(/\r?\n/)) {
     const m = LINE.exec(raw);
     if (!m) continue;
-    const rest = m[4] ?? "";
+    const all = m[4] ?? "";
+    const attrs = ATTRS.exec(all)?.[0] ?? ""; // only these bracket groups are attributes; inline text can't supply one
+    const rest = all.slice(attrs.length);
     out.push({
       indent: m[1].length,
       role: m[2],
       name: (m[3] ?? "").replace(/\\(.)/g, "$1"),
-      ref: REF.exec(rest)?.[1] ?? null,
-      level: m[2] === "heading" ? Number(LEVEL.exec(rest)?.[1] ?? NaN) || null : null,
-      text: rest.replace(/\[[^\]]*\]/g, "").trim().replace(/^:\s*/, ""),
+      ref: REF.exec(attrs)?.[1] ?? null,
+      level: m[2] === "heading" ? Number(LEVEL.exec(attrs)?.[1] ?? NaN) || null : null,
+      text: rest.trim().replace(/^:\s*/, ""),
     });
   }
   return out;
@@ -179,6 +183,10 @@ export class WriteGuard {
       return "error: refused: cannot evaluate the page; try again next step";
     }
     if (!ref) return null;
+    if (!REF_SHAPE.test(ref)) {
+      this.refuse(flat(ref).slice(0, 80));
+      return "error: refused: click targets must be a ref from the snapshot; use the ref of the control";
+    }
     const c = findControl(this.lines, ref);
     if (c === null || !isDeleteLike(this.lines, c)) return null;
     if (pageNamesMarker(this.tabs, this.lines, c, this.marker)) return null;
