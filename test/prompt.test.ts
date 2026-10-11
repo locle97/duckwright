@@ -157,6 +157,11 @@ test("system_md_documents_twofa", () => {
   assert.ok(md.includes("A page-changing action (goto, click, dblclick, press, tab-new, tab-select, tab-close, go-back, twofa)"));
 });
 
+test("system_md_says_a_submitting_edit_goes_last", () => {
+  const md = fs.readFileSync(new URL("../prompts/system.md", import.meta.url), "utf8");
+  assert.ok(md.includes("A fill or type with --submit submits the form and may change the page too, so place it last as well."));
+});
+
 test("stepline_ignores_evidence_fields", () => {
   const base = rec(1);
   assert.equal(stepLine({ ...base, screenshot: "screenshots/step-001.png", screenshotError: "boom" }), stepLine(base));

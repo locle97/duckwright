@@ -25,8 +25,13 @@ export function exploreTaskText(flow: Flow, url: string, runDir: string): string
     lines.push("Steps:", ...flow.steps.map((s, i) => `${i + 1}. ${flat(s)}`), "");
   }
   const expected = flat(flow.expected);
-  lines.push(`Check that: ${expected || "the flow finishes without an error page."}`, "");
+  lines.push(`Check that: ${sentence(expected || "the flow finishes without an error page")}`, "");
   return lines.join("\n");
+}
+
+/** Ends the text with "." unless it already ends in ".", "?" or "!". */
+function sentence(text: string): string {
+  return /[.?!]$/.test(text) ? text : `${text}.`;
 }
 
 export function exploreFunctionTaskText(fn: ReportedFunction, url: string, runDir: string, env: string | null): string {
@@ -41,8 +46,8 @@ export function exploreFunctionTaskText(fn: ReportedFunction, url: string, runDi
     ...(fn.area_url ? [`Open ${safe(fn.area_url)}.`, ""] : []),
   ];
   if (fn.steps.length) lines.push("Steps:", ...fn.steps.map((s, i) => `${i + 1}. ${safe(s)}`), "");
-  const expected = safe(fn.expected).replace(/\.+$/, "");
-  lines.push(`Check that: ${expected || "the function finishes without an error page"}.`, "");
+  const expected = safe(fn.expected);
+  lines.push(`Check that: ${sentence(expected || "the function finishes without an error page")}`, "");
   lines.push("Name everything you create with the prefix RT- and delete what you created at the end of the task.", "");
   return lines.join("\n");
 }

@@ -326,3 +326,8 @@ test("hostile names stay on one line in the markdown report", () => {
   const md = renderExploreMarkdown(rep);
   assert.ok(!/^## (Injected|Fake heading)/m.test(md));
 });
+
+test("dropped functions are not mentioned in the markdown of a run without writes", () => {
+  const md = renderExploreMarkdown(base({ dropped_functions: 3 }));
+  assert.ok(!md.includes("function(s) in the answer were unreadable"));
+});

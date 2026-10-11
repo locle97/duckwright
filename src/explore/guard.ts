@@ -131,9 +131,9 @@ type Parsed = Omit<SnapLine, "parent" | "dialog">;
 /** A line with a `[ref=` token that does not parse: an `unknown` control named by its raw text (fail closed). */
 function unknownLine(indent: number, body: string, key: string): Parsed {
   const own = trailingAttrs(key).attrs.flatMap((a) => (a.startsWith("ref=") ? [a.slice(4)] : []));
-  // A ref mentioned anywhere in a delete-like unparsed line is filed under it too: page text can only make
-  // a click stricter.
-  const mentioned = DELETE_LIKE.test(body) ? [...body.matchAll(REF_ALL)].map((m) => m[1]) : [];
+  // A ref mentioned anywhere in a delete-like or confirm-like unparsed line is filed under it too: page text
+  // can only make a click stricter.
+  const mentioned = DELETE_LIKE.test(body) || CONFIRM_ANY.test(body) ? [...body.matchAll(REF_ALL)].map((m) => m[1]) : [];
   return { indent, role: "unknown", name: flat(body), ref: own[0] ?? null, text: "", level: null, refs: [...new Set([...own, ...mentioned])] };
 }
 
@@ -293,6 +293,8 @@ export class WriteGuard {
   private tabs = "";
   private lines: SnapLine[] | null = null;
   private ledgerUrls = new Set<string>();
+  /** Set once an edit with --submit ran this step: the snapshot may no longer match the page. */
+  private stale = false;
 
   constructor(workdir: string, marker: string) {
     this.workdir = workdir;
@@ -302,6 +304,7 @@ export class WriteGuard {
   begin(step: number, tabs: string, snapshot: string | null): void {
     this.step = step;
     this.tabs = tabs;
+    this.stale = false;
     let parsed: SnapLine[] | null = null;
     try {
       parsed = snapshot === null || snapshot.trim() === "" ? null : parseSnapshot(snapshot);
@@ -314,9 +317,14 @@ export class WriteGuard {
 
   /** null when the action may run, else the error result to report instead. */
   check(a: { cmd: string; args: string[] }): string | null {
+    if (this.stale) return "error: refused: the page may have changed; try again next step";
     try {
       if (CLICKS.has(a.cmd)) return this.checkClick(positional(a.args)[0]);
-      if (EDITS.has(a.cmd)) this.audit(a);
+      if (EDITS.has(a.cmd)) {
+        // A submitting edit may navigate, so later actions this step would act on a stale snapshot.
+        if (a.args.some((x) => x.split("=", 1)[0] === "--submit")) this.stale = true;
+        this.audit(a);
+      }
       return null;
     } catch {
       // Never expected; a click the guard could not judge is refused, an edit goes through unaudited.
@@ -356,7 +364,6 @@ export class WriteGuard {
   }
 
   private audit(a: { cmd: string; args: string[] }): void {
-    if (this.lines === null) return;
     const pos = positional(a.args);
     let control: string;
     let value: string;
@@ -365,11 +372,10 @@ export class WriteGuard {
       control = "(focused element)";
       value = pos[0] ?? "";
     } else {
-      if (!pos[0]) return;
-      const c = findControl(this.lines, pos[0]);
-      if (c === null) return;
-      if (c.role === "searchbox" || /search|filter/i.test(c.name)) return;
-      control = `${c.role} "${flat(c.name).slice(0, 80)}"`;
+      const target = pos[0] ?? "";
+      const c = this.lines === null || !REF_SHAPE.test(target) ? null : findControl(this.lines, target);
+      if (c !== null && (c.role === "searchbox" || /search|filter/i.test(c.name))) return;
+      control = c !== null ? `${c.role} "${flat(c.name).slice(0, 80)}"` : this.lines === null ? "(unreadable page)" : flat(target).slice(0, 80);
       value = a.cmd === "fill" || a.cmd === "select" ? (pos[1] ?? "") : "";
     }
     const { url, title } = this.page();

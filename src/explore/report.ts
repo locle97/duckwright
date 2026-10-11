@@ -251,7 +251,7 @@ export function renderExploreMarkdown(r: ExploreReport): string {
   if (r.writes) parts.push([`Marker: ${flat(r.writes.marker)}`]);
   if (r.answer_error) parts.push([`The agent's answer could not be read as a flow list: ${flat(r.answer_error)}.`]);
   if (r.dropped_flows > 0) parts.push([`${r.dropped_flows} flow(s) in the answer were unreadable and left out.`]);
-  if ((r.dropped_functions ?? 0) > 0) parts.push([`${r.dropped_functions} function(s) in the answer were unreadable and left out.`]);
+  if (r.writes && (r.dropped_functions ?? 0) > 0) parts.push([`${r.dropped_functions} function(s) in the answer were unreadable and left out.`]);
 
   parts.push([`## Broken links and failed requests (${r.network_checked ? r.failed_requests.length : "-"})`]);
   if (!r.network_checked) parts.push(["Network capture was off (--no-network), so requests were not checked."]);

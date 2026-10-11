@@ -26,7 +26,7 @@ The snapshot lists elements with refs such as `[ref=e15]`. Pass the ref (`e15`) 
 
 ## Actions per step
 
-Return 1 to 3 actions. A page-changing action (goto, click, dblclick, press, tab-new, tab-select, tab-close, go-back, twofa) may invalidate refs, so any actions after it are skipped. Place a page-changing action last. Safe to batch before it: fill, type, select, check, uncheck, hover, expect, request.
+Return 1 to 3 actions. A page-changing action (goto, click, dblclick, press, tab-new, tab-select, tab-close, go-back, twofa) may invalidate refs, so any actions after it are skipped. Place a page-changing action last. A fill or type with --submit submits the form and may change the page too, so place it last as well. Safe to batch before it: fill, type, select, check, uncheck, hover, expect, request.
 
 ## Notes (explore runs only)
 

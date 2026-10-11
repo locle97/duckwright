@@ -29,7 +29,7 @@ test("exploreTaskText equals C6 with steps", () => {
     "1. Type mug",
     "2. Press Enter",
     "",
-    "Check that: Results appear",
+    "Check that: Results appear.",
     "",
   ].join("\n"));
 });
@@ -54,7 +54,7 @@ test("exploreTaskText flattens multi-line fields", () => {
   assert.ok(!/^b$|^y$|^q$|^B$|^z/m.test(t));
   assert.match(t, /^# A B$/m);
   assert.match(t, /^1\. x y$/m);
-  assert.match(t, /^Check that: p q$/m);
+  assert.match(t, /^Check that: p q\.$/m);
 });
 
 test("writeExploreTasks writes only ok flows, loadable", () => {
@@ -134,4 +134,12 @@ test("functions alone are enough to write tasks; nothing at all returns null; no
   assert.deepEqual(only.files.map((f) => path.basename(f)), ["01-fn-create-recipe.md"]);
   assert.equal(writeExploreTasks([], "https://s.test/", "runs/r1", tmp(), { functions: [{ ...FNC, status: "broken" }], env: null }), null);
   assert.equal(writeExploreTasks([], "https://s.test/", "runs/r1", tmp()), null);
+});
+
+test("Check that gets a final period only when it does not already end in . ? or !", () => {
+  for (const [expected, line] of [["Results appear", "Results appear."], ["Results appear.", "Results appear."], ["Is it there?", "Is it there?"], ["Done!", "Done!"], ["Wait...", "Wait..."]]) {
+    assert.ok(exploreTaskText(flow({ expected }), URL0, "/r").includes(`Check that: ${line}\n`), expected);
+    assert.ok(exploreFunctionTaskText({ ...FNC, expected }, URL0, "/r", null).includes(`Check that: ${line}\n`), expected);
+  }
+  assert.ok(exploreFunctionTaskText({ ...FNC, expected: "" }, URL0, "/r", null).includes("Check that: the function finishes without an error page.\n"));
 });

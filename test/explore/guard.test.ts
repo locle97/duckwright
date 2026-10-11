@@ -455,3 +455,49 @@ test("a large snapshot with many siblings is checked quickly", () => {
   for (let i = 0; i < 20; i++) assert.equal(g.check({ cmd: "click", args: [i % 2 ? "e3" : `e${n - 1 - i}`] }), null);
   assert.ok(Date.now() - start < 5000, `took ${Date.now() - start}ms`);
 });
+
+test("a fill or type with --submit makes the snapshot stale: later actions in the step are refused", () => {
+  // e20 is the one Delete on a marked detail page: allowed on its own, refused after a submit.
+  const page = detail.replace('[ref=e4]', '[ref=e20]').replace('textbox "Name" [ref=e6]', 'textbox "Name" [ref=e3]');
+  const stale = "error: refused: the page may have changed; try again next step";
+  const a = guard(page, `${M}Pasta | Mealie`);
+  assert.equal(a.g.check({ cmd: "fill", args: ["e3", "x", "--submit"] }), null);
+  assert.equal(a.g.check({ cmd: "click", args: ["e20"] }), stale);
+  assert.equal(a.g.check({ cmd: "fill", args: ["e3", "y"] }), stale);
+  const b = guard(page, `${M}Pasta | Mealie`);
+  assert.equal(b.g.check({ cmd: "type", args: ["--submit", "x"] }), null);
+  assert.equal(b.g.check({ cmd: "click", args: ["e20"] }), stale);
+  // A new step reads a fresh snapshot.
+  b.g.begin(4, tabs(`${M}Pasta | Mealie`), page);
+  assert.equal(b.g.check({ cmd: "click", args: ["e20"] }), null);
+  // Without --submit nothing changes.
+  const c = guard(page, `${M}Pasta | Mealie`);
+  c.g.check({ cmd: "fill", args: ["e3", "x"] });
+  assert.equal(c.g.check({ cmd: "click", args: ["e20"] }), null);
+});
+
+test("edits on a non-ref target, an unknown ref or an unreadable page are still audited", () => {
+  const sel = guard(detail.replace(M, ""), "Mealie", "https://s.test/r/old");
+  assert.equal(sel.g.check({ cmd: "fill", args: ["#name", "Renamed"] }), null);
+  assert.deepEqual(readAudit(sel.dir), [{ step: 3, url: "https://s.test/r/old", control: "#name", cmd: "fill" }]);
+  const unknown = guard(detail.replace(M, ""), "Mealie", "https://s.test/r/old");
+  assert.equal(unknown.g.check({ cmd: "check", args: ["e99"] }), null);
+  assert.deepEqual(readAudit(unknown.dir), [{ step: 3, url: "https://s.test/r/old", control: "e99", cmd: "check" }]);
+  const blind = guard(null, "Mealie", "https://s.test/r/old");
+  assert.equal(blind.g.check({ cmd: "fill", args: ["e6", "Renamed"] }), null);
+  assert.deepEqual(readAudit(blind.dir), [{ step: 3, url: "https://s.test/r/old", control: "(unreadable page)", cmd: "fill" }]);
+});
+
+test("an unparsed confirm line inside a delete dialog files the refs it mentions (fails closed)", () => {
+  const page = [
+    '- heading "Items" [level=1] [ref=e1]',
+    '- dialog "Delete item?" [ref=e2]:',
+    "  - paragraph [ref=e3]: This cannot be undone.",
+    '  - button "Cancel" [ref=e4]',
+    "  - button [ref=e5] Confirm",
+  ].join("\n");
+  const { g, dir } = guard(page, "Items");
+  assert.match(g.check({ cmd: "click", args: ["e5"] }) ?? "", /^error: refused: /);
+  assert.equal(readRefusals(dir).length, 1);
+  assert.equal(g.check({ cmd: "click", args: ["e4"] }), null);
+});

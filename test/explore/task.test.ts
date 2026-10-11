@@ -69,7 +69,7 @@ test("the writes prompt states the marker, the rules, the forbidden list and the
   assert.ok(t.includes(`Marker for this run: ${M}`));
   assert.ok(t.includes(`starts with ${M}`));
   assert.ok(t.includes("You may edit or delete only items whose name starts with"));
-  assert.ok(t.includes("is refused unless the page title, a heading, or the open dialog shows"));
+  assert.ok(t.includes(`is refused unless the open dialog shows ${M}, or the item's own page shows it in its title or main heading (a list with several delete buttons never counts).`));
   for (const forbidden of ["payments or purchases", "signing up", "sending messages", "changing passwords", "deleting users, groups or households", "importing or restoring a whole database", "system or admin settings"]) {
     assert.ok(t.includes(forbidden), forbidden);
   }

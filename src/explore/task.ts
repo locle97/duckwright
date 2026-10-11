@@ -16,7 +16,7 @@ export function exploreTask(url: string, opts: { brief?: string; writes?: { mark
 
 Writes are allowed in this run (this is a disposable test instance). Marker for this run: ${marker}
 - Every item you create (a recipe, a cookbook, a list, an entry, ...) must have a name or title that starts with ${marker}. Write the marker first, then a short name, for example ${marker}Pasta.
-- You may edit or delete only items whose name starts with ${marker}. Never touch anything else, including items with another DW- marker or none. Open an item you created before deleting it: a delete or confirm control is refused unless the page title, a heading, or the open dialog shows ${marker}.
+- You may edit or delete only items whose name starts with ${marker}. Never touch anything else, including items with another DW- marker or none. Open an item you created before deleting it: a delete or confirm control is refused unless the open dialog shows ${marker}, or the item's own page shows it in its title or main heading (a list with several delete buttons never counts).
 - Still forbidden: payments or purchases, signing up, sending messages, emails or invitations, changing passwords, accounts or security settings, deleting users, groups or households, importing or restoring a whole database, and system or admin settings.
 - Record what you do: right after creating an item, {"cmd": "note", "args": ["created", "<the item's name, starting with the marker>", "<its URL>"]}; after deleting it and seeing it gone, {"cmd": "note", "args": ["removed", "<the same name>"]}.
 - Declare each function of the app as soon as you see it: {"cmd": "note", "args": ["function", "<short name, for example Create recipe>", "<URL of its page or area>"]}.
