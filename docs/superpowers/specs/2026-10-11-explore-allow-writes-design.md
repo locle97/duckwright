@@ -67,7 +67,7 @@ The finishing JSON gains an optional `functions` array:
 
 Statuses a run may report: `ok`, `broken`, `blocked` (could not be exercised: needs an external service, a forbidden action, missing data). `steps` are plain-language and include any setup. Invalid entries are dropped and counted (`dropped_functions`), as for flows.
 
-Without the flag the prompt keeps today's read-only rules; the `function` declaration and the `functions` list are still described (read-only explore can build the inventory, but should not write), `created` and `removed` are not.
+Without the flag the prompt is byte-for-byte what it is today: no function, marker or ledger instructions (a regression test pins this). `function` notes are still accepted if the agent sends one, and a returning read-only run's brief shows known functions as information, but a read-only run does not build the inventory on its own.
 
 ## Notes
 
@@ -94,7 +94,7 @@ Because deletes from a list row are refused (the row's page title and headings d
 
 ### Audit of edits (after the run)
 
-Edits cannot be told reliably from creation or search forms, so they are audited, not blocked. From `history.json` (the new `page` entries and the actions), the report lists under "Possible writes to unmarked items" each `fill`, `type`, `select`, `check` or `uncheck` action where the page's title and URL carry no marker, the URL is not a ledger URL, the typed value does not start with the marker (that would be naming a new item), and the control does not look like a search or filter (role `searchbox`, or a name matching `/search|filter/i`). Each entry shows the step, the page URL and the control. It is a heuristic for human review, not a verdict.
+Edits cannot be told reliably from creation or search forms, so they are audited, not blocked. The write guard records them live (it has the snapshot, so it can name the control, which `history.json` does not keep) to `<run>/audit.jsonl`, and the report lists under "Possible writes to unmarked items" each `fill`, `type`, `select`, `check` or `uncheck` action where the page's title and URL carry no marker, the URL is not a ledger URL, the typed value does not start with the marker (that would be naming a new item), and the control does not look like a search or filter (role `searchbox`, or a name matching `/search|filter/i`). Each entry shows the step, the page URL and the control. It is a heuristic for human review, not a verdict.
 
 ## Data model changes
 
