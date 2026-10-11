@@ -402,7 +402,7 @@ options:
                         tasks/explore-<host>/, runnable with
                         duckwright -p -f tasks/explore-<host>/
   --max-steps MAX_STEPS
-                        step budget (default 40)
+                        step budget (default 60)
 
 Other run options (--model, --env, --state, --session, --headed, --network,
 --screenshot, --video, --jev, --debug, --snapshot-*) work as for a task.
@@ -419,7 +419,7 @@ const EXPLORE_REJECTED: readonly (readonly [string[], string])[] = [
   [["--theme"], "--theme does not apply to explore"],
 ];
 
-/** `settings` should already hold the explore default (maxSteps 40); this applies none. */
+/** `settings` should already hold the explore default (maxSteps 60); this applies none. */
 export function parseExploreArgs(argv: string[], defaultSkill: string, settings: TaskSettings = {}): Parsed<ExploreArgs> {
   const fail = (msg: string): never => {
     throw new UsageError(msg, EXPLORE_USAGE, "duckwright explore");

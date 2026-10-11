@@ -11,6 +11,7 @@ import type { WebHandle } from "../src/web/index.ts";
 import type { ManagerEvent, ManagerLike } from "../src/runs/manager.ts";
 import type { PastRun } from "../src/runs/past.ts";
 import type { AgentOptions, RunResult } from "../src/loop.ts";
+import { NoteSink } from "../src/explore/notes.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightError } from "../src/pw.ts";
@@ -1850,4 +1851,119 @@ test("explore_after_double_dash_is_a_task_and_never_uses_tui", async () => {
   const loadTui = async (): Promise<TuiModule> => { loaded = true; throw new Error("no"); };
   assert.equal(await main(t.argv, t.deps({ isTTY: () => true, loadTui, createAgent: exploreAgent() })), 0);
   assert.equal(loaded, false);
+});
+
+// ---- explore: site memory ----
+
+const SHOP = "https://shop.example/";
+
+function shopAgent(pages: { url: string; links: string[] }[], seen: AgentOptions[] = []) {
+  return agentWith(async (opts) => {
+    seen.push(opts);
+    const history = pages.map((p, i) => exploreEntry({ step: i + 1, page: { url: p.url, title: "T", links: p.links } }));
+    for (const r of history) opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
+    return { success: true, answer: FLOWS, steps: history.length, costUsd: 0, history };
+  });
+}
+
+const SHOP_RUN_1 = [
+  { url: SHOP, links: [`${SHOP}a`, `${SHOP}b`] },
+  { url: `${SHOP}a`, links: [SHOP] },
+];
+
+function shopEnv() {
+  const e = env();
+  const base = e.deps;
+  e.deps = (over = {}) => base({ loadConfig: () => ({}), ...over });
+  return { ...e, argv: ["explore", SHOP, "--skill", e.argv[2]] };
+}
+
+test("explore_memory_files_are_written_and_printed", async () => {
+  const e = shopEnv();
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
+  const md = path.join("environments", "shop.example.md");
+  const sm = path.join("environments", "shop.example.sitemap.json");
+  assert.ok(e.out.includes(`Environment: ${md}`));
+  assert.ok(e.out.includes(`Sitemap: ${sm}`));
+  assert.ok(e.out.indexOf(`Environment: ${md}`) > e.out.findIndex((l) => l.startsWith("Data:")));
+  assert.ok(fs.existsSync(path.join(e.tmp, md)));
+  assert.ok(fs.existsSync(path.join(e.tmp, sm)));
+  assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore-memory.json")));
+  assert.ok(seen[0].notes instanceof NoteSink);
+  assert.equal(seen[0].pageInfo, true);
+  assert.equal(seen[0].environment, null);
+});
+
+test("explore_second_run_loads_and_extends_the_map", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent([{ url: SHOP, links: [`${SHOP}a`, `${SHOP}b`] }], seen) })), 0);
+  assert.match(seen[0].task, /Earlier exploration of this site/);
+  assert.ok(seen[0].task.includes(`${SHOP}b`));
+  const mdText = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  assert.ok(mdText.length > 0);
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.equal(sm.runs, 2);
+  const urls = sm.pages.map((p: { url: string }) => p.url);
+  assert.equal(new Set(urls).size, urls.length);
+  // The second run was given the environment the first run wrote.
+  const third: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, third) })), 0);
+  assert.equal(third[0].environment, mdText.trim());
+});
+
+test("explore_explicit_env_wins_but_memory_files_still_update", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const shopMd = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  fs.writeFileSync(path.join(e.tmp, "environments", "other.md"), "OTHER ENV\n");
+  const seen: AgentOptions[] = [];
+  assert.equal(await main([...e.argv, "--env", "other"], e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
+  assert.equal(seen[0].environment, "OTHER ENV");
+  assert.equal(fs.readFileSync(path.join(e.tmp, "environments", "other.md"), "utf8"), "OTHER ENV\n");
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.equal(sm.runs, 2);
+  assert.ok(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8").length > 0);
+  assert.ok(shopMd.length > 0);
+});
+
+test("explore_env_path_receives_the_generated_environment", async () => {
+  const e = shopEnv();
+  const custom = path.join(e.tmp, "mine.md");
+  fs.writeFileSync(custom, "My notes\n");
+  assert.equal(await main([...e.argv, "--env", custom], e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  assert.ok(e.out.includes(`Environment: ${custom}`));
+  assert.ok(fs.existsSync(custom));
+  assert.ok(fs.existsSync(path.join(e.tmp, "environments", "shop.example.sitemap.json")));
+  assert.equal(fs.existsSync(path.join(e.tmp, "environments", "shop.example.md")), false);
+});
+
+test("task_runs_ignore_the_generated_environment", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const t = env();
+  const seen: AgentOptions[] = [];
+  const createAgent = agentWith(async (opts) => { seen.push(opts); return result(true); });
+  assert.equal(await main(["open shop.example", "--skill", t.argv[2]], t.deps({ createAgent })), 0);
+  assert.equal(seen[0].environment, null);
+  assert.equal(seen[0].notes, undefined);
+  assert.ok(!seen[0].pageInfo);
+});
+
+test("explore_memory_write_failure_warns_and_fails_an_otherwise_good_run", async () => {
+  const e = shopEnv();
+  fs.writeFileSync(path.join(e.tmp, "environments"), "file");
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 1);
+  assert.ok(e.out.some((l) => l.startsWith("# Exploration report")));
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot save site memory")));
+  assert.ok(!e.out.some((l) => l.startsWith("Environment:")));
+});
+
+test("explore_without_a_recorded_page_creates_no_memory_files", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent() })), 0);
+  assert.equal(fs.existsSync(path.join(e.tmp, "environments")), false);
+  assert.ok(!e.out.some((l) => l.startsWith("Environment:") || l.startsWith("Sitemap:")));
 });

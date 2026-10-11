@@ -5,10 +5,11 @@ import { RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs 
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
-import { EnvError, loadEnvironment } from "./environment.ts";
+import { EnvError, isEnvPath, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun, loadHistory } from "./export.ts";
 import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
+import { loadMemory, saveMemory } from "./explore/memory.ts";
 import { writeExploreTasks } from "./explore/tasks.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
@@ -502,13 +503,21 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stderr(badSecret);
     return 2;
   }
-  const problem = preflightArgs(deps, run);
+  const host = new URL(url).host;
+  const mem = loadMemory(host);
+  for (const w of mem.warnings) deps.stderr(`warning: ${w}`);
+  // An explicit --env wins; otherwise an earlier run's environment file for this host is used.
+  const runArgs = run.env === null && mem.envName !== null ? { ...run, env: mem.envName } : run;
+  const problem = preflightArgs(deps, runArgs);
   if (problem) {
     deps.stderr(problem);
     return 2;
   }
   const handle = startRun(
-    { task: exploreTask(url), taskFile: null, args: run, exportTest: false, consoleErrors: true },
+    {
+      task: exploreTask(url, { brief: mem.brief }), taskFile: null, args: runArgs, exportTest: false,
+      consoleErrors: true, explore: { host },
+    },
     {
       ...deps,
       humanFor: () => (deps.isTTY() ? deps.human("duckwright explore") : null),
@@ -542,6 +551,18 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
   } catch (e) {
     writeFailed = true;
     deps.stderr(`explore: cannot write report: ${errMsg(e)}`);
+  }
+  try {
+    const m = await saveMemory({
+      host, runDir: handle.workdir, data, report, startUrl: url,
+      envFile: run.env !== null && isEnvPath(run.env) ? path.resolve(run.env) : null,
+    });
+    for (const w of m.warnings) deps.stderr(`warning: ${w}`);
+    if (m.md !== null) deps.stdout(`Environment: ${m.md}`);
+    if (m.sitemap !== null) deps.stdout(`Sitemap: ${m.sitemap}`);
+  } catch (e) {
+    writeFailed = true;
+    deps.stderr(`explore: cannot save site memory: ${errMsg(e)}`);
   }
   if (writeTasks) {
     try {
