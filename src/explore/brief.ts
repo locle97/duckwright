@@ -8,16 +8,36 @@ export const BRIEF_MAX_BYTES = 4096;
 const safe = (s: string): string => neutralise(flat(s));
 
 /** What a returning explore run should spend its budget on, as prompt text; "" when nothing is known yet. */
-export function frontierBrief(sm: Sitemap, maxBytes: number = BRIEF_MAX_BYTES): string {
+export function frontierBrief(sm: Sitemap, maxBytes: number = BRIEF_MAX_BYTES, opts: { writes?: boolean } = {}): string {
   const pages = sm.pages ?? [];
   const frontier = sm.frontier ?? [];
   const flows = sm.flows ?? [];
+  const functions = sm.functions ?? [];
+  const created = sm.created ?? [];
   if (pages.length === 0) return "";
   const known = new Set(pages.map((p) => p.url));
   const broken = pages.filter((p) => p.status === "broken").length;
   // Off-limits comes first: trimming drops from the end, and that list must be the last thing lost.
   const groups: [string, string[]][] = [
     ["Off-limits (never open these)", (sm.notes?.["off-limits"] ?? []).map((t) => `- ${safe(t)}`)],
+    ...(opts.writes
+      ? ([
+          [
+            "Functions still to exercise (untested first, then broken to re-check; blocked ones only if something changed)",
+            (["untested", "broken", "blocked"] as const).flatMap((s) =>
+              functions.filter((f) => f.status === s).map((f) => `- ${safe(f.name)} (${s})${f.area ? ` at ${safe(f.area)}` : ""}`)),
+          ],
+          [
+            "Leftovers from earlier runs (do not touch; they do not carry this run's marker)",
+            created.filter((c) => !c.removed).map((c) => `- ${safe(c.name)}${c.url ? ` at ${safe(c.url)}` : ""}`),
+          ],
+        ] as [string, string[]][])
+      : ([
+          [
+            "Known functions (information only; do not write)",
+            functions.map((f) => `- ${safe(f.name)} (${safe(f.status)})`),
+          ],
+        ] as [string, string[]][])),
     ["Unvisited links (explore these first)", frontier.map((u) => `- ${safe(u)}`)],
     [
       "Flows to re-check (dead-end or broken last time)",

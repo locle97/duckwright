@@ -280,3 +280,17 @@ test("saveMemory merges the run's ledger, declared functions and reported functi
   assert.deepEqual(sm.functions.map((f) => [f.name, f.status]).sort(), [["Create recipe", "ok"], ["Delete recipe", "untested"]]);
   assert.deepEqual(sm.created.map((c) => c.name), ["DW-1-Pasta"]);
 });
+
+test("loadMemory forwards writes to the brief", () => {
+  const root = tmpDir();
+  const seeded = emptySitemap(HOST);
+  seeded.runs = 1;
+  seeded.pages.push({
+    url: "https://shop.example/", title: "home", purpose: "", status: "ok", http_status: null, depth: 0,
+    first_seen_run: 1, last_seen_run: 1, links: [], pattern: null,
+  });
+  seeded.functions.push({ name: "Add to cart", area: null, status: "untested", steps: [], expected: "", notes: "", first_seen_run: 1, last_run: 1 });
+  fs.writeFileSync(memoryPaths(HOST, root).sitemap, JSON.stringify(seeded));
+  assert.ok(loadMemory(HOST, root, { writes: true }).brief.includes("Functions still to exercise"));
+  assert.ok(loadMemory(HOST, root).brief.includes("Known functions"));
+});

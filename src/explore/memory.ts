@@ -134,13 +134,13 @@ function readSitemap(file: string, warnings: string[]): SitemapRead {
   return { sitemap: null, unreadable: null };
 }
 
-export function loadMemory(host: string, root: string = ENV_DIR) {
+export function loadMemory(host: string, root: string = ENV_DIR, opts: { writes?: boolean } = {}) {
   const p = memoryPaths(host, root);
   const warnings: string[] = [];
   const { sitemap } = readSitemap(p.sitemap, warnings);
   return {
     sitemap,
-    brief: sitemap ? frontierBrief(sitemap) : "",
+    brief: sitemap ? frontierBrief(sitemap, undefined, opts) : "",
     envName: fs.existsSync(p.md) ? p.slug : null,
     warnings,
   };
