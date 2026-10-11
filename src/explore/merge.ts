@@ -125,6 +125,8 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
   // 4. Notes.
   for (const kind of MEMORY_KINDS) base.notes[kind] = base.notes[kind] ?? [];
   for (const n of ev.notes) {
+    // The ledger and the function inventory are merged separately (Task 4); they are not memory notes.
+    if (n.kind === "created" || n.kind === "removed" || n.kind === "function") continue;
     const nurl = norm(n.url);
     if (n.kind === "page") {
       const p = nurl ? pages.get(nurl) : undefined;

@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { NoteSink, checkNoteArgs, looksLikeSecret, readNotes, readRejected } from "../../src/explore/notes.ts";
+import { readLedger } from "../../src/explore/writes.ts";
 import { tmpDir } from "../helpers.ts";
 
 const HOST = "shop.example";
@@ -64,4 +65,41 @@ test("rejected adds are counted in a file that survives a crash", () => {
   assert.deepEqual(readNotes(dir).map((n) => n.text), ["fine"]);
   assert.ok(!fs.readFileSync(path.join(dir, "notes.jsonl"), "utf8").includes("hunter2"));
   assert.equal(readRejected(tmpDir()), 0);
+});
+
+const M = "DW-261011-a3f9-";
+
+test("created and removed notes need the flag's marker", () => {
+  assert.match(checkNoteArgs(["created", `${M}Pasta`], HOST) ?? "", /only available with --allow-writes/);
+  assert.match(checkNoteArgs(["removed", `${M}Pasta`], HOST) ?? "", /only available with --allow-writes/);
+  assert.equal(checkNoteArgs(["created", `${M}Pasta`, "https://shop.example/r/1"], HOST, M), null);
+  assert.match(checkNoteArgs(["created", "Pasta"], HOST, M) ?? "", new RegExp(`must start with the run marker ${M}`));
+  assert.match(checkNoteArgs(["created", "DW-261011-ffff-Pasta"], HOST, M) ?? "", /must start with the run marker/);
+});
+
+test("function notes are accepted in every explore run", () => {
+  assert.equal(checkNoteArgs(["function", "Create recipe", "https://shop.example/r/create"], HOST), null);
+  assert.equal(checkNoteArgs(["function", "Create recipe"], HOST, M), null);
+  assert.match(checkNoteArgs(["function", "password: hunter2"], HOST) ?? "", /secret/);
+});
+
+test("the sink writes the ledger for created and removed, and rejects an unmatched removed", () => {
+  const dir = tmpDir();
+  const sink = new NoteSink(dir, HOST, M);
+  sink.step = 4;
+  assert.equal(sink.add(["created", `${M}Pasta`, "https://shop.example/r/1#x"]), "ok");
+  assert.match(sink.add(["removed", `${M}Soup`]), /does not match an item created in this run/);
+  assert.equal(sink.add(["removed", `${M.toLowerCase()}pasta`]), "ok");
+  assert.deepEqual(readLedger(dir), [{ name: `${M}Pasta`, url: "https://shop.example/r/1", removed: true }]);
+  const kinds = readNotes(dir).map((n) => n.kind);
+  assert.deepEqual(kinds, ["created", "removed"]);
+  const raw = fs.readFileSync(path.join(dir, "notes.jsonl"), "utf8");
+  assert.ok(raw.includes('{"rejected":1}'));
+});
+
+test("without a marker the sink refuses created notes and writes no ledger", () => {
+  const dir = tmpDir();
+  const sink = new NoteSink(dir, HOST);
+  assert.match(sink.add(["created", `${M}Pasta`]), /only available with --allow-writes/);
+  assert.equal(fs.existsSync(path.join(dir, "created.jsonl")), false);
 });

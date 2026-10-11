@@ -5,8 +5,9 @@ import { redactText } from "../redact.ts";
 import { codePointLength, flat } from "../text.ts";
 import { normalizeUrl } from "./site.ts";
 import type { NoteKind } from "./site.ts";
+import { CREATED_FILE, itemKey, startsWithMarker } from "./writes.ts";
 
-export const NOTE_KINDS: readonly NoteKind[] = ["business", "page", "quirk", "off-limits", "account", "flow"];
+export const NOTE_KINDS: readonly NoteKind[] = ["business", "page", "quirk", "off-limits", "account", "flow", "created", "removed", "function"];
 export const NOTE_TEXT_MAX = 400;
 export const NOTES_FILE = "notes.jsonl";
 
@@ -25,7 +26,7 @@ export function looksLikeSecret(text: string): boolean {
 }
 
 /** The error text for an invalid note action, or null when it is fine. */
-export function checkNoteArgs(args: string[], host: string): string | null {
+export function checkNoteArgs(args: string[], host: string, marker?: string): string | null {
   if (args.length < 2 || args.length > 3) return "error: note needs [kind, text] or [kind, text, url]";
   if (!NOTE_KINDS.includes(args[0] as NoteKind)) return `error: note kind must be one of ${NOTE_KINDS.join(", ")}`;
   const text = flat(args[1]).trim();
@@ -33,6 +34,10 @@ export function checkNoteArgs(args: string[], host: string): string | null {
   if (codePointLength(text) > NOTE_TEXT_MAX) return `error: note text is longer than ${NOTE_TEXT_MAX} characters`;
   if (looksLikeSecret(text)) {
     return "error: note looks like it contains a secret; name where the credential comes from instead of its value";
+  }
+  if (args[0] === "created" || args[0] === "removed") {
+    if (marker === undefined) return `error: ${args[0]} notes are only available with --allow-writes`;
+    if (!startsWithMarker(text, marker)) return `error: ${args[0]} note must start with the run marker ${marker}`;
   }
   if (args.length === 3) {
     const url = normalizeUrl(args[2]);
@@ -47,28 +52,42 @@ export class NoteSink {
   step = 0;
   readonly workdir: string;
   readonly host: string;
+  readonly marker: string | undefined;
+  private readonly created = new Set<string>();
 
-  constructor(workdir: string, host: string) {
+  constructor(workdir: string, host: string, marker?: string) {
     this.workdir = workdir;
     this.host = host;
+    this.marker = marker;
+  }
+
+  /** Count a refused note: a marker line, never the refused text. On disk at once, so a crash keeps it. */
+  private refuse(message: string): string {
+    try {
+      fs.appendFileSync(path.join(this.workdir, NOTES_FILE), JSON.stringify({ rejected: 1 }) + "\n");
+    } catch {
+      // counting is best effort
+    }
+    return message;
   }
 
   add(args: string[]): string {
-    const err = checkNoteArgs(args, this.host);
-    if (err !== null) {
-      // Count only: a marker line, never the refused text. It is on disk at once, so a crash keeps it.
-      try {
-        fs.appendFileSync(path.join(this.workdir, NOTES_FILE), JSON.stringify({ rejected: 1 }) + "\n");
-      } catch {
-        // counting is best effort
-      }
-      return err;
+    const err = checkNoteArgs(args, this.host, this.marker);
+    if (err !== null) return this.refuse(err);
+    const kind = args[0] as NoteKind;
+    const text = flat(args[1]).trim();
+    const url = args.length === 3 ? normalizeUrl(args[2]) : null;
+    if (kind === "removed" && !this.created.has(itemKey(text))) {
+      return this.refuse("error: removed note does not match an item created in this run");
     }
-    const line: NoteLine = {
-      step: this.step, kind: args[0] as NoteKind, text: flat(args[1]).trim(),
-      url: args.length === 3 ? normalizeUrl(args[2]) : null,
-    };
+    const line: NoteLine = { step: this.step, kind, text, url };
     fs.appendFileSync(path.join(this.workdir, NOTES_FILE), JSON.stringify(line) + "\n");
+    if (kind === "created") {
+      this.created.add(itemKey(text));
+      fs.appendFileSync(path.join(this.workdir, CREATED_FILE), JSON.stringify({ step: this.step, created: text, url }) + "\n");
+    } else if (kind === "removed") {
+      fs.appendFileSync(path.join(this.workdir, CREATED_FILE), JSON.stringify({ step: this.step, removed: text }) + "\n");
+    }
     return "ok";
   }
 }

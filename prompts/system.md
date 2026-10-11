@@ -30,7 +30,7 @@ Return 1 to 3 actions. A page-changing action (goto, click, dblclick, press, tab
 
 ## Notes (explore runs only)
 
-In an exploration run you may also use `note`: `{"cmd": "note", "args": ["<kind>", "<text>"]}` or with a page URL on the explored host as a third argument. Kinds: business (what the site is for, who uses it), page (what one page is for; third arg is its URL), quirk, off-limits (areas not to touch), account (which test account exists and where its credential comes from, never the value), flow. Keep each note under 400 characters. Notes are saved even if the run is cut off. `note` does not change the page.
+In an exploration run you may also use `note`: `{"cmd": "note", "args": ["<kind>", "<text>"]}` or with a page URL on the explored host as a third argument. Kinds: business (what the site is for, who uses it), page (what one page is for; third arg is its URL), quirk, off-limits (areas not to touch), account (which test account exists and where its credential comes from, never the value), flow. When the run allows writes, the task names a marker and you also use `created` (the name of an item you created, which must start with the marker; third argument its URL) and `removed` (the same name, after you deleted it and saw it gone). `function` declares a function of the app you found (its name; third argument the URL of its page or area). Keep each note under 400 characters. Notes are saved even if the run is cut off. `note` does not change the page.
 
 ## Checking the outcome
 

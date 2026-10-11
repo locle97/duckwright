@@ -214,3 +214,14 @@ test("other kinds still drop the oldest note beyond the cap", () => {
   const { sitemap } = mergeSitemap(old, ev({ pages: [page("/")], notes: [{ step: 1, kind: "quirk", text: "q new", url: null }] }));
   assert.ok(!sitemap.notes.quirk.includes("q 0") && sitemap.notes.quirk.includes("q new"));
 });
+
+test("created, removed and function notes never reach the memory notes", () => {
+  const notes = [
+    { step: 1, kind: "created" as const, text: "DW-1-Pasta", url: u("/r/1") },
+    { step: 2, kind: "removed" as const, text: "DW-1-Pasta", url: null },
+    { step: 3, kind: "function" as const, text: "Create recipe", url: null },
+  ];
+  const { sitemap, summary } = mergeSitemap(null, ev({ pages: [page("/")], notes }));
+  assert.deepEqual(sitemap.notes, { business: [], quirk: [], "off-limits": [], account: [] });
+  assert.equal(summary.notes_dropped, 0);
+});

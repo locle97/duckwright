@@ -4,7 +4,7 @@ export const SITEMAP_VERSION = 1;
 export const CAPS = { pages: 500, flows: 100, frontier: 100, notesPerKind: 20, linksPerPage: 100 } as const;
 
 export type PageStatus = "ok" | "broken" | "stale" | "gated" | "external";
-export type NoteKind = "business" | "page" | "quirk" | "off-limits" | "account" | "flow";
+export type NoteKind = "business" | "page" | "quirk" | "off-limits" | "account" | "flow" | "created" | "removed" | "function";
 export type MemoryKind = "business" | "quirk" | "off-limits" | "account";
 export const MEMORY_KINDS: readonly MemoryKind[] = ["business", "quirk", "off-limits", "account"];
 
