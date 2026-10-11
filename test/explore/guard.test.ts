@@ -251,3 +251,35 @@ test("inline text cannot spoof a ref or a heading level", () => {
   assert.equal(lines[1].text, "see [level=1] here");
   assert.equal(parseSnapshot("- paragraph: [level=1] [ref=e5]")[0].ref, null);
 });
+
+test("single-quoted YAML keys are unwrapped so delete-like names are still found", () => {
+  const refused = /^error: refused: /;
+  for (const line of [
+    `- 'button "Delete #3" [ref=e9]'`,
+    `- 'button "Delete: Pasta" [ref=e9]': inline`,
+    `- 'button "It''s gone: Delete" [ref=e9]'`,
+  ]) {
+    const { g } = guard(`- main [ref=e1]:\n  ${line}`, "Recipes");
+    assert.match(g.check({ cmd: "click", args: ["e9"] }) ?? "", refused, line);
+  }
+  assert.equal(parseSnapshot(`- 'button "It''s gone: Delete" [ref=e9]'`)[0].name, "It's gone: Delete");
+});
+
+test("a quoted level-1 heading with the marker unlocks the one delete on a detail page", () => {
+  const snap = [`- 'heading "${M}x: y" [level=1] [ref=e2]'`, '- button "Delete" [ref=e3]'].join("\n");
+  assert.equal(parseSnapshot(snap)[0].level, 1);
+  assert.equal(guard(snap, "Mealie").g.check({ cmd: "click", args: ["e3"] }), null);
+});
+
+test("unparsed controls fail closed; unparsed lines without a ref are ignored", () => {
+  const { g } = guard("- main [ref=e1]:\n  - button /Delete \\d+/ [ref=e9]", "Recipes");
+  assert.match(g.check({ cmd: "click", args: ["e9"] }) ?? "", /^error: refused: /);
+  assert.equal(parseSnapshot("- /url: /x\n- ??? weird").length, 0);
+  const harmless = guard("- /url: /x\n- button \"Edit\" [ref=e3]", "Recipes").g;
+  assert.equal(harmless.check({ cmd: "click", args: ["e3"] }), null);
+});
+
+test("inline text in the quoted form cannot spoof a ref", () => {
+  const snap = [`- 'text: note [ref=e9]'`, '- button "Delete" [ref=e9]'].join("\n");
+  assert.match(guard(snap, "Recipes").g.check({ cmd: "click", args: ["e9"] }) ?? "", /^error: refused: 'Delete'/);
+});

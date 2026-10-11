@@ -30,29 +30,62 @@ export interface SnapLine {
   level: number | null;
 }
 
-const LINE = /^(\s*)- ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?(.*)$/;
 const REF = /\[ref=([^\]]+)\]/;
 const LEVEL = /\[level=(\d+)\]/;
 const ATTRS = /^(?:\s*\[[^\]]*\])*/;
 const REF_SHAPE = /^(?:f\d+)?e\d+$/;
 
-/** The accessibility snapshot as lines with role, name, ref and inline text (lines like `- /url: x` are skipped). */
+const QUOTED = /^(\s*)- '((?:[^']|'')*)'(.*)$/;
+const FIRST_REF = /\[ref=([^\]]+)\]/;
+
+/** One `role "name" [attrs]: text` body (after `- `), or null when it has another shape. */
+function parseBody(indent: number, body: string, tail: string): SnapLine | null {
+  const m = /^([\w-]+)(?: "((?:[^"\\]|\\.)*)")?(.*)$/.exec(body);
+  if (!m) return null;
+  const all = (m[3] ?? "") + tail;
+  const attrs = ATTRS.exec(all)?.[0] ?? ""; // only these bracket groups are attributes; inline text can't supply one
+  const rest = all.slice(attrs.length);
+  const role = m[1];
+  const ref = REF.exec(attrs)?.[1] ?? null;
+  if (ref === null && !rest.trimStart().startsWith(":") && FIRST_REF.test(rest)) return null; // exotic name: fail closed below
+  return {
+    indent,
+    role,
+    name: (m[2] ?? "").replace(/\\(.)/g, "$1"),
+    ref,
+    level: role === "heading" ? Number(LEVEL.exec(attrs)?.[1] ?? NaN) || null : null,
+    text: rest.trim().replace(/^:\s*/, ""),
+  };
+}
+
+/**
+ * The accessibility snapshot as lines with role, name, ref and inline text. Keys playwright wraps in single
+ * quotes (names with `: `, ` #`, braces or backticks) are unwrapped. A line with a ref that still does not
+ * parse becomes an `unknown` control named by its raw text, so it can be judged delete-like (fail closed);
+ * lines without a ref (like `- /url: x`) are skipped.
+ */
 export function parseSnapshot(snapshot: string): SnapLine[] {
   const out: SnapLine[] = [];
   for (const raw of snapshot.split(/\r?\n/)) {
-    const m = LINE.exec(raw);
-    if (!m) continue;
-    const all = m[4] ?? "";
-    const attrs = ATTRS.exec(all)?.[0] ?? ""; // only these bracket groups are attributes; inline text can't supply one
-    const rest = all.slice(attrs.length);
-    out.push({
-      indent: m[1].length,
-      role: m[2],
-      name: (m[3] ?? "").replace(/\\(.)/g, "$1"),
-      ref: REF.exec(attrs)?.[1] ?? null,
-      level: m[2] === "heading" ? Number(LEVEL.exec(attrs)?.[1] ?? NaN) || null : null,
-      text: rest.trim().replace(/^:\s*/, ""),
-    });
+    const q = QUOTED.exec(raw);
+    const plain = q ? null : /^(\s*)- (.*)$/.exec(raw);
+    let line: SnapLine | null = null;
+    let text = "";
+    let indent = 0;
+    if (q) {
+      indent = q[1].length;
+      text = q[2].replace(/''/g, "'");
+      line = parseBody(indent, text, q[3]);
+    } else if (plain) {
+      indent = plain[1].length;
+      text = plain[2];
+      line = parseBody(indent, text, "");
+    }
+    if (line === null && (q || plain)) {
+      const ref = FIRST_REF.exec(text)?.[1];
+      if (ref !== undefined) line = { indent, role: "unknown", name: flat(text), ref, level: null, text: "" };
+    }
+    if (line !== null) out.push(line);
   }
   return out;
 }
