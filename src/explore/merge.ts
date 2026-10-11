@@ -175,9 +175,11 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
   base.flows = [...flows.values()].sort((a, b) => b.last_run - a.last_run).slice(0, CAPS.flows);
 
   // 5b. Function inventory: declared names are untested; a report carries the verdict; silence changes nothing.
-  const fnKey = (name: string): string => noteKey(name);
   const cap120 = (s: string): string => [...flat(s).trim()].slice(0, 120).join("");
+  const fnKey = (name: string): string => noteKey(cap120(name));
   const fns = new Map<string, SiteFunction>(base.functions.map((f) => [fnKey(f.name), f]));
+  const existed = new Set(fns.keys());
+  const updated = new Set<string>();
   for (const d of declared) {
     const k = fnKey(d.name);
     if (k === "" || fns.has(k)) continue;
@@ -195,25 +197,32 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
       status: f.status, steps: [...f.steps], expected: f.expected, notes: f.notes,
       first_seen_run: prev?.first_seen_run ?? run, last_run: run,
     });
-    if (prev) summary.functions_updated++;
-    else summary.functions_added++;
+    if (existed.has(k)) updated.add(k);
+    else if (!prev) summary.functions_added++;
   }
+  summary.functions_updated += updated.size;
   base.functions = [...fns.values()].sort((a, b) => b.last_run - a.last_run).slice(0, CAPS.functions);
 
   // 5c. Ledger of created items across runs (the agent's record; the harness never checks the items still exist).
-  const ledgerKey = (name: string, url: string | null) => `${noteKey(name)}|${url ?? ""}`;
+  const ledgerKey = (name: string, url: string | null) => `${noteKey(cap120(name))}|${url ?? ""}`;
   const created = new Map(base.created.map((c) => [ledgerKey(c.name, c.url), c]));
   for (const c of ev.created ?? []) {
-    const url = c.url === null ? null : norm(c.url);
-    const k = ledgerKey(c.name, url);
+    const url = c.url === null ? null : normalizeUrl(c.url); // plain: cleanup needs the real url, not a pattern
+    const name = cap120(c.name);
+    const k = ledgerKey(name, url);
     const prev = created.get(k);
     if (prev) prev.removed = prev.removed || c.removed;
     else {
-      created.set(k, { name: c.name, url, removed: c.removed, run });
+      created.set(k, { name, url, removed: c.removed, run });
       summary.created_logged++;
     }
   }
-  base.created = [...created.values()].slice(-CAPS.created);
+  const ledger = [...created.values()];
+  while (ledger.length > CAPS.created) {
+    const i = ledger.findIndex((c) => c.removed); // removed items are the cheapest to forget
+    ledger.splice(i === -1 ? 0 : i, 1);
+  }
+  base.created = ledger;
 
   // 6. Collapse parameterized urls (/product/1, /product/2, ...) into one page and one link target.
   const patterns = collapsePatterns([...pages.keys(), ...[...pages.values()].flatMap((p) => p.links), ...base.frontier]);

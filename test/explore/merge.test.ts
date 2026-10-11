@@ -287,3 +287,51 @@ test("the ledger appends, dedupes, marks removed and caps; old sitemaps without 
   assert.equal(m.sitemap.functions.length, 1);
   assert.equal(m.sitemap.created.length, 2);
 });
+
+test("a function name over 120 chars keeps one stable entry across runs", () => {
+  const long = "L".repeat(130);
+  const a = mergeSitemap(null, ev({ pages: [page("/")], notes: [decl(long)] })).sitemap;
+  const b = mergeSitemap(a, ev({ runName: "r2", pages: [page("/")], notes: [decl(long)], functions: [fn(long)] })).sitemap;
+  assert.deepEqual(b.functions.map((f) => [f.name.length, f.status]), [[120, "ok"]]);
+  const c = mergeSitemap(b, ev({ runName: "r3", pages: [page("/")], notes: [decl(long)], functions: [fn(long)] })).sitemap;
+  assert.equal(c.functions.length, 1);
+  assert.deepEqual(c.functions.map((f) => [f.name, f.status, f.steps, f.first_seen_run]), b.functions.map((f) => [f.name, f.status, f.steps, f.first_seen_run]));
+});
+
+test("ledger urls keep the real id even when a pattern page is stored", () => {
+  const base = { ...emptySitemap(H), runs: 1, pages: [{ url: u("/r/:id"), title: "R", purpose: "", status: "ok" as const, http_status: null, depth: 1, first_seen_run: 1, last_seen_run: 1, links: [], pattern: "/r/:id" }] };
+  const m = mergeSitemap(base, ev({ pages: [page("/")], created: [{ name: "DW-x-Pasta", url: u("/r/12?x=1"), removed: false }] }));
+  assert.equal(m.sitemap.created[0].url, u("/r/12"));
+});
+
+test("function counters: declare+report is one add; report twice is one update", () => {
+  const both = mergeSitemap(null, ev({ pages: [page("/")], notes: [decl("New one")], functions: [fn("New one")] })).summary;
+  assert.deepEqual([both.functions_added, both.functions_updated], [1, 0]);
+  const twice = mergeSitemap(null, ev({ pages: [page("/")], functions: [fn("Twice"), fn("twice")] })).summary;
+  assert.deepEqual([twice.functions_added, twice.functions_updated], [1, 0]);
+  const a = mergeSitemap(null, ev({ pages: [page("/")], functions: [fn("Old")] })).sitemap;
+  const r = mergeSitemap(a, ev({ pages: [page("/")], functions: [fn("Old"), fn("old")] })).summary;
+  assert.deepEqual([r.functions_added, r.functions_updated], [0, 1]);
+});
+
+test("ledger names are flattened and capped at 120 chars", () => {
+  const name = "DW-1-" + "line\nbreak ".repeat(20);
+  const m = mergeSitemap(null, ev({ pages: [page("/")], created: [{ name, url: null, removed: false }] })).sitemap;
+  assert.ok(name.length > 120);
+  assert.ok(!m.created[0].name.includes("\n"));
+  assert.ok([...m.created[0].name].length <= 120);
+});
+
+test("ledger over the cap evicts removed entries first, then the oldest", () => {
+  const full = Array.from({ length: CAPS.created - 1 }, (_, i) => ({ name: `DW-1-${i}`, url: null, removed: false }));
+  full.push({ name: "DW-1-old-removed", url: null, removed: true });
+  const a = mergeSitemap(null, ev({ pages: [page("/")], created: full })).sitemap;
+  const b = mergeSitemap(a, ev({ runName: "r2", pages: [page("/")], created: [{ name: "DW-2-new", url: null, removed: false }] })).sitemap;
+  assert.equal(b.created.length, CAPS.created);
+  assert.ok(!b.created.some((c) => c.name === "DW-1-old-removed")); // removed goes first
+  assert.ok(b.created.some((c) => c.name === "DW-1-0")); // unremoved leftovers kept
+  const c = mergeSitemap(b, ev({ runName: "r3", pages: [page("/")], created: [{ name: "DW-3-new", url: null, removed: false }] })).sitemap;
+  assert.equal(c.created.length, CAPS.created);
+  assert.ok(!c.created.some((x) => x.name === "DW-1-0")); // then the oldest unremoved
+  assert.ok(c.created.some((x) => x.name === "DW-3-new"));
+});
