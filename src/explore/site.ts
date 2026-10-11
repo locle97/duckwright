@@ -75,6 +75,8 @@ export function normalizeUrl(raw: string, base?: string): string | null {
 
 const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,})$/i;
 
+export const isIdSegment = (seg: string): boolean => ID_SEGMENT.test(seg);
+
 /** Maps each URL that has two or more id-like siblings to its path pattern, e.g. `/product/:id`. */
 export function collapsePatterns(urls: string[]): Map<string, string> {
   const groups = new Map<string, Set<string>>();

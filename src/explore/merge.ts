@@ -4,7 +4,7 @@ import type { PageInfo } from "./pages.ts";
 import type { NoteLine } from "./notes.ts";
 import type { Flow } from "./report.ts";
 import {
-  CAPS, MEMORY_KINDS, collapsePatterns, emptySitemap, normalizeUrl,
+  CAPS, MEMORY_KINDS, collapsePatterns, emptySitemap, isIdSegment, normalizeUrl,
 } from "./site.ts";
 import type { MemoryKind, SiteFlow, SitePage, Sitemap } from "./site.ts";
 
@@ -45,10 +45,33 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
   const pages = new Map<string, SitePage>(base.pages.map((p) => [p.url, p]));
   const visited = new Set<string>();
 
+  // 0. Canonicalise incoming urls against pattern pages stored by earlier runs (/product/7 -> /product/:id).
+  const storedPatterns = base.pages.filter((p) => p.pattern !== null).map((p) => new URL(p.url));
+  const pre = (url: string): string => {
+    const u = new URL(url);
+    const segs = u.pathname.split("/");
+    for (const pu of storedPatterns) {
+      const psegs = pu.pathname.split("/");
+      if (pu.origin !== u.origin || psegs.length !== segs.length) continue;
+      if (psegs.every((ps, i) => ps === segs[i] || (ps === ":id" && i > 0 && isIdSegment(segs[i])))) return pu.href;
+    }
+    return url;
+  };
+  const norm = (url: string | null): string | null => {
+    const n = url === null ? null : normalizeUrl(url);
+    return n === null ? null : pre(n);
+  };
+  const extLinks: string[] = [];
+
   // 1. Pages seen this run.
-  for (const obs of ev.pages) {
+  for (const raw of ev.pages) {
+    const url = norm(raw.url);
+    if (url === null) continue;
+    const obs = { ...raw, url };
     const external = hostOf(obs.url) !== ev.host;
-    const links = external ? [] : obs.links.filter((l) => hostOf(l) === ev.host);
+    const allLinks = external ? [] : raw.links.map((l) => norm(l)).filter((l): l is string => l !== null);
+    const links = allLinks.filter((l) => hostOf(l) === ev.host);
+    extLinks.push(...allLinks.filter((l) => hostOf(l) !== ev.host));
     let p = pages.get(obs.url);
     if (!p) {
       p = {
@@ -66,13 +89,18 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
     p.links = uniq([...p.links, ...links]).slice(0, CAPS.linksPerPage);
     if (!external && (p.status === "stale" || p.status === "broken")) p.status = "ok";
   }
-  const sameHostVisited = ev.pages.some((o) => hostOf(o.url) === ev.host);
+  const sameHostVisited = [...visited].some((u) => hostOf(u) === ev.host);
 
   // 2. Broken pages: a failed request, or a flow that starts there and was judged broken.
-  const brokenUrls = new Set(ev.failedPages);
+  const evFlows: Flow[] = [];
   for (const f of ev.flows) {
-    const s = normalizeUrl(f.start_url);
-    if (f.status === "broken" && s !== null) brokenUrls.add(s);
+    const start = norm(f.start_url);
+    if (start === null || hostOf(start) !== ev.host) continue;
+    evFlows.push({ ...f, start_url: start, steps: [...f.steps] });
+  }
+  const brokenUrls = new Set(ev.failedPages.map((f) => norm(f)).filter((f): f is string => f !== null));
+  for (const f of evFlows) {
+    if (f.status === "broken") brokenUrls.add(f.start_url);
   }
   for (const url of brokenUrls) {
     const p = pages.get(url);
@@ -85,26 +113,25 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
   // 3. Stale pages: only a run that finished normally can say a page is gone.
   if (ev.completed && sameHostVisited) {
     for (const p of pages.values()) {
-      if (!visited.has(p.url) && p.status !== "external" && run - p.last_seen_run >= STALE_AFTER_RUNS && p.status !== "stale") {
+      if (!visited.has(p.url) && p.status === "ok" && run - p.last_seen_run >= STALE_AFTER_RUNS) {
         p.status = "stale";
         summary.stale_pages++;
       }
     }
   }
 
-  const evFlows = ev.flows.map((f) => ({ ...f, steps: [...f.steps] }));
-
   // 4. Notes.
   for (const kind of MEMORY_KINDS) base.notes[kind] = base.notes[kind] ?? [];
   for (const n of ev.notes) {
+    const nurl = norm(n.url);
     if (n.kind === "page") {
-      const p = n.url ? pages.get(n.url) : undefined;
+      const p = nurl ? pages.get(nurl) : undefined;
       if (!p) { summary.notes_dropped++; continue; }
       if (/^\s*gated\b/i.test(n.text)) p.status = "gated";
       else p.purpose = n.text;
       summary.notes_added++;
     } else if (n.kind === "flow") {
-      const target = evFlows.length && n.url ? evFlows.find((f) => normalizeUrl(f.start_url) === n.url) : undefined;
+      const target = evFlows.length && nurl ? evFlows.find((f) => f.start_url === nurl) : undefined;
       if (!target) { summary.notes_dropped++; continue; }
       target.notes = target.notes ? `${target.notes}; ${n.text}` : n.text;
       summary.notes_added++;
@@ -138,7 +165,7 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
     const links = uniq(p.links.map(canon));
     const prev = merged.get(key);
     if (!prev) {
-      merged.set(key, { ...p, url: key, links, pattern: patterns.get(p.url) ?? null });
+      merged.set(key, { ...p, url: key, links, pattern: patterns.get(p.url) ?? p.pattern });
       continue;
     }
     prev.first_seen_run = Math.min(prev.first_seen_run, p.first_seen_run);
@@ -146,10 +173,11 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
     prev.links = uniq([...prev.links, ...links]).slice(0, CAPS.linksPerPage);
     if (p.status === "broken") prev.status = "broken";
     prev.purpose = prev.purpose || p.purpose;
+    prev.pattern = prev.pattern ?? patterns.get(p.url) ?? p.pattern;
   }
 
   // 7. Depth: breadth-first from the start URL; unreachable pages keep their old depth.
-  const start = canon(ev.start);
+  const start = canon(norm(ev.start) ?? ev.start);
   const depth = new Map<string, number>([[start, 0]]);
   const queue = [start];
   for (let i = 0; i < queue.length; i++) {
@@ -161,15 +189,26 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
 
   // 8. Frontier: same-host link targets never visited, plus the old frontier, nearest first.
   const known = new Set(merged.keys());
-  const candidates = uniq([
-    ...[...merged.values()].filter((p) => p.status !== "external").flatMap((p) => p.links),
-    ...base.frontier.map(canon),
-  ]).filter((l) => !known.has(l) && hostOf(l) === ev.host);
+  const isPatternUrl = (url: string) => /\/:id(\/|$)/.test(new URL(url).pathname);
+  const rawTargets = [
+    ...[...pages.values()].filter((p) => p.status !== "external").flatMap((p) => p.links),
+    ...base.frontier,
+  ];
+  const sampled = new Set<string>();
+  const candidates: string[] = [];
+  for (const raw of uniq(rawTargets)) {
+    if (hostOf(raw) !== ev.host) continue;
+    const target = canon(raw);
+    if (known.has(target)) continue;
+    if (isPatternUrl(raw)) continue;
+    if (target !== raw) {
+      if (sampled.has(target)) continue;
+      sampled.add(target);
+    }
+    candidates.push(raw);
+  }
   base.frontier = candidates.slice(0, CAPS.frontier);
-  base.external_links = uniq([
-    ...base.external_links,
-    ...[...merged.values()].flatMap((p) => p.links.filter((l) => hostOf(l) !== ev.host)),
-  ]).slice(0, CAPS.frontier);
+  base.external_links = uniq([...base.external_links, ...extLinks]).slice(0, CAPS.frontier);
 
   // 9. Page cap: drop long-broken pages first, then the least recently seen and deepest.
   let list = [...merged.values()];
