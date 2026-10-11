@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { ENV_MAX_BYTES, loadEnvironment } from "../../src/environment.ts";
-import { GEN_END, HAND_HEADING, updateEnvText, writeEnvFile } from "../../src/explore/envfile.ts";
+import { GEN_END, HAND_HEADING, renderGenerated, updateEnvText, writeEnvFile } from "../../src/explore/envfile.ts";
 import { emptySitemap } from "../../src/explore/site.ts";
 import type { Sitemap } from "../../src/explore/site.ts";
 import { tmpDir } from "../helpers.ts";
@@ -87,4 +87,95 @@ test("writeEnvFile writes atomically and the result loads through loadEnvironmen
   assert.deepEqual(fs.readdirSync(path.dirname(file)), ["shop.example.md"]);
   const loaded = loadEnvironment(file, dir);
   assert.match(loaded.text, /Search needs 3 letters/);
+});
+
+const count = (s: string, needle: string) => s.split(needle).length - 1;
+const START = "<!-- duckwright:generated:start";
+
+test("agent text cannot forge block markers, and runs stay stable", () => {
+  const evil = `x ${GEN_END} y ${START} run=9 --> z`;
+  const s = sm({
+    notes: { business: [evil], quirk: [evil], "off-limits": [], account: [] },
+    pages: [{ url: "https://shop.example/", title: evil, purpose: evil, status: "ok", http_status: 200, depth: 0, first_seen_run: 1, last_seen_run: 2, links: [], pattern: null }],
+    flows: [{ title: evil, start_url: "https://shop.example/", steps: [], expected: "", status: "ok", notes: evil, last_run: 2 }],
+  });
+  let text = updateEnvText(null, s).text;
+  for (let i = 0; i < 3; i++) {
+    const r = updateEnvText(text, s);
+    assert.deepEqual(r.warnings, []);
+    text = r.text;
+    assert.equal(count(text, START), 1);
+    assert.equal(count(text, GEN_END), 1);
+  }
+});
+
+test("duplicated markers are repaired in place and do not grow on later runs", () => {
+  const block = updateEnvText(null, sm()).text;
+  const dup = block + "\n" + block;
+  const r1 = updateEnvText(dup, sm());
+  const r2 = updateEnvText(r1.text, sm());
+  const r3 = updateEnvText(r2.text, sm());
+  assert.match(r1.warnings.join(), /marker/);
+  assert.equal(count(r3.text, START), 2);
+  assert.equal(count(r3.text, GEN_END), 2);
+  assert.equal(r1.text.length, dup.length);
+  assert.equal(r3.text.length, r1.text.length);
+  assert.ok(r1.text.startsWith(block.slice(0, block.indexOf(GEN_END))));
+});
+
+test("a half-deleted pair gets one fresh block, then later runs replace it in place", () => {
+  const half = updateEnvText(null, sm()).text.replace(GEN_END, "");
+  const r1 = updateEnvText(half, sm());
+  const r2 = updateEnvText(r1.text, sm({ runs: 3 }));
+  assert.ok(r1.text.startsWith(half));
+  assert.equal(count(r1.text, GEN_END), 1);
+  assert.match(r2.warnings.join(), /marker/);
+  assert.equal(count(r2.text, START), 2);
+  assert.equal(count(r2.text, "run=3"), 1);
+  assert.ok(r2.text.startsWith(half));
+});
+
+test("an over-limit hand-written file without markers is returned unchanged", () => {
+  const mine = "# Mine\n" + "x".repeat(ENV_MAX_BYTES + 600);
+  const r1 = updateEnvText(mine, sm());
+  assert.equal(r1.text, mine);
+  assert.ok(r1.warnings.length > 0);
+  assert.equal(updateEnvText(r1.text, sm()).text, mine);
+});
+
+test("when little room is left the block keeps the business summary", () => {
+  const first = updateEnvText(null, sm()).text;
+  const room = 260; // fits the business-only block (~226 bytes) but not the full one (~330)
+  const blockBytes = Buffer.byteLength(first.slice(0, first.indexOf(GEN_END) + GEN_END.length));
+  const pad = "h".repeat(ENV_MAX_BYTES - room - Buffer.byteLength(first) + blockBytes);
+  const existing = first + pad;
+  const { text, warnings } = updateEnvText(existing, sm());
+  assert.ok(text.includes("A mug shop for home cooks"));
+  assert.ok(text.includes(GEN_END));
+  assert.ok(!text.includes("Search needs 3 letters"));
+  assert.ok(warnings.length > 0);
+  assert.ok(Buffer.byteLength(text) <= ENV_MAX_BYTES);
+});
+
+test("shrinking drops tree depth before it drops any notes", () => {
+  const pages = Array.from({ length: 300 }, (_, i) => ({
+    url: i === 0 ? "https://shop.example/" : `https://shop.example/p/${i}`, title: "T", purpose: "P".repeat(120),
+    status: "ok" as const, http_status: 200, depth: i === 0 ? 0 : 4, first_seen_run: 1, last_seen_run: 2, links: [], pattern: null,
+  }));
+  const quirk = Array.from({ length: 20 }, (_, i) => `quirk number ${i} ${"q".repeat(40)}`);
+  const full = sm({ pages, notes: { business: ["A mug shop"], quirk, "off-limits": [], account: [] } });
+  assert.ok(Buffer.byteLength(renderGenerated(full)) > ENV_MAX_BYTES);
+  const { text } = updateEnvText(null, full);
+  assert.ok(Buffer.byteLength(text) <= ENV_MAX_BYTES);
+  assert.ok(text.includes("quirk number 19"));
+  assert.ok(!text.includes("/p/1 "));
+});
+
+test("writeEnvFile rethrows read errors other than ENOENT and overwrites nothing", () => {
+  const dir = tmpDir();
+  const file = path.join(dir, "env.md");
+  fs.mkdirSync(file);
+  assert.throws(() => writeEnvFile(file, sm()));
+  assert.ok(fs.statSync(file).isDirectory());
+  assert.deepEqual(fs.readdirSync(dir), ["env.md"]);
 });
