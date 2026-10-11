@@ -79,7 +79,7 @@ export function buildPrompt(
   const parts = [
     `Step ${step}/${maxSteps}`,
     section("task", task),
-    ...(environment ? [section("environment", environment)] : []),
+    ...(environment ? [section("environment", neutralise(environment))] : []),
     section("memory", memory || "(empty)"),
     section("tabs", neutralise(obs.tabs)),
     section("history", lines.length ? lines.join("\n") : "(none)"),

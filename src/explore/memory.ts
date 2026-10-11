@@ -8,11 +8,14 @@ import { frontierBrief } from "./brief.ts";
 import { writeEnvFile } from "./envfile.ts";
 import { mergeSitemap } from "./merge.ts";
 import type { RunEvidence } from "./merge.ts";
-import { readNotes } from "./notes.ts";
+import { readNotes, readRejected } from "./notes.ts";
 import type { NoteLine } from "./notes.ts";
-import type { ExploreReport } from "./report.ts";
+import type { ExploreReport, FlowStatus } from "./report.ts";
 import { MEMORY_KINDS, SITEMAP_VERSION, normalizeUrl, slugForHost } from "./site.ts";
-import type { Sitemap } from "./site.ts";
+import type { PageStatus, SiteFlow, SitePage, Sitemap } from "./site.ts";
+
+const PAGE_STATUSES: readonly PageStatus[] = ["ok", "broken", "stale", "gated", "external"];
+const FLOW_STATUSES: readonly FlowStatus[] = ["ok", "dead-end", "broken"];
 
 export function memoryPaths(host: string, root: string = ENV_DIR) {
   const slug = slugForHost(host);
@@ -36,7 +39,43 @@ function asSitemap(v: unknown): Sitemap | null {
     const list = v.notes[k];
     notes[k] = Array.isArray(list) ? list.filter((t): t is string => typeof t === "string") : [];
   }
-  return { ...(v as unknown as Sitemap), notes, external_links: Array.isArray(v.external_links) ? (v.external_links as string[]) : [] };
+  const urls = (xs: unknown): string[] => (Array.isArray(xs) ? xs.filter((x): x is string => typeof x === "string" && normalizeUrl(x) !== null) : []);
+  const pages = v.pages.flatMap((p) => asPage(p) ?? []);
+  const flows = v.flows.flatMap((f) => asFlow(f) ?? []);
+  return {
+    ...(v as unknown as Sitemap), pages, flows, notes, frontier: urls(v.frontier), external_links: urls(v.external_links),
+  };
+}
+
+const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+/** A hand-edited page entry: malformed ones are dropped, missing optional fields get safe defaults. */
+function asPage(p: unknown): SitePage | null {
+  if (!isObject(p) || typeof p.url !== "string") return null;
+  const url = normalizeUrl(p.url);
+  if (url === null) return null;
+  return {
+    url, title: str(p.title), purpose: str(p.purpose),
+    status: PAGE_STATUSES.includes(p.status as PageStatus) ? (p.status as PageStatus) : "ok",
+    http_status: typeof p.http_status === "number" ? p.http_status : null,
+    depth: num(p.depth, 1), first_seen_run: num(p.first_seen_run, 0), last_seen_run: num(p.last_seen_run, 0),
+    links: Array.isArray(p.links) ? p.links.filter((l): l is string => typeof l === "string" && normalizeUrl(l) !== null) : [],
+    pattern: typeof p.pattern === "string" ? p.pattern : null,
+  };
+}
+
+function asFlow(f: unknown): SiteFlow | null {
+  if (!isObject(f) || typeof f.title !== "string" || typeof f.start_url !== "string") return null;
+  const start = normalizeUrl(f.start_url);
+  if (start === null) return null;
+  return {
+    title: f.title, start_url: start,
+    steps: Array.isArray(f.steps) ? f.steps.filter((s): s is string => typeof s === "string") : [],
+    expected: str(f.expected),
+    status: FLOW_STATUSES.includes(f.status as FlowStatus) ? (f.status as FlowStatus) : "ok",
+    notes: str(f.notes), last_run: num(f.last_run, 0),
+  };
 }
 
 type SitemapRead = { sitemap: Sitemap | null; unreadable: string | null };
@@ -151,6 +190,7 @@ export async function saveMemory(o: {
     const { sitemap: old, unreadable } = readSitemap(p.sitemap, warnings);
     if (unreadable !== null) return null;
     const { sitemap, summary } = mergeSitemap(old, ev);
+    summary.notes_rejected = readRejected(o.runDir);
     const tmp = `${p.sitemap}.tmp-${process.pid}`;
     try {
       fs.writeFileSync(tmp, JSON.stringify(sitemap, null, 2) + "\n");

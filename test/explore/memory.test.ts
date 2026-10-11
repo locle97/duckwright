@@ -8,6 +8,7 @@ import { buildEvidence, loadMemory, memoryPaths, saveMemory } from "../../src/ex
 import { buildExploreReport } from "../../src/explore/report.ts";
 import type { HistoryData } from "../../src/export.ts";
 import { emptySitemap } from "../../src/explore/site.ts";
+import { NoteSink } from "../../src/explore/notes.ts";
 import { tmpDir } from "../helpers.ts";
 
 const HOST = "shop.example";
@@ -203,4 +204,39 @@ test("an existing but unreadable sitemap is never overwritten; the run goes to p
   assert.ok(fs.statSync(p.sitemap).isDirectory());
   assert.equal(fs.existsSync(p.md), false);
   assert.equal(fs.existsSync(p.lock), false);
+});
+
+test("a rejected secret note is counted in explore-memory.json and never stored", async () => {
+  const root = tmpDir();
+  const runDir = fs.mkdtempSync(path.join(root, "run-"));
+  const sink = new NoteSink(runDir, HOST);
+  assert.match(sink.add(["account", "login password: hunter2hunter2"]), /^error:/);
+  const d = data();
+  const report = buildExploreReport(d, { url: "https://shop.example/", runDir, network: true });
+  await saveMemory({ host: HOST, runDir, data: d, report, startUrl: "https://shop.example/", root });
+  const summary = JSON.parse(fs.readFileSync(path.join(runDir, "explore-memory.json"), "utf8"));
+  assert.equal(summary.notes_rejected, 1);
+  for (const f of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (f.isFile()) assert.ok(!fs.readFileSync(path.join(f.parentPath, f.name), "utf8").includes("hunter2"), f.name);
+  }
+});
+
+test("malformed page and flow entries are dropped without making the file corrupt", async () => {
+  const root = tmpDir();
+  const p = memoryPaths(HOST, root);
+  const goodPage = { url: "https://shop.example/", title: "Home", purpose: "", status: "ok", http_status: 200, depth: 0, first_seen_run: 1, last_seen_run: 1, links: [], pattern: null };
+  fs.writeFileSync(p.sitemap, JSON.stringify({
+    version: 1, host: HOST, updated_run: "r", runs: 1, frontier: [], notes: {},
+    pages: [goodPage, null, 5, { url: 7 }, { url: "mailto:x@y.z", links: [] }, { url: "https://shop.example/nolinks" }, { url: "https://shop.example/badlinks", links: "x" }],
+    flows: [null, { title: "x" }, { title: "Ok", start_url: "https://shop.example/", status: "ok" }],
+  }));
+  const mem = loadMemory(HOST, root);
+  assert.ok(mem.sitemap);
+  assert.deepEqual(mem.warnings, []);
+  assert.deepEqual(mem.sitemap!.pages.map((x) => x.url).sort(), ["https://shop.example/", "https://shop.example/badlinks", "https://shop.example/nolinks"]);
+  assert.ok(mem.sitemap!.pages.every((x) => Array.isArray(x.links)));
+  assert.deepEqual(mem.sitemap!.flows.map((f) => f.title), ["Ok"]);
+  const r = await run(data(), root);
+  assert.ok(r.md, "save must succeed");
+  assert.equal(r.warnings.length, 0);
 });

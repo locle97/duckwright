@@ -55,7 +55,15 @@ export class NoteSink {
 
   add(args: string[]): string {
     const err = checkNoteArgs(args, this.host);
-    if (err !== null) return err;
+    if (err !== null) {
+      // Count only: a marker line, never the refused text. It is on disk at once, so a crash keeps it.
+      try {
+        fs.appendFileSync(path.join(this.workdir, NOTES_FILE), JSON.stringify({ rejected: 1 }) + "\n");
+      } catch {
+        // counting is best effort
+      }
+      return err;
+    }
     const line: NoteLine = {
       step: this.step, kind: args[0] as NoteKind, text: flat(args[1]).trim(),
       url: args.length === 3 ? normalizeUrl(args[2]) : null,
@@ -86,4 +94,24 @@ export function readNotes(workdir: string): NoteLine[] {
     }
   }
   return out;
+}
+
+/** How many notes the sink refused in this run; never throws. */
+export function readRejected(workdir: string): number {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(workdir, NOTES_FILE), "utf8");
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const line of raw.split("\n")) {
+    try {
+      const o = JSON.parse(line) as { rejected?: unknown };
+      if (typeof o.rejected === "number") n += o.rejected;
+    } catch {
+      // skip a damaged line
+    }
+  }
+  return n;
 }

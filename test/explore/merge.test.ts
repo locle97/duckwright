@@ -195,3 +195,22 @@ test("flows: the latest verdict replaces the old one and unrelated flows stay", 
   assert.equal(b.sitemap.flows.find((x) => x.title === "Search")?.last_run, 2);
   assert.equal(b.summary.flows_updated, 1);
 });
+
+test("off-limits notes are never dropped for room: the incoming one is dropped and counted", () => {
+  const old = emptySitemap(H);
+  old.notes["off-limits"] = Array.from({ length: CAPS.notesPerKind }, (_, i) => `off ${i}`);
+  const notes = [{ step: 1, kind: "off-limits" as const, text: "off new", url: null }];
+  const { sitemap, summary } = mergeSitemap(old, ev({ pages: [page("/")], notes }));
+  assert.equal(sitemap.notes["off-limits"].length, CAPS.notesPerKind);
+  assert.ok(sitemap.notes["off-limits"].includes("off 0"));
+  assert.ok(!sitemap.notes["off-limits"].includes("off new"));
+  assert.equal(summary.notes_dropped, 1);
+  assert.equal(summary.notes_added, 0);
+});
+
+test("other kinds still drop the oldest note beyond the cap", () => {
+  const old = emptySitemap(H);
+  old.notes.quirk = Array.from({ length: CAPS.notesPerKind }, (_, i) => `q ${i}`);
+  const { sitemap } = mergeSitemap(old, ev({ pages: [page("/")], notes: [{ step: 1, kind: "quirk", text: "q new", url: null }] }));
+  assert.ok(!sitemap.notes.quirk.includes("q 0") && sitemap.notes.quirk.includes("q new"));
+});

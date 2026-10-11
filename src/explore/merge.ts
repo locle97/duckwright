@@ -29,6 +29,8 @@ export interface MergeSummary {
   stale_pages: number;
   notes_added: number;
   notes_dropped: number;
+  /** Notes the note action refused (credential-looking, bad kind or url); set by saveMemory. */
+  notes_rejected: number;
   flows_updated: number;
 }
 
@@ -40,7 +42,7 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
   const base: Sitemap = old ? structuredClone(old) : emptySitemap(ev.host);
   const run = base.runs + 1;
   const summary: MergeSummary = {
-    added_pages: 0, updated_pages: 0, broken_pages: 0, stale_pages: 0, notes_added: 0, notes_dropped: 0, flows_updated: 0,
+    added_pages: 0, updated_pages: 0, broken_pages: 0, stale_pages: 0, notes_added: 0, notes_dropped: 0, notes_rejected: 0, flows_updated: 0,
   };
   const pages = new Map<string, SitePage>(base.pages.map((p) => [p.url, p]));
   const visited = new Set<string>();
@@ -138,6 +140,8 @@ export function mergeSitemap(old: Sitemap | null, ev: RunEvidence): { sitemap: S
     } else {
       const list = base.notes[n.kind as MemoryKind];
       if (list.some((t) => noteKey(t) === noteKey(n.text))) { summary.notes_dropped++; continue; }
+      // Off-limits entries are safety rules: never push one out for room, drop the incoming one instead.
+      if (n.kind === "off-limits" && list.length >= CAPS.notesPerKind) { summary.notes_dropped++; continue; }
       list.push(n.text);
       if (list.length > CAPS.notesPerKind) list.shift();
       summary.notes_added++;

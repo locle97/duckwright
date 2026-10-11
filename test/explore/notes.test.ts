@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { NoteSink, checkNoteArgs, looksLikeSecret, readNotes } from "../../src/explore/notes.ts";
+import { NoteSink, checkNoteArgs, looksLikeSecret, readNotes, readRejected } from "../../src/explore/notes.ts";
 import { tmpDir } from "../helpers.ts";
 
 const HOST = "shop.example";
@@ -52,4 +52,16 @@ test("NoteSink appends only valid notes and readNotes is tolerant", () => {
     { step: 3, kind: "page", text: "Cart page", url: "https://shop.example/cart" },
   ]);
   assert.deepEqual(readNotes(tmpDir()), []);
+});
+
+test("rejected adds are counted in a file that survives a crash", () => {
+  const dir = tmpDir();
+  const sink = new NoteSink(dir, HOST);
+  assert.equal(sink.add(["quirk", "fine"]), "ok");
+  assert.match(sink.add(["quirk", "password: hunter2"]), /^error:/);
+  assert.match(sink.add(["nope", "x"]), /^error:/);
+  assert.equal(readRejected(dir), 2);
+  assert.deepEqual(readNotes(dir).map((n) => n.text), ["fine"]);
+  assert.ok(!fs.readFileSync(path.join(dir, "notes.jsonl"), "utf8").includes("hunter2"));
+  assert.equal(readRejected(tmpDir()), 0);
 });
