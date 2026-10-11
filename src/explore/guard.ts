@@ -27,10 +27,12 @@ export interface SnapLine {
   name: string;
   ref: string | null;
   text: string;
+  level: number | null;
 }
 
 const LINE = /^(\s*)- ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?(.*)$/;
-const REF = /\[ref=(e\d+)\]/;
+const REF = /\[ref=([^\]]+)\]/;
+const LEVEL = /\[level=(\d+)\]/;
 
 /** The accessibility snapshot as lines with role, name, ref and inline text (lines like `- /url: x` are skipped). */
 export function parseSnapshot(snapshot: string): SnapLine[] {
@@ -44,6 +46,7 @@ export function parseSnapshot(snapshot: string): SnapLine[] {
       role: m[2],
       name: (m[3] ?? "").replace(/\\(.)/g, "$1"),
       ref: REF.exec(rest)?.[1] ?? null,
+      level: m[2] === "heading" ? Number(LEVEL.exec(rest)?.[1] ?? NaN) || null : null,
       text: rest.replace(/\[[^\]]*\]/g, "").trim().replace(/^:\s*/, ""),
     });
   }
@@ -90,16 +93,47 @@ export function isDeleteLike(lines: SnapLine[], c: Control): boolean {
   return c.role === "button" && CONFIRM.test(c.name) && ancestorIndices(lines, c.index).some((i) => isDialog(lines[i].role));
 }
 
-/** The marker shows in the tab title, a heading, or the dialog the control sits in. */
+/** Delete-like controls with a ref that sit outside any dialog. */
+function deleteLikeOutsideDialogs(lines: SnapLine[]): number {
+  let n = 0;
+  lines.forEach((l, index) => {
+    if (l.ref === null || ancestorIndices(lines, index).some((i) => isDialog(lines[i].role))) return;
+    if (isDeleteLike(lines, { index, role: l.role, name: l.name })) n++;
+  });
+  return n;
+}
+
+/**
+ * The marker unlocks a delete-like click when it shows in the dialog the control sits in, or in the tab
+ * title or a level-1 heading of a page with at most one delete-like control outside dialogs (a list or
+ * grid page, where the title or heading cannot say which row a Delete belongs to, stays locked).
+ */
 export function pageNamesMarker(tabs: string, lines: SnapLine[], c: Control, marker: string): boolean {
-  if (containsMarker(parsePage(tabs, null)?.title ?? "", marker)) return true;
-  if (lines.some((l) => l.role === "heading" && containsMarker(`${l.name} ${l.text}`, marker))) return true;
   const dialog = ancestorIndices(lines, c.index).find((i) => isDialog(lines[i].role));
-  return dialog !== undefined && containsMarker(subtreeText(lines, dialog), marker);
+  if (dialog !== undefined && containsMarker(subtreeText(lines, dialog), marker)) return true;
+  const named = containsMarker(parsePage(tabs, null)?.title ?? "", marker)
+    || lines.some((l) => l.role === "heading" && l.level === 1 && containsMarker(`${l.name} ${l.text}`, marker));
+  return named && deleteLikeOutsideDialogs(lines) <= 1;
 }
 
 const CLICKS = new Set(["click", "dblclick"]);
 const EDITS = new Set(["fill", "type", "select", "check", "uncheck"]);
+
+const VALUE_FLAGS = new Set(["--modifiers"]);
+
+/** Positional arguments: flags, and the value of a flag that takes one, are dropped. */
+function positional(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (/^-{1,2}[A-Za-z]/.test(a)) {
+      if (VALUE_FLAGS.has(a)) i++;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
 
 /**
  * Per-step write guard for `explore --allow-writes`. The loop calls `begin` with the step's tab list and
@@ -122,13 +156,14 @@ export class WriteGuard {
   begin(step: number, tabs: string, snapshot: string | null): void {
     this.step = step;
     this.tabs = tabs;
-    this.lines = snapshot === null || snapshot.trim() === "" ? null : parseSnapshot(snapshot);
+    const parsed = snapshot === null || snapshot.trim() === "" ? null : parseSnapshot(snapshot);
+    this.lines = parsed !== null && parsed.length > 0 ? parsed : null;
     this.ledgerUrls = new Set(readLedger(this.workdir).flatMap((i) => (i.url === null ? [] : [i.url])));
   }
 
   /** null when the action may run, else the error result to report instead. */
   check(a: { cmd: string; args: string[] }): string | null {
-    if (CLICKS.has(a.cmd)) return this.checkClick(a.args[0]);
+    if (CLICKS.has(a.cmd)) return this.checkClick(positional(a.args)[0]);
     if (EDITS.has(a.cmd)) this.audit(a);
     return null;
   }
@@ -157,16 +192,27 @@ export class WriteGuard {
   }
 
   private audit(a: { cmd: string; args: string[] }): void {
-    if (this.lines === null || !a.args[0]) return;
-    const c = findControl(this.lines, a.args[0]);
-    if (c === null) return;
+    if (this.lines === null) return;
+    const pos = positional(a.args);
+    let control: string;
+    let value: string;
+    if (a.cmd === "type") {
+      // type has no ref: it writes into the focused element.
+      control = "(focused element)";
+      value = pos[0] ?? "";
+    } else {
+      if (!pos[0]) return;
+      const c = findControl(this.lines, pos[0]);
+      if (c === null) return;
+      if (c.role === "searchbox" || /search|filter/i.test(c.name)) return;
+      control = `${c.role} "${flat(c.name).slice(0, 80)}"`;
+      value = a.cmd === "fill" || a.cmd === "select" ? (pos[1] ?? "") : "";
+    }
     const { url, title } = this.page();
     if (containsMarker(title, this.marker)) return;
     if (url !== null && (containsMarker(url, this.marker) || this.ledgerUrls.has(url))) return;
-    const value = a.cmd === "fill" || a.cmd === "type" || a.cmd === "select" ? (a.args[1] ?? "") : "";
     if (value !== "" && startsWithMarker(value, this.marker)) return; // naming a new item
-    if (c.role === "searchbox" || /search|filter/i.test(c.name)) return;
-    append(this.workdir, AUDIT_FILE, { step: this.step, url, control: `${c.role} "${flat(c.name).slice(0, 80)}"`, cmd: a.cmd });
+    append(this.workdir, AUDIT_FILE, { step: this.step, url, control, cmd: a.cmd });
   }
 }
 

@@ -120,7 +120,7 @@ test("audit skips marked pages, marker-valued names, search controls and ledger 
   assert.deepEqual(readAudit(naming.dir), []);
 
   const search = guard(detail.replace(M, ""), "Mealie");
-  search.g.check({ cmd: "type", args: ["e5", "soup"] });
+  search.g.check({ cmd: "fill", args: ["e5", "soup"] });
   assert.deepEqual(readAudit(search.dir), []);
 
   const dir = tmpDir();
@@ -156,4 +156,74 @@ test("parseSnapshot copes with a realistic nested snapshot and odd lines", () =>
   assert.equal(findControl(lines, "e2")?.name, 'Remove "Pasta"?');
   assert.equal(lines.find((l) => l.role === "text")?.text, "Are you sure?");
   assert.equal(findControl(lines, "e4")?.role, "link");
+});
+
+const grid = [
+  "- main [ref=e1]:",
+  '  - article [ref=e2]:',
+  `    - heading "${M}Pasta" [level=2] [ref=e3]`,
+  '    - button "Delete" [ref=e4]',
+  '  - article [ref=e5]:',
+  '    - heading "Old soup" [level=2] [ref=e6]',
+  '    - button "Delete" [ref=e7]',
+].join("\n");
+
+test("flag-first refs are still evaluated and audited", () => {
+  const { g } = guard(list, "Recipes");
+  const refused = /^error: refused:/;
+  assert.match(g.check({ cmd: "click", args: ["--modifiers=Shift", "e9"] }) ?? "", refused);
+  assert.match(g.check({ cmd: "click", args: ["--modifiers", "Shift", "e9"] }) ?? "", refused);
+  assert.match(g.check({ cmd: "dblclick", args: ["e9"] }) ?? "", refused);
+  const a = guard(detail.replace(M, ""), "Mealie");
+  a.g.check({ cmd: "fill", args: ["--submit", "e6", "x"] });
+  assert.deepEqual(readAudit(a.dir).map((e) => e.control), ['textbox "Name"']);
+});
+
+test("iframe refs like f1e3 are evaluated", () => {
+  const snap = ['- iframe [ref=e2]:', '  - main [ref=f1e1]:', '    - button "Delete" [ref=f1e3]'].join("\n");
+  const { g } = guard(snap, "Recipes");
+  assert.match(g.check({ cmd: "click", args: ["f1e3"] }) ?? "", /^error: refused: 'Delete'/);
+});
+
+test("a marked title or h1 unlocks a delete only on a page with at most one delete-like control", () => {
+  assert.equal(guard(detail, "Mealie").g.check({ cmd: "click", args: ["e4"] }), null);
+  const second = guard(grid, "Recipes").g;
+  assert.match(second.check({ cmd: "click", args: ["e7"] }) ?? "", /^error: refused:/);
+  assert.match(second.check({ cmd: "click", args: ["e4"] }) ?? "", /^error: refused:/); // non-h1 heading never unlocks
+  const results = [
+    '- heading "Results for \"' + M + 'x\"" [level=1] [ref=e1]',
+    '- button "Delete" [ref=e2]',
+    '- button "Delete" [ref=e3]',
+  ].join("\n");
+  const r = guard(results, "Recipes").g;
+  assert.match(r.check({ cmd: "click", args: ["e2"] }) ?? "", /^error: refused:/);
+  assert.match(r.check({ cmd: "click", args: ["e3"] }) ?? "", /^error: refused:/);
+  // Safe by design: two delete-like buttons on a marked detail page are refused too.
+  const two = detail + '\n  - button "Remove photo" [ref=e8]';
+  assert.match(guard(two, `${M}Pasta | Mealie`).g.check({ cmd: "click", args: ["e4"] }) ?? "", /^error: refused:/);
+});
+
+test("a generic dialog on a marked detail page with one delete-like control outside still allows Confirm", () => {
+  const snap = [
+    `- heading "${M}Pasta" [level=1] [ref=e1]`,
+    '- button "Delete" [ref=e2]',
+    '- dialog "Are you sure?" [ref=e3]:',
+    '  - button "Confirm" [ref=e4]',
+  ].join("\n");
+  assert.equal(guard(snap, "Mealie").g.check({ cmd: "click", args: ["e4"] }), null);
+});
+
+test("type edits are audited as the focused element unless marker-valued", () => {
+  const a = guard(detail.replace(M, ""), "Mealie", "https://s.test/r/old");
+  a.g.check({ cmd: "type", args: ["Renamed"] });
+  assert.deepEqual(readAudit(a.dir), [{ step: 3, url: "https://s.test/r/old", control: "(focused element)", cmd: "type" }]);
+  const b = guard(detail.replace(M, ""), "Mealie");
+  b.g.check({ cmd: "type", args: [`${M}x`] });
+  assert.deepEqual(readAudit(b.dir), []);
+});
+
+test("a snapshot that parses to no lines is unreadable", () => {
+  const { g, dir } = guard("<html>error</html>", "Mealie");
+  assert.match(g.check({ cmd: "click", args: ["e3"] }) ?? "", /cannot evaluate/);
+  assert.deepEqual(readRefusals(dir).map((r) => r.control), ["(unreadable page)"]);
 });
