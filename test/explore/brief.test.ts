@@ -77,3 +77,27 @@ test("a trimmed brief never ends with a group title that has no items", () => {
     assert.ok(last !== "", `cap ${cap}: trailing blank`);
   }
 });
+
+test("missing sitemap collections do not throw", () => {
+  const noNotes = sm() as Partial<Sitemap>;
+  delete noNotes.notes;
+  const variants: unknown[] = [
+    noNotes,
+    sm({ notes: {} as Sitemap["notes"] }),
+    (() => { const x = sm() as Partial<Sitemap>; delete x.frontier; delete x.flows; return x; })(),
+    sm({ pages: [{ ...pg("/", { depth: 0 }), links: undefined as unknown as string[] }] }),
+  ];
+  for (const v of variants) {
+    const brief = frontierBrief(v as Sitemap);
+    assert.ok(brief.startsWith("Earlier runs mapped 1 pages"));
+  }
+});
+
+test("pattern pages are not listed as stale or shallow URLs", () => {
+  const brief = frontierBrief(sm({
+    pages: [pg("/", { depth: 0 }), pg("/product/:id", { last_seen_run: 1, depth: 1, links: ["https://s.test/zzz"], pattern: "/product/:id" })],
+  }));
+  assert.ok(!brief.includes(":id"));
+  assert.ok(!brief.includes("Pages not seen"));
+  assert.ok(!brief.includes("Shallow areas"));
+});

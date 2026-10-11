@@ -9,27 +9,30 @@ const safe = (s: string): string => neutralise(flat(s));
 
 /** What a returning explore run should spend its budget on, as prompt text; "" when nothing is known yet. */
 export function frontierBrief(sm: Sitemap, maxBytes: number = BRIEF_MAX_BYTES): string {
-  if (sm.pages.length === 0) return "";
-  const known = new Set(sm.pages.map((p) => p.url));
-  const broken = sm.pages.filter((p) => p.status === "broken").length;
+  const pages = sm.pages ?? [];
+  const frontier = sm.frontier ?? [];
+  const flows = sm.flows ?? [];
+  if (pages.length === 0) return "";
+  const known = new Set(pages.map((p) => p.url));
+  const broken = pages.filter((p) => p.status === "broken").length;
   // Off-limits comes first: trimming drops from the end, and that list must be the last thing lost.
   const groups: [string, string[]][] = [
-    ["Off-limits (never open these)", sm.notes["off-limits"].map((t) => `- ${safe(t)}`)],
-    ["Unvisited links (explore these first)", sm.frontier.map((u) => `- ${safe(u)}`)],
+    ["Off-limits (never open these)", (sm.notes?.["off-limits"] ?? []).map((t) => `- ${safe(t)}`)],
+    ["Unvisited links (explore these first)", frontier.map((u) => `- ${safe(u)}`)],
     [
       "Flows to re-check (dead-end or broken last time)",
-      sm.flows.filter((f) => f.status !== "ok").map((f) => `- ${safe(f.title)} at ${safe(f.start_url)} (${f.status}${f.notes ? `: ${safe(f.notes)}` : ""})`),
+      flows.filter((f) => f.status !== "ok").map((f) => `- ${safe(f.title)} at ${safe(f.start_url)} (${safe(f.status)}${f.notes ? `: ${safe(f.notes)}` : ""})`),
     ],
     [
       `Pages not seen for ${STALE_AFTER_RUNS} or more runs`,
-      sm.pages.filter((p) => p.status !== "external" && sm.runs - p.last_seen_run >= STALE_AFTER_RUNS).map((p) => `- ${safe(p.url)}`),
+      pages.filter((p) => p.pattern === null && p.status !== "external" && sm.runs - p.last_seen_run >= STALE_AFTER_RUNS).map((p) => `- ${safe(p.url)}`),
     ],
     [
       "Shallow areas (visited, but links from them were not followed)",
-      sm.pages.filter((p) => p.depth <= 1 && p.links.some((l) => !known.has(l))).map((p) => `- ${safe(p.url)}`),
+      pages.filter((p) => p.pattern === null && p.depth <= 1 && (p.links ?? []).some((l) => !known.has(l))).map((p) => `- ${safe(p.url)}`),
     ],
   ];
-  const head = `Earlier runs mapped ${sm.pages.length} pages on this site${broken ? ` (${broken} broken)` : ""}. Do not re-walk what is already mapped; use the budget to extend the map.`;
+  const head = `Earlier runs mapped ${pages.length} pages on this site${broken ? ` (${broken} broken)` : ""}. Do not re-walk what is already mapped; use the budget to extend the map.`;
   const lines = [head];
   for (const [title, items] of groups) if (items.length) lines.push("", `${title}:`, ...items);
   let out = lines.join("\n");
