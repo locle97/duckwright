@@ -75,10 +75,10 @@ Infer and do not ask: file names, folder, IDs, max-steps, which pages to start f
 sitemap or code, which checks to make, shared setup. Write every inference you are not sure of as
 `# assumption: ...` in the task's front matter and list it in your report.
 
-With no testing map: carry on with the env file, sitemap and code, mark more assumptions, and at the end
-offer to write a starter map from `templates/testing-map.md` filled with what you learned.
-With no env file: ask for the base URL, and suggest
-`duckwright explore <url> --env environments/<name>.md` to create one.
+With no testing map or no env file: carry on with what exists (env file, sitemap, code), mark more
+assumptions, and at the end tell the user to run `/duckwright-setup` (the `duckwright-setup` skill; install
+with `npx skills add locle97/duckwright --skill duckwright-setup`). It writes the starter map, the CLAUDE.md
+section and the env file. If there is no base URL at all, ask for it.
 
 ## 4. Write the tasks
 

@@ -107,11 +107,13 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 
 ### Writing tasks with Claude Code
 
-Install the `duckwright-tasks` skill into your project, then ask Claude to write tasks that follow your project's own testing rules:
+Two skills, installed into your project:
 
 ```bash
-npx skills add locle97/duckwright --skill duckwright-tasks
+npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks
 ```
+
+Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks:
 
 ```text
 /duckwright-tasks write tasks for the promo codes in the basket

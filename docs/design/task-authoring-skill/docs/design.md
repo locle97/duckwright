@@ -43,7 +43,8 @@ In the Duckwright repo (final locations: the skill is at the repo root `skills/d
 | `skills/duckwright-tasks/SKILL.md` | The skill: discovery, precedence, ask/infer, writing rules, output, self-check, report |
 | `skills/duckwright-tasks/references/harness-constraints.md` | What a task can and cannot ask for, each fact tied to a source file |
 | `skills/duckwright-tasks/references/project-convention.md` | The convention the project follows (also user docs) |
-| `skills/duckwright-tasks/templates/{task.md,plan.json,testing-map.md,claude-md-section.md}` | Skeletons the skill fills |
+| `skills/duckwright-tasks/templates/{task.md,plan.json}` | Skeletons the skill fills |
+| `skills/duckwright-setup/` | Second skill, run once per project: `SKILL.md`, `templates/{testing-map.md,claude-md-section.md}`, `scripts/doctor.mjs` (see "Setup skill") |
 | `skills/duckwright-tasks/scripts/check-tasks.mjs` | Linter, Node 22, no deps, read-only, ~320 lines |
 | `docs/design/task-authoring-skill/examples/project-larder/` | Worked example: CLAUDE.md, testing map, env file, sitemap, and the skill's output for one request |
 | `test/skill-check.test.ts` | Keeps the linter's key list and the reference in step with `src/taskfile.ts` and `src/brain.ts`; runs the example through the real parsers and the linter |
@@ -129,7 +130,7 @@ The owner wins and the conflict is listed in the report. A generated block or si
 what a task may do; it can only add off-limits.
 
 **Missing info** (table in `project-convention.md`): no map means the skill still works from env,
-sitemap and code, marks more `# assumption:` lines, and offers to write a starter map at the end. No env
+sitemap and code, marks more `# assumption:` lines, and tells the user to run `/duckwright-setup`. No env
 file means it asks for the base URL and suggests `duckwright explore`. No sitemap means URLs are not
 checked. Missing auth for a needed role, or a missing expected value, is a question, never a guess.
 
@@ -217,6 +218,37 @@ value no source gives; what to test when the request is empty.
 
 Infer and mark: file and folder names, IDs, max-steps, start pages, labels from sitemap or code, check
 types, shared setup. Unsure inferences become `# assumption:` lines and are listed in the report.
+
+## Setup skill: `duckwright-setup`
+
+Authoring runs often and only writes task files. Setting a project up runs once, edits project config
+(CLAUDE.md, `.gitignore`, the map, a starter env file) and ends in things only a person can do. Mixing them
+made the authoring skill "offer a starter map" mid-task, so setup is its own skill and owns the two
+project-side templates (one copy each).
+
+- **Modes:** *doctor* (read-only report, re-runnable any time) and *setup* (doctor, find the root, one round
+  of at most five questions with repo-derived guesses, write starter files, offer explore, hand over a
+  checklist, doctor again).
+- **Writes:** `.duckwright/testing-map.md`, a `## Duckwright` section in CLAUDE.md, a starter
+  `environments/<name>.md` of facts it was given or found, and `.auth/` in `.gitignore`. Existing files are
+  shown as a diff and changed only on a yes; the generated block of an env file is never touched.
+- **Does not:** read `.env*` or `.auth/*`, take a password, run installs, run explore or any task without a
+  yes (explore calls Claude and a browser; `--allow-writes` only when the user says so), seed data, create
+  state files, write tasks.
+- **Person's checklist:** create each state file (sign in once, `playwright-cli state-save`; command to be
+  confirmed against the installed CLI), seed or reset data, set env vars such as `DUCKWRIGHT_TOTP_SECRET`,
+  install missing tools.
+- **`scripts/doctor.mjs`** (about 150 lines, Node 22, no dependencies, read-only): Node 22.18+, `duckwright`,
+  `playwright-cli`, `claude` on PATH; root layout; map front matter (five known keys, no duplicates) and
+  leftover `TODO`; CLAUDE.md section and leftover `<placeholders>`; env file size against 16384 bytes, empty,
+  no Base URL; `.auth/` in `.gitignore`; state files named by tasks exist; sitemap parses, pages unseen for
+  3+ runs, explore leftovers never removed. Verified on the Larder example and on a fresh project made from
+  the templates (it flags the TODOs, placeholders and missing `.gitignore` entry).
+- **Install:** `npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks`.
+  Checked: both copy into `.claude/skills/`. Each skill is self-contained; `duckwright-setup` reads
+  `duckwright-tasks/references/project-convention.md` when both are installed.
+- **Cost accepted:** `doctor.mjs` repeats the map's key list and the 16384 limit that `check-tasks.mjs`
+  also holds, because installed skills cannot import from each other. The drift test should cover both.
 
 ## Worked example: Larder
 

@@ -1,7 +1,7 @@
 # What a project provides for Duckwright tasks
 
 Three things, each with one job. A worked example is in the Duckwright repo at
-`docs/design/task-authoring-skill/examples/project-larder/` in the Duckwright repo.
+`docs/design/task-authoring-skill/examples/project-larder/`.
 
 | File | Job | Read by | Size |
 | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ The map lives in a hidden folder, `.duckwright/`, because `duckwright -f <folder
 
 ## CLAUDE.md section
 
-Copy `templates/claude-md-section.md`. It says where the root and the map are, where UI strings and seed
+The `duckwright-setup` skill writes it from `templates/claude-md-section.md`; to do it by hand, copy that file from the Duckwright repo's `skills/duckwright-setup/templates/`. It says where the root and the map are, where UI strings and seed
 data live in the code, and which files must never be read. Keep the rules themselves out of CLAUDE.md:
 it is loaded into every session, including ones that have nothing to do with tests.
 
@@ -83,7 +83,7 @@ place; the sitemap still goes to `environments/<slug>.sitemap.json`; the skill f
 | Missing | What the skill does |
 | --- | --- |
 | CLAUDE.md section | finds the root by looking for `.duckwright/` or `environments/` |
-| testing map | uses env file, sitemap and code; marks more assumptions; offers a starter map at the end |
+| testing map | uses env file, sitemap and code; marks more assumptions; tells the user to run `/duckwright-setup` |
 | env file | asks for the base URL; suggests `duckwright explore` |
 | sitemap | writes tasks anyway; URLs are not checked; suggests `duckwright explore` |
 | auth for a needed role | asks |

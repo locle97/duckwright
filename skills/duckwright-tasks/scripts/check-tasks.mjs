@@ -4,8 +4,8 @@
 //   node check-tasks.mjs --root <duckwright root> [--map <file>] [--sitemap <file>] <file|folder>...
 //
 // --root is the folder `duckwright` is run from (bare `env:` names resolve to <root>/environments/).
-// --map defaults to <root>/.duckwright/testing-map.md when it exists; --sitemap defaults to the map's
-// `sitemap:` key. Folders are read like `duckwright -f`: root-level .md/.txt files, plus plan.json.
+// --map defaults to <root>/.duckwright/testing-map.md when it exists; --sitemap is optional (the skill passes
+// environments/<slug>.sitemap.json). Folders are read like `duckwright -f`: root-level .md/.txt files, plus plan.json.
 //
 // Prints `path:line: error|warn: message`. Exit 0 = no errors, 1 = errors, 2 = bad usage.
 // No dependencies; Node 22+. Read-only: it never writes a file.
