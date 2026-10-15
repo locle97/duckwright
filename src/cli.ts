@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
+import { RUN_USAGE, UsageError, parseCheckArgs, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
+import { checkTasks } from "./check.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
@@ -184,6 +185,23 @@ function exportSpec(deps: CliDeps, run: string, out: string | null = null, api =
   const { path: p, warnings } = exportRun(run, out, api);
   for (const w of warnings) deps.stderr(`warning: ${w}`);
   return p;
+}
+
+/** `duckwright check PATH...`: load task files as a run would, without running anything. */
+function checkMain(deps: CliDeps, argv: string[]): number {
+  const parsed = parseCheckArgs(argv);
+  if (parsed.kind === "help") {
+    deps.stdout(parsed.text.trimEnd());
+    return 0;
+  }
+  if (parsed.kind === "version") return 0;
+  const { ok, findings } = checkTasks(parsed.args.paths);
+  for (const f of findings) deps.stderr(`${f.level}: ${f.message}`);
+  for (const p of ok) deps.stdout(`ok: ${p}`);
+  const errors = findings.filter((f) => f.level === "error").length;
+  const warnings = findings.length - errors;
+  deps.stdout(`${ok.length} ok, ${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}`);
+  return errors ? 2 : 0;
 }
 
 function exportMain(deps: CliDeps, argv: string[]): number {
@@ -382,6 +400,7 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
 }
 
 async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
+  if (argv[0] === "check") return checkMain(deps, argv.slice(1));
   if (argv[0] === "export") return exportMain(deps, argv.slice(1));
   if (argv[0] === "init") return initMain(deps, argv.slice(1));
   if (argv[0] === "explore") return exploreMain(deps, argv.slice(1));

@@ -11,7 +11,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ENV_MAX_BYTES = 16384; // src/environment.ts
-const MAP_KEYS = new Set(["default-env", "write-envs", "data-prefix", "off-limits-terms", "allow-literals"]);
+const MAP_KEYS = new Set(["default-env", "write-envs", "investigate-envs", "data-prefix", "off-limits-terms", "allow-literals"]);
 const STALE_AFTER_RUNS = 3; // src/explore: a page unseen this many runs is stale
 
 let root = process.cwd();
@@ -134,6 +134,26 @@ for (const f of exists(envDir) ? fs.readdirSync(envDir).filter((f) => f.endsWith
   const left = (m.created ?? []).filter((c) => !c.removed).length;
   say(stale ? "warn" : "ok", `${rel(p)}: ${(m.pages ?? []).length} pages after ${m.runs} run(s)${stale ? `, ${stale} not seen for ${STALE_AFTER_RUNS}+ runs: run duckwright explore again` : ""}`);
   if (left) say("warn", `${rel(p)}: ${left} item(s) created by earlier explore runs were never removed: clean them up before running write tasks`);
+}
+
+// 9. Facts memory of the duckwright-tasks skill (references/memory.md).
+const factsDir = path.join(root, ".duckwright", "facts");
+for (const f of exists(factsDir) ? fs.readdirSync(factsDir).filter((f) => f.endsWith(".jsonl")) : []) {
+  const p = path.join(factsDir, f);
+  const ids = new Map();
+  let bad = 0;
+  for (const line of read(p).split("\n")) {
+    if (!line.trim()) continue;
+    try { const x = JSON.parse(line); ids.set(x.id, x); } catch { bad++; }
+  }
+  const now = new Date().toISOString().slice(0, 10);
+  const live = [...ids.values()].filter((x) => x.status !== "retired");
+  const due = live.filter((x) => x.verify_after && x.verify_after < now).length;
+  say(bad ? "warn" : "ok", `${rel(p)}: ${live.length} fact(s)${due ? `, ${due} past their re-verify date` : ""}${bad ? `, ${bad} damaged line(s) skipped` : ""}`);
+}
+const ga = path.join(root, ".gitattributes");
+if (exists(factsDir) && !(exists(ga) && /facts\/\*\.jsonl\s+merge=union/.test(read(ga)))) {
+  say("warn", `${rel(ga)}: add ".duckwright/facts/*.jsonl merge=union" so teammates' appended facts merge without conflicts`);
 }
 
 console.log(failed ? `\n${failed} failure(s)` : "\nno failures");

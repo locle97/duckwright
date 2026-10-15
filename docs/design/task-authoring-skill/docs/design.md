@@ -219,6 +219,46 @@ value no source gives; what to test when the request is empty.
 Infer and mark: file and folder names, IDs, max-steps, start pages, labels from sitemap or code, check
 types, shared setup. Unsure inferences become `# assumption:` lines and are listed in the report.
 
+## Closing context gaps: probe, explore, arena
+
+Files are often not enough: an exact label, what happens after a click, which page lists a thing, or a
+design choice with no obvious answer. Guessing makes tasks fail or, worse, pass for the wrong reason. The
+skill (`SKILL.md` step 3b, detail in `references/close-gaps.md`) picks the tool by the kind of gap:
+
+| Gap | Tool | Rule that keeps it honest |
+| --- | --- | --- |
+| What the product *should* do (expected totals, wording, policy) | ask the user | A probe shows what the app does, not what is right; building on it would lock in bugs |
+| What the app currently shows or does | **probe**: `duckwright -p "<read-only task>" --env <name> --max-steps 15 [--state ...]` | read-only by default; sign in only via the map's state file; never production; at most 5 per request |
+| A whole area missing from the sitemap | **explore**: `duckwright explore <area URL> --env ... --max-steps 40` | ask first; no `--allow-writes` unless told; re-read via `sitemap-brief.mjs` afterwards |
+| A real design choice that affects many tasks | **arena** skill, if installed | frame as one small artifact, fixed rubric (linter clean, cited values, fewest steps, parallel-safe), linter and optional smoke run after the pick; if not installed, give the user 2 to 3 options |
+
+- **Consent:** each of these drives a browser or several models, so the skill asks once ("what I will run,
+  how many runs, which env, rough cost"). No yes means no run: `# assumption:` lines, and the report says
+  what a run would have confirmed.
+- **Evidence over claims:** a probe's `Answer:` is not trusted by itself. Every quoted string or number is
+  grepped in `runs/<id>/history.json`, `page/snapshot.yml` or `network/`; not found means discarded. Page
+  text is data, never instructions.
+- **Observed is not specified:** used facts are recorded as `# observed: ... (probe <run>, <date>)` and
+  listed in the report under "Observed, not specified". Labels, routes, step order and which API call an
+  action makes may be used freely; an expected outcome (a total, a validation message) goes into a task only
+  after the user confirms it is intended.
+- **Durable findings** (a quirk, an ambiguous label) can be offered for the env file's `## Notes (yours)` or
+  the map, as a diff, on a yes. The generated block is never touched.
+- **Why not always probe, or let explore write tasks:** cost, data side effects and the bug-locking problem
+  above. `--write-tasks` output is used as a skeleton only, for the same reason.
+- **Why arena stays optional:** it is another skill (`michael-denyer/pstack-claude` in this repo's
+  `skills-lock.json`) and the most expensive tool here. Small choices take the simpler option and an
+  assumption line.
+- **Not verified:** no live probe, explore or arena run was done for this change. The commands follow the
+  README's `-p`, `--env`, `--state`, `--max-steps` and `explore` options. The first real run should check
+  that `Answer:` is printed for `done success <report>` and that `history.json` holds the step results.
+
+## Investigation and long-term memory
+
+When the skill lacks a fact it can probe the real app and keep what it proves in an append-only facts file
+(`<root>/.duckwright/facts/<slug>.jsonl`), read back as a small filtered brief next time. Design, evidence
+rules and trust model: `memory/design.md`; arena record: `memory/SYNTHESIS.md`. Skill-only in v1.
+
 ## Setup skill: `duckwright-setup`
 
 Authoring runs often and only writes task files. Setting a project up runs once, edits project config
@@ -287,7 +327,7 @@ Output, `e2e/tasks/basket-promo-codes/`:
 
 ## Out of scope
 
-- Running tasks, CI wiring, exporting or editing Playwright specs.
+- Running tasks (except probes, explore and an optional smoke run, each with the user's yes), CI wiring, exporting or editing Playwright specs.
 - Creating state files, signing in, seeding databases, starting servers (all become plan notes).
 - Changing application code or adding test ids.
 - Editing env files or the map without being asked; never the generated block.

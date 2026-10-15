@@ -3,6 +3,7 @@
 # Flat key: value lines, same syntax as Duckwright task-file front matter.
 default-env: local
 write-envs: local
+investigate-envs: local
 data-prefix: RT-
 off-limits-terms: /admin/users, Delete account, Refund, Stripe dashboard
 allow-literals: larder-local-only, 4242 4242 4242 4242
@@ -16,7 +17,7 @@ Rules for writing Duckwright task files for Larder. Runtime facts the agent need
 
 - `local` (`environments/local.md`): http://localhost:3000 on a developer machine or in CI, seeded by
   `npm run db:seed`. Tasks may create data here.
-- `staging`: shared, read-only for Duckwright. No task that creates an order, a basket item or an account
+- `staging`: shared, read-only for Duckwright, and not in `investigate-envs`: no probes there. No task that creates an order, a basket item or an account
   may name `env: staging`. There is no staging env file in this repo yet.
 
 ## Auth

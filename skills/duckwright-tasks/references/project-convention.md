@@ -8,6 +8,8 @@ Three things, each with one job. A worked example is in the Duckwright repo at
 | `CLAUDE.md`, a `## Duckwright` section | Pointer: where the Duckwright root and the testing map are | every Claude Code session | 5 to 10 lines |
 | `<root>/.duckwright/testing-map.md` | **Authoring rules**: how this project's tasks are written | this skill, people writing tasks | a few KB |
 | `<root>/environments/<name>.md` | **Runtime facts** the agent needs during a run | the Duckwright agent, every step | under 16384 bytes |
+| `<root>/.duckwright/facts/<slug>.jsonl` | **Verified app facts** the skill learned by probing (labels, messages, flows, API calls), with provenance | this skill, through `scripts/facts.mjs brief` | at most 400 facts per host |
+| `<root>/.duckwright/probes/*.md` | The probe tasks that produced those facts; re-run one to re-verify | this skill, `duckwright -p -f` | small |
 
 Plus what `duckwright explore` makes: `<root>/environments/<slug>.sitemap.json` and a generated block in
 an env file.
@@ -43,6 +45,7 @@ Markdown with front matter in Duckwright's own flat `key: value` syntax. The ski
 | --- | --- | --- |
 | `default-env` | env name used when the user names none | |
 | `write-envs` | comma list of envs where tasks may create or change data | |
+| `investigate-envs` | comma list of envs the skill may probe to learn facts; never production. Absent: the skill asks per env and never probes a host it cannot tell is a test instance | |
 | `data-prefix` | prefix for every name a task creates, for example `RT-` | warns when a creating task never uses it |
 | `off-limits-terms` | comma list of words or paths no task may touch | warns on each mention |
 | `allow-literals` | comma list of seed-only values that look like secrets but may appear in tasks | exempts them from the secret check |
@@ -67,6 +70,13 @@ Use these headings so the skill finds them. Number rules (`R1`, `R2`, ...) so a 
   files, payments) and how to handle them.
 - `## Naming`: folders, file names, IDs.
 - `## Off-limits`: in words; mirror the short forms in `off-limits-terms`.
+
+## Facts memory
+
+Written only by the `duckwright-tasks` skill (`scripts/facts.mjs`); format in `references/memory.md`.
+Commit `.duckwright/facts/` and `.duckwright/probes/` so teammates get them, and add
+`.duckwright/facts/*.jsonl merge=union` to `<root>/.gitattributes`: the files are append-only, so a union
+merge never loses a line. Run folders (`runs/`) stay out of git; each fact keeps a short evidence excerpt.
 
 ## Environment files
 

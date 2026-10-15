@@ -3,6 +3,8 @@
 # Flat key: value lines, same syntax as Duckwright task-file front matter. Delete keys you do not need.
 default-env: TODO
 write-envs: TODO
+# investigate-envs: envs the duckwright-tasks skill may probe to learn labels and flows (never production)
+investigate-envs: TODO
 data-prefix: RT-
 off-limits-terms: TODO
 # allow-literals: seed-only values that look like secrets, comma separated
@@ -14,7 +16,8 @@ Rules for writing Duckwright task files. Runtime facts (base URL, accounts, quir
 
 ## Environments
 
-- `TODO` (`environments/TODO.md`): what it is, who seeds it, whether tasks may create data.
+- `TODO` (`environments/TODO.md`): what it is, who seeds it, whether tasks may create data, and whether
+  the skill may probe it (`investigate-envs`; probes that write also need `write-envs`).
 
 ## Auth
 

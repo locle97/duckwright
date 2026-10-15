@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "basket promo codes (2)",
+  "source": "duckwright-tasks skill, 2026-10-15: remove a code, empty code, lower-case code",
+  "setup": "shared/setup.md",
+  "notes": [
+    "Run npm run db:seed in app/ first (resets baskets and coupons).",
+    "Make the state files with npm run e2e:auth -- shopper-a, shopper-b and shopper-c if they are missing.",
+    "BSK-6 is written to the intended behaviour and fails until LAR-412 (case-insensitive codes) is fixed."
+  ],
+  "skipped": [],
+  "tasks": [
+    { "file": "01-remove-applied-code.md", "id": "BSK-4", "title": "Removing an applied code brings the total back" },
+    { "file": "02-empty-code-is-refused.md", "id": "BSK-5", "title": "Apply with an empty field shows a message and changes nothing" },
+    { "file": "03-lower-case-code-is-accepted.md", "id": "BSK-6", "title": "A promo code typed in lower case works like the upper-case code" }
+  ]
+}

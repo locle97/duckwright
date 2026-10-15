@@ -113,7 +113,7 @@ Two skills, installed into your project:
 npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks
 ```
 
-Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks:
+Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks. When the skill lacks context it can investigate the app with a read-only Duckwright run, map an area with `explore`, or compare designs with the `arena` skill, each only after you say yes:
 
 ```text
 /duckwright-tasks write tasks for the promo codes in the basket
@@ -134,6 +134,7 @@ duckwright -p "<task>" [--max-steps N] [--model M] [--[no-]headed]
 duckwright -p -f FILE|FOLDER [FILE|FOLDER ...] [options]
 duckwright plan PLAN [-p] [options]
 duckwright explore URL [--write-tasks] [--allow-writes] [options]
+duckwright check FILE|FOLDER [FILE|FOLDER ...]
 duckwright export [--api] RUN [-o FILE]
 duckwright init
 ```
@@ -515,6 +516,14 @@ duckwright -p -f tasks/ extra/one.md --headed     # mixed; flags apply to every 
 - When the paths come down to a single file, the run is an ordinary single run, with no summary.
 - `-f` reads every argument after it as a path, so `duckwright -p -f a.md "Open the site"` fails with `Open the site: file not found`. A task on the command line and `-f` cannot be combined anyway.
 
+#### Checking task files without running them
+
+```bash
+duckwright check tasks/checkout/ tasks/login.md
+```
+
+`duckwright check` loads each file the way a run does and reports what would stop it: a front-matter error (with its line), no task text, a missing or empty `setup:` file, and an `env:` file that is missing, empty, not UTF-8 or over the 16 KB limit. It needs no browser, no Claude and no `playwright-cli`, so it is cheap in CI and in editors. Run it from the folder you run `duckwright` from, because a bare `env:` name is read from `./environments/`. A missing `state:` file is a warning, not an error: it is often git-ignored, but a run fails its preflight without it. An environment file over 80% of the limit also warns, because `explore` needs room for its generated block. It prints `ok: <file>` for each good file and a one-line summary, and exits `0` with no errors and `2` otherwise.
+
 ### Output
 
 Each step's history line is printed as it happens, followed by the result, answer, step count, and cost. Each run gets its own directory, `runs/<timestamp>-<label>/`, such as `runs/20261003-101500-login/`. The label is the task file's name without its extension (lowercased, accents dropped, anything but letters and digits turned into `-`, at most 40 characters), or two random words such as `brave-otter` for a task given on the command line or a file name with no usable characters. A run that would reuse an existing name gets `-2`, `-3` and so on. The directory contains:
@@ -584,7 +593,7 @@ Limits:
 | --- | --- |
 | `0` | The agent finished with `done success` |
 | `1` | Failure: `done failure`, max steps reached, repeated brain failures, or a playwright error. In a batch, at least one task failed |
-| `2` | Bad input or a preflight check failed: an unreadable or invalid task file, a folder with no task files, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
+| `2` | Bad input or a preflight check failed (also `duckwright check` finding an error): an unreadable or invalid task file, a folder with no task files, a missing system prompt, skill, `--state` file, `claude`, or `playwright-cli` |
 | `130` | Interrupted with Ctrl-C (`history.json` is still written; a batch stops at the interrupted task) |
 
 ## Turning a run into a regression test
