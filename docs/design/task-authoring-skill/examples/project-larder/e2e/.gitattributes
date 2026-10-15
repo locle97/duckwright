@@ -1,0 +1,2 @@
+# Facts memory is append-only: a union merge keeps both sides' new lines.
+.duckwright/facts/*.jsonl merge=union

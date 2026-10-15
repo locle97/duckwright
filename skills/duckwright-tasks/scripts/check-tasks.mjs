@@ -13,14 +13,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// Mirrors src/taskfile.ts KEYS. test/skill-check.test.ts fails when they drift.
+// Mirrors src/taskfile.ts KEYS. a drift test against src/taskfile.ts is proposed in docs/design/task-authoring-skill/docs/.
 export const KEYS = {
   "max-steps": "int", model: "str", headed: "bool", skill: "path", session: "str", state: "path",
   network: "bool", video: "bool", screenshot: "bool", "twofa-timeout": "int", jev: "bool", debug: "bool",
   "jev-threshold": "threshold", snapshot: "snapshot", env: "env", setup: "path",
 };
 export const ENV_MAX_BYTES = 16384; // src/environment.ts
-const MAP_KEYS = new Set(["default-env", "write-envs", "data-prefix", "off-limits-terms", "allow-literals"]);
+const MAP_KEYS = new Set(["default-env", "write-envs", "investigate-envs", "data-prefix", "off-limits-terms", "allow-literals"]);
 
 // Things one browser driven through the allow-list cannot do (prompts/system.md "Commands").
 const ERRORS = [
@@ -213,7 +213,11 @@ function lintBody(file, lines, start, ctx) {
       }
     }
   });
-  if (ctx.isTask) {
+  if (ctx.isTask && ctx.probe) {
+    // A probe (templates/probe.md) asks questions instead of checking results.
+    if (!/^\s*find out\b/im.test(text)) report(file, start, "error", 'probe has no "Find out" questions');
+    if (!/"facts"\s*:/.test(text)) report(file, start, "error", 'probe does not ask for the {"facts": [...]} answer that facts.mjs ingest reads');
+  } else if (ctx.isTask) {
     if (!/^\s*(expected results?:|check that\b)/im.test(text)) report(file, start, "error", 'no checks: add an "Expected results:" list with at least one checkable item');
     const steps = lines.filter((l) => /^\s*\d+\.\s/.test(l)).length;
     const max = Number(ctx.maxSteps ?? 25);
@@ -253,6 +257,7 @@ function lintTask(file, root, sitemap) {
   }
   lintBody(file, body, bodyStart, {
     isTask: true, network: s.network?.value, maxSteps: s["max-steps"]?.value, base: baseUrlOf(envText), sitemap,
+    probe: fm.some(([, l]) => /^#\s*duckwright-tasks probe:/.test(l)),
   });
 }
 

@@ -113,7 +113,7 @@ Two skills, installed into your project:
 npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks
 ```
 
-Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks:
+Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks. When the skill lacks context it can investigate the app with a read-only Duckwright run, map an area with `explore`, or compare designs with the `arena` skill, each only after you say yes:
 
 ```text
 /duckwright-tasks write tasks for the promo codes in the basket
