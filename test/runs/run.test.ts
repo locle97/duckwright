@@ -454,7 +454,7 @@ test("run_start_env_failure_fails_run", async () => {
     const h = startRun(s.spec, s.deps);
     const o = await h.done;
     assert.equal(o.exitCode, 1);
-    assert.equal(o.error, `environment file not found: ${path.join(fs.realpathSync(dir), "environments", "gone.md")}`);
+    assert.equal(o.error, `environment file not found: ${path.join(fs.realpathSync(dir), ".duckwright", "environments", "gone.md")}`);
     assert.equal(created, 0);
     assert.ok(!("env" in readHistory(h.workdir)));
   });

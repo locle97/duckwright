@@ -6,6 +6,7 @@ import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
 import { EnvError, isEnvPath, loadEnvironment } from "./environment.ts";
+import { ProjectError, loadProject, scaffoldProject } from "./project.ts";
 import { ExportError, exportRun, loadHistory } from "./export.ts";
 import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
@@ -165,6 +166,12 @@ function preflight(deps: CliDeps, skill: string, state: string | null, env: stri
       if (e instanceof EnvError) return e.message;
       throw e;
     }
+  }
+  try {
+    loadProject();
+  } catch (e) {
+    if (e instanceof ProjectError) return e.message;
+    throw e;
   }
   if (!deps.which("claude")) return "claude CLI not found on PATH (install Claude Code)";
   if (!deps.which("playwright-cli")) return "playwright-cli not found on PATH (npm i -g @playwright/cli@latest)";
@@ -352,9 +359,16 @@ function webMain(deps: CliDeps, argv: string[], args: RunArgs, config: GlobalCon
   });
 }
 
-/** `duckwright init`: write the default config unless one exists. */
+/** `duckwright init`: write the default config unless one exists. `init project` scaffolds `.duckwright/`. */
 function initMain(deps: CliDeps, rest: string[]): number {
-  if (rest.length) throw usage("init takes no arguments");
+  if (rest.length === 1 && rest[0] === "project") {
+    const written = scaffoldProject();
+    deps.stdout(written.length
+      ? `Wrote:\n${written.map((f) => `  ${f}`).join("\n")}\nEdit .duckwright/PROJECT.md: the agent reads it in every step.`
+      : "Project files already exist in .duckwright/");
+    return 0;
+  }
+  if (rest.length) throw usage("init takes no arguments, or `project` to write .duckwright/");
   try {
     const { file, created } = deps.initConfig();
     deps.stdout(created ? `Wrote default config: ${file}` : `Config already exists: ${file}`);

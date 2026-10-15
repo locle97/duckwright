@@ -367,7 +367,7 @@ test("args_env_usage_and_help", () => {
   assert.ok(RUN_USAGE.includes("                  [--state FILE] [--env ENV] [--allow-file-access]\n"));
   assert.ok(RUN_HELP.includes(
     "                        state-load before the task starts\n"
-    + "  --env ENV             environment context: the text of environments/ENV.md\n"
+    + "  --env ENV             environment context: the text of .duckwright/environments/ENV.md\n"
     + "                        (or of the .md file at path ENV) is put into every\n"
     + "                        step's prompt; none = no environment\n",
   ));

@@ -4,7 +4,10 @@ import path from "node:path";
 import { resolvePath } from "./paths.ts";
 import { compareCodePoints } from "./text.ts";
 
-export const ENV_DIR = "environments";
+export const PROJECT_DIR = ".duckwright";
+export const ENV_DIR = `${PROJECT_DIR}/environments`;
+/** Where environments lived before the project folder; still read when the new folder lacks the file. */
+export const LEGACY_ENV_DIR = "environments";
 export const ENV_MAX_BYTES = 16384;
 export const ENV_NONE = "none";
 
@@ -29,7 +32,11 @@ export function envLabel(value: string | null): string | null {
 export function resolveEnv(value: string, cwd = process.cwd()): { name: string; path: string } {
   const name = envLabel(value) as string;
   if (isEnvPath(value)) return { name, path: resolvePath(path.resolve(cwd, value)) };
-  if (isEnvName(value)) return { name, path: resolvePath(path.join(cwd, ENV_DIR, value + ".md")) };
+  if (isEnvName(value)) {
+    const current = path.join(cwd, ENV_DIR, value + ".md");
+    const legacy = path.join(cwd, LEGACY_ENV_DIR, value + ".md");
+    return { name, path: resolvePath(!fs.existsSync(current) && fs.existsSync(legacy) ? legacy : current) };
+  }
   throw new EnvError(`invalid environment: '${value}'`);
 }
 
@@ -69,8 +76,13 @@ export function loadEnvironment(
   return { name, path: p, text };
 }
 
-export function listEnvironments(cwd = process.cwd()): string[] {
-  const dir = path.join(cwd, ENV_DIR);
+/** The folder explore memory lives in: the project folder's, unless only the legacy one exists. */
+export function envRoot(cwd = process.cwd()): string {
+  const current = path.join(cwd, ENV_DIR);
+  return !fs.existsSync(current) && fs.existsSync(path.join(cwd, LEGACY_ENV_DIR)) ? LEGACY_ENV_DIR : ENV_DIR;
+}
+
+function envNamesIn(dir: string): string[] {
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
@@ -89,5 +101,13 @@ export function listEnvironments(cwd = process.cwd()): string[] {
     }
     names.push(stem);
   }
-  return names.sort(compareCodePoints);
+  return names;
+}
+
+export function listEnvironments(cwd = process.cwd()): string[] {
+  const all = new Set([
+    ...envNamesIn(path.join(cwd, ENV_DIR)),
+    ...envNamesIn(path.join(cwd, LEGACY_ENV_DIR)),
+  ]);
+  return [...all].sort(compareCodePoints);
 }

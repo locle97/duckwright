@@ -1467,7 +1467,7 @@ test("web_outside_sigint_quits", { timeout: 5000 }, async () => {
 });
 
 function envFile(tmp: string, name: string, text: string): string {
-  const p = path.join(tmp, "environments", name + ".md");
+  const p = path.join(tmp, ".duckwright", "environments", name + ".md");
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, text);
   return p;
@@ -1496,7 +1496,7 @@ test("cli_env_reaches_agent", async () => {
 
 test("cli_env_preflight_errors", async () => {
   const e = env();
-  const dir = path.join(e.tmp, "environments");
+  const dir = path.join(e.tmp, ".duckwright", "environments");
   const p = (n: string) => path.join(dir, n + ".md");
   envFile(e.tmp, "big", "x".repeat(16385));
   envFile(e.tmp, "empty", "  \n");
@@ -1547,7 +1547,7 @@ test("cli_env_batch_errors_prefixed", async () => {
   const a = taskFile(e.tmp, "---\nenv: ma\n---\nA\n", "a.md");
   const b = taskFile(e.tmp, "---\nenv: mb\n---\nB\n", "b.md");
   assert.equal(await main(["-p", "--skill", e.argv[2], "-f", a, b], e.deps()), 2);
-  const dir = path.join(fs.realpathSync(e.tmp), "environments");
+  const dir = path.join(fs.realpathSync(e.tmp), ".duckwright", "environments");
   assert.deepEqual(e.err, [
     `a.md: environment file not found: ${dir}/ma.md`,
     `b.md: environment file not found: ${dir}/mb.md`,
@@ -1883,8 +1883,8 @@ test("explore_memory_files_are_written_and_printed", async () => {
   const e = shopEnv();
   const seen: AgentOptions[] = [];
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
-  const md = path.join("environments", "shop.example.md");
-  const sm = path.join("environments", "shop.example.sitemap.json");
+  const md = path.join(".duckwright", "environments", "shop.example.md");
+  const sm = path.join(".duckwright", "environments", "shop.example.sitemap.json");
   assert.ok(e.out.includes(`Environment: ${md}`));
   assert.ok(e.out.includes(`Sitemap: ${sm}`));
   assert.ok(e.out.indexOf(`Environment: ${md}`) > e.out.findIndex((l) => l.startsWith("Data:")));
@@ -1900,18 +1900,18 @@ test("explore_second_run_loads_and_extends_the_map", async () => {
   const e = shopEnv();
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
   const first: AgentOptions[] = [];
-  fs.rmSync(path.join(e.tmp, "environments"), { recursive: true, force: true });
+  fs.rmSync(path.join(e.tmp, ".duckwright", "environments"), { recursive: true, force: true });
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, first) })), 0);
   assert.doesNotMatch(first[0].task, /Earlier exploration of this site/);
-  const run1Md = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  const run1Md = fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.md"), "utf8");
   const seen: AgentOptions[] = [];
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent([{ url: SHOP, links: [`${SHOP}a`, `${SHOP}b`] }], seen) })), 0);
   assert.equal(seen[0].environment, run1Md.trim());
   assert.match(seen[0].task, /Earlier exploration of this site/);
   assert.ok(seen[0].task.includes(`${SHOP}b`));
-  const mdText = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  const mdText = fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.md"), "utf8");
   assert.ok(mdText.length > 0);
-  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json"), "utf8"));
   assert.equal(sm.runs, 2);
   const urls = sm.pages.map((p: { url: string }) => p.url);
   assert.equal(new Set(urls).size, urls.length);
@@ -1924,16 +1924,16 @@ test("explore_second_run_loads_and_extends_the_map", async () => {
 test("explore_explicit_env_wins_but_memory_files_still_update", async () => {
   const e = shopEnv();
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
-  const shopMd = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
-  fs.writeFileSync(path.join(e.tmp, "environments", "other.md"), "OTHER ENV\n");
+  const shopMd = fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.md"), "utf8");
+  fs.writeFileSync(path.join(e.tmp, ".duckwright", "environments", "other.md"), "OTHER ENV\n");
   const seen: AgentOptions[] = [];
   assert.equal(await main([...e.argv, "--env", "other"], e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
   assert.equal(seen[0].environment, "OTHER ENV");
-  assert.equal(fs.readFileSync(path.join(e.tmp, "environments", "other.md"), "utf8"), "OTHER ENV\n");
-  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.equal(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "other.md"), "utf8"), "OTHER ENV\n");
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json"), "utf8"));
   assert.equal(sm.runs, 2);
   assert.match(shopMd, /run=1 /);
-  assert.match(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8"), /run=2 /);
+  assert.match(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.md"), "utf8"), /run=2 /);
 });
 
 test("explore_env_path_receives_the_generated_environment", async () => {
@@ -1943,8 +1943,8 @@ test("explore_env_path_receives_the_generated_environment", async () => {
   assert.equal(await main([...e.argv, "--env", custom], e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
   assert.ok(e.out.includes(`Environment: ${custom}`));
   assert.ok(fs.existsSync(custom));
-  assert.ok(fs.existsSync(path.join(e.tmp, "environments", "shop.example.sitemap.json")));
-  assert.equal(fs.existsSync(path.join(e.tmp, "environments", "shop.example.md")), false);
+  assert.ok(fs.existsSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json")));
+  assert.equal(fs.existsSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.md")), false);
 });
 
 test("task_runs_ignore_the_generated_environment", async () => {
@@ -1961,7 +1961,7 @@ test("task_runs_ignore_the_generated_environment", async () => {
 
 test("explore_memory_write_failure_warns_and_fails_an_otherwise_good_run", async () => {
   const e = shopEnv();
-  fs.writeFileSync(path.join(e.tmp, "environments"), "file");
+  fs.writeFileSync(path.join(e.tmp, ".duckwright"), "file");
   assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 1);
   assert.ok(e.out.some((l) => l.startsWith("# Exploration report")));
   assert.ok(e.err.some((l) => l.startsWith("explore: cannot save site memory")));
@@ -1971,7 +1971,7 @@ test("explore_memory_write_failure_warns_and_fails_an_otherwise_good_run", async
 test("explore_without_a_recorded_page_creates_no_memory_files", async () => {
   const e = shopEnv();
   assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent() })), 0);
-  assert.equal(fs.existsSync(path.join(e.tmp, "environments")), false);
+  assert.equal(fs.existsSync(path.join(e.tmp, ".duckwright", "environments")), false);
   assert.ok(!e.out.some((l) => l.startsWith("Environment:") || l.startsWith("Sitemap:")));
 });
 
@@ -1983,26 +1983,26 @@ test("explore_env_none_switches_the_auto_environment_off", async () => {
     assert.equal(await main([...e.argv, ...flag], e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
     assert.equal(seen[0].environment, null);
     assert.match(seen[0].task, /Earlier exploration of this site/);
-    const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+    const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json"), "utf8"));
     assert.equal(sm.runs, 2);
-    assert.match(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8"), /run=2 /);
+    assert.match(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.md"), "utf8"), /run=2 /);
   }
 });
 
 test("explore_failed_preflight_leaves_a_corrupt_sitemap_alone", async () => {
   const e = shopEnv();
-  fs.mkdirSync(path.join(e.tmp, "environments"));
-  const sm = path.join(e.tmp, "environments", "shop.example.sitemap.json");
+  fs.mkdirSync(path.join(e.tmp, ".duckwright", "environments"), { recursive: true });
+  const sm = path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json");
   fs.writeFileSync(sm, "{ not json");
   assert.equal(await main(e.argv, e.deps({ which: () => null })), 2);
   assert.equal(fs.readFileSync(sm, "utf8"), "{ not json");
-  assert.deepEqual(fs.readdirSync(path.join(e.tmp, "environments")), ["shop.example.sitemap.json"]);
+  assert.deepEqual(fs.readdirSync(path.join(e.tmp, ".duckwright", "environments")), ["shop.example.sitemap.json"]);
   assert.ok(!e.err.some((l) => l.startsWith("warning:")));
 });
 
 test("explore_memory_write_failure_keeps_a_nonzero_exit_code", async () => {
   const e = shopEnv();
-  fs.writeFileSync(path.join(e.tmp, "environments"), "file");
+  fs.writeFileSync(path.join(e.tmp, ".duckwright"), "file");
   const aborted = agentWith(async (opts) => {
     opts.events!.emit({ type: "step:end", record: exploreEntry({ page: { url: SHOP, title: "T", links: [] } }), cost: 0, durationMs: 0 });
     throw new AbortedError();
@@ -2072,7 +2072,7 @@ test("explore_allow_writes_second_run_brief_lists_untested_functions", async () 
   assert.match(second[0].task, /Functions still to exercise/);
   assert.ok(second[0].task.includes("- Delete recipe (untested)"));
   assert.ok(!second[0].task.includes("- Create recipe (ok)"));
-  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json"), "utf8"));
   assert.deepEqual(sm.functions.map((f: { name: string; status: string }) => [f.name, f.status]).sort(), [["Create recipe", "ok"], ["Delete recipe", "untested"]]);
 });
 
@@ -2113,7 +2113,7 @@ test("explore_allow_writes_cut_off_run_keeps_ledger_and_declared_functions", asy
     throw new AbortedError();
   });
   assert.equal(await main([...e.argv, "--allow-writes"], e.deps({ createAgent: cut })), 130);
-  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, ".duckwright", "environments", "shop.example.sitemap.json"), "utf8"));
   assert.deepEqual(sm.functions.map((f: { name: string; status: string }) => [f.name, f.status]), [["Delete recipe", "untested"]]);
   assert.equal(sm.created.length, 1);
   assert.match(sm.created[0].name, /^DW-\d{6}-[0-9a-f]{4}-Pasta$/);

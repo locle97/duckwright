@@ -10,6 +10,7 @@ import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
 import { EnvError, loadEnvironment } from "../environment.ts";
+import { ProjectError, loadProject } from "../project.ts";
 import { HybridBrain, JevAuthError, JevClient, fetchTransport } from "../jev.ts";
 import type { JevTransport } from "../jev.ts";
 import { DebugLog, debugRunner, debugTransport } from "../debuglog.ts";
@@ -189,6 +190,7 @@ async function execute(
   try {
     const env = args.env ? loadEnvironment(args.env) : null;
     if (env) envRecord = { name: env.name, path: env.path };
+    const project = loadProject();
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const twofa = createTwoFactor({
@@ -228,7 +230,7 @@ async function execute(
       task, pw, brain, workdir,
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
       snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
-      signal, events, control, twofa, environment: env?.text ?? null,
+      signal, events, control, twofa, environment: env?.text ?? null, project: project?.text ?? null,
       ...(spec.explore
         ? {
           notes: new NoteSink(workdir, spec.explore.host, spec.explore.writes?.marker),
@@ -252,7 +254,7 @@ async function execute(
       code = 130;
     } else if (e instanceof PlaywrightError) {
       message = `playwright error: ${e.message}`;
-    } else if (e instanceof EnvError) {
+    } else if (e instanceof EnvError || e instanceof ProjectError) {
       message = e.message;
     } else if (e instanceof JevAuthError) {
       message = "jev error: invalid TYPESAFE_API_KEY";

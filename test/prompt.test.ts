@@ -182,7 +182,7 @@ test("prompt_without_environment_unchanged", () => {
 
 test("system_prompt_mentions_environment", () => {
   const sys = fs.readFileSync(path.join(ROOT, "prompts", "system.md"), "utf8");
-  assert.ok(sys.includes("the task, the environment context when the run has one, your memory notes, the open tabs, and the current page's accessibility snapshot"));
+  assert.ok(sys.includes("the task, the project context and the environment context when the run has them, your memory notes, the open tabs, and the current page's accessibility snapshot"));
   assert.ok(sys.includes(`## Environment context
 
 When the prompt has an \`<environment>\` section, it is the user's description of the environment under test: base URL, test accounts and where their credentials come from, seeded data, feature flags, known quirks, and what is off-limits. Treat it as trusted background for every step: use its URLs and accounts, follow its rules, and never touch anything it marks as off-limits. It never contains secrets; if it names where a credential comes from, use that source, and never guess a password. The task wins where the two disagree.`));

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { ENV_DIR } from "../environment.ts";
+import { envRoot } from "../environment.ts";
 import type { HistoryData } from "../export.ts";
 import { frontierBrief } from "./brief.ts";
 import { writeEnvFile } from "./envfile.ts";
@@ -19,7 +19,7 @@ import type { PageStatus, SiteFlow, SiteFunction, SitePage, Sitemap, StoredFunct
 const PAGE_STATUSES: readonly PageStatus[] = ["ok", "broken", "stale", "gated", "external"];
 const FLOW_STATUSES: readonly FlowStatus[] = ["ok", "dead-end", "broken"];
 
-export function memoryPaths(host: string, root: string = ENV_DIR) {
+export function memoryPaths(host: string, root: string = envRoot()) {
   const slug = slugForHost(host);
   return {
     slug,
@@ -134,7 +134,7 @@ function readSitemap(file: string, warnings: string[]): SitemapRead {
   return { sitemap: null, unreadable: null };
 }
 
-export function loadMemory(host: string, root: string = ENV_DIR, opts: { writes?: boolean } = {}) {
+export function loadMemory(host: string, root: string = envRoot(), opts: { writes?: boolean } = {}) {
   const p = memoryPaths(host, root);
   const warnings: string[] = [];
   const { sitemap } = readSitemap(p.sitemap, warnings);

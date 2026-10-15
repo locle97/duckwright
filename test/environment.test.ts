@@ -9,7 +9,7 @@ import {
 import { tmpDir } from "./helpers.ts";
 
 function envFile(cwd: string, name: string, content: string | Uint8Array): string {
-  const p = path.join(cwd, "environments", name);
+  const p = path.join(cwd, ".duckwright", "environments", name);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, content);
   return p;
@@ -36,7 +36,7 @@ test("env_classify", () => {
 test("env_resolve_and_label", () => {
   const tmp = tmpDir();
   assert.deepEqual(resolveEnv("staging", tmp), {
-    name: "staging", path: path.join(tmp, "environments", "staging.md"),
+    name: "staging", path: path.join(tmp, ".duckwright", "environments", "staging.md"),
   });
   assert.deepEqual(resolveEnv("x/prod.MD", tmp), { name: "prod", path: path.join(tmp, "x", "prod.MD") });
   assert.equal(envLabel("../envs/eu-west"), "eu-west");
@@ -47,11 +47,11 @@ test("env_resolve_and_label", () => {
 
 test("env_load_errors", () => {
   const tmp = tmpDir();
-  const p = path.join(tmp, "environments", "staging.md");
+  const p = path.join(tmp, ".duckwright", "environments", "staging.md");
   assert.equal(loadError("staging", tmp), `environment file not found: ${p}`);
-  fs.mkdirSync(path.join(tmp, "environments", "dir.md"), { recursive: true });
-  const d = path.join(tmp, "environments", "dir.md");
-  assert.equal(loadError("environments/dir.md", tmp),
+  fs.mkdirSync(path.join(tmp, ".duckwright", "environments", "dir.md"), { recursive: true });
+  const d = path.join(tmp, ".duckwright", "environments", "dir.md");
+  assert.equal(loadError(".duckwright/environments/dir.md", tmp),
     `environment file cannot be read: ${d}: not a file`);
   envFile(tmp, "staging.md", new Uint8Array([0xff, 0xfe, 0x41]));
   assert.equal(loadError("staging", tmp), `environment file cannot be read: ${p}: not valid UTF-8`);
@@ -78,6 +78,19 @@ test("env_list_filters_and_sorts", () => {
   for (const f of ["b.md", "a.md", "A.md", ".hidden.md", "none.md", "x.MD.md", "notes.txt", "UP.MD", "bad name.md"]) {
     envFile(tmp, f, "x");
   }
-  fs.mkdirSync(path.join(tmp, "environments", "dir.md"));
+  fs.mkdirSync(path.join(tmp, ".duckwright", "environments", "dir.md"));
   assert.deepEqual(listEnvironments(tmp), ["A", "a", "b"]);
+});
+
+test("env_legacy_folder_is_still_read", () => {
+  const tmp = tmpDir();
+  fs.mkdirSync(path.join(tmp, "environments"));
+  fs.writeFileSync(path.join(tmp, "environments", "old.md"), "OLD\n");
+  assert.equal(resolveEnv("old", tmp).path, path.join(tmp, "environments", "old.md"));
+  assert.equal(loadEnvironment("old", tmp).text, "OLD");
+  // The project folder wins when both have the name.
+  envFile(tmp, "old.md", "NEW\n");
+  assert.equal(loadEnvironment("old", tmp).text, "NEW");
+  envFile(tmp, "extra.md", "x\n");
+  assert.deepEqual(listEnvironments(tmp), ["extra", "old"]);
 });

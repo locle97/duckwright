@@ -921,7 +921,7 @@ test("manager_env_names_resolve_against_manager_cwd", () => {
   const id = mgr.addTyped("t");
   mgr.start(id);
   started.push(mgr.effectiveArgs(id).env);
-  const want = resolvePath(path.join(dir, "environments", "qa.md"));
+  const want = resolvePath(path.join(dir, ".duckwright", "environments", "qa.md"));
   assert.deepEqual(seen, [want]);
   assert.deepEqual(started, [want]);
   assert.equal(mgr.list()[0].effective.env, "qa");
@@ -937,7 +937,7 @@ test("manager_env_reaches_start_run", () => {
   const { mgr, fakes } = setup({ cwd: dir });
   mgr.setGlobals({ env: "qa" });
   mgr.start(mgr.addTyped("t"));
-  assert.equal(fakes[0].spec.args.env, resolvePath(path.join(dir, "environments", "qa.md")));
+  assert.equal(fakes[0].spec.args.env, resolvePath(path.join(dir, ".duckwright", "environments", "qa.md")));
 });
 
 test("manager_env_preflight_failure_is_task_error", () => {

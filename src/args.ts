@@ -107,7 +107,7 @@ options:
   --session SESSION
   --state FILE          storage state JSON (cookies, localStorage) loaded with
                         state-load before the task starts
-  --env ENV             environment context: the text of environments/ENV.md
+  --env ENV             environment context: the text of .duckwright/environments/ENV.md
                         (or of the .md file at path ENV) is put into every
                         step's prompt; none = no environment
   --allow-file-access   allow file:// URLs and UNRESTRICTED local file access
