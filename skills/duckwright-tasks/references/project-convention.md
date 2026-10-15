@@ -1,7 +1,7 @@
 # What a project provides for Duckwright tasks
 
 Three things, each with one job. A worked example is in the Duckwright repo at
-`examples/project-larder/`.
+`docs/design/task-authoring-skill/examples/project-larder/` in the Duckwright repo.
 
 | File | Job | Read by | Size |
 | --- | --- | --- | --- |

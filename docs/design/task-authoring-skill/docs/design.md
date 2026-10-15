@@ -36,7 +36,7 @@ CLAUDE.md gets only a 5-line pointer, because it is loaded into every session, t
 
 ## What ships, and where
 
-In the Duckwright repo (this candidate's output dir mirrors these paths):
+In the Duckwright repo (final locations: the skill is at the repo root `skills/duckwright-tasks/`, where `npx skills add` finds it; the example and this doc stay under `docs/design/task-authoring-skill/`):
 
 | Path | What |
 | --- | --- |
@@ -45,7 +45,7 @@ In the Duckwright repo (this candidate's output dir mirrors these paths):
 | `skills/duckwright-tasks/references/project-convention.md` | The convention the project follows (also user docs) |
 | `skills/duckwright-tasks/templates/{task.md,plan.json,testing-map.md,claude-md-section.md}` | Skeletons the skill fills |
 | `skills/duckwright-tasks/scripts/check-tasks.mjs` | Linter, Node 22, no deps, read-only, ~320 lines |
-| `examples/project-larder/` | Worked example: CLAUDE.md, testing map, env file, sitemap, and the skill's output for one request |
+| `docs/design/task-authoring-skill/examples/project-larder/` | Worked example: CLAUDE.md, testing map, env file, sitemap, and the skill's output for one request |
 | `test/skill-check.test.ts` | Keeps the linter's key list and the reference in step with `src/taskfile.ts` and `src/brain.ts`; runs the example through the real parsers and the linter |
 
 `skills/` sits at the top level, not in `.claude/skills/`: that folder holds the skills used to develop
@@ -53,7 +53,7 @@ Duckwright itself, and mixing a user-facing skill into it would install it for c
 
 **Install for users** (README section to add): either copy `skills/duckwright-tasks/` into the
 project's `.claude/skills/`, or `npx skills add locle97/duckwright --skill duckwright-tasks` (the `skills`
-tool this repo already uses, see `skills-lock.json`). Optional packaging change: add `"skills"` to
+tool this repo already uses, see `skills-lock.json`; `--skill` is needed because the repo's own `.claude/skills/playwright-cli` is also discoverable). Checked: `skills add` finds the skill, copies all 9 files to `.claude/skills/duckwright-tasks/`, and the installed linter runs. Optional packaging change: add `"skills"` to
 `package.json` `files` so `npm i -g duckwright` carries a copy users can copy from. Not a harness change.
 
 Verified in a scratch copy of the repo: `node --test test/skill-check.test.ts` passes 5/5, `tsc` is

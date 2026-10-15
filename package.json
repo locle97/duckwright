@@ -18,7 +18,8 @@
   },
   "files": [
     "dist",
-    "prompts"
+    "prompts",
+    "skills"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts",

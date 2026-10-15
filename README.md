@@ -105,6 +105,20 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 > pipx uninstall playwright-agent-loop && npm install -g duckwright
 > ```
 
+### Writing tasks with Claude Code
+
+Install the `duckwright-tasks` skill into your project, then ask Claude to write tasks that follow your project's own testing rules:
+
+```bash
+npx skills add locle97/duckwright --skill duckwright-tasks
+```
+
+```text
+/duckwright-tasks write tasks for the promo codes in the basket
+```
+
+The skill reads your `CLAUDE.md` (a short `## Duckwright` section), a testing map at `.duckwright/testing-map.md`, your environment files and the explore sitemap, writes a task folder, and lints it with its bundled `scripts/check-tasks.mjs`. See `skills/duckwright-tasks/references/project-convention.md` for what your project provides, and `docs/design/task-authoring-skill/` for the design and a worked example.
+
 ## Usage
 
 ```bash
