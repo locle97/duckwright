@@ -11,6 +11,8 @@ import type { WebHandle } from "../src/web/index.ts";
 import type { ManagerEvent, ManagerLike } from "../src/runs/manager.ts";
 import type { PastRun } from "../src/runs/past.ts";
 import type { AgentOptions, RunResult } from "../src/loop.ts";
+import { NoteSink } from "../src/explore/notes.ts";
+import { WriteGuard } from "../src/explore/guard.ts";
 import { AbortedError } from "../src/proc.ts";
 import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightError } from "../src/pw.ts";
@@ -261,7 +263,7 @@ test("version_flag", async () => {
 
 test("system_prompt_documents_expect", () => {
   const text = fs.readFileSync(PROMPTS.system, "utf8");
-  assert.ok(text.includes("screenshot, expect, expect-request, request, twofa, done"));
+  assert.ok(text.includes("screenshot, expect, expect-request, request, twofa, note, done"));
   assert.ok(text.includes('{"cmd": "request", "args": ["POST", "/api/todos", "{\\"title\\":\\"x\\"}", "201"]}'));
   assert.ok(text.includes("Safe to batch before it: fill, type, select, check, uncheck, hover, expect, request."));
   assert.ok(text.includes('{"cmd": "expect-request", "args": ["POST", "/api/login", "201"]}'));
@@ -1701,7 +1703,7 @@ test("explore_success_prints_report_and_writes_files", async () => {
   assert.equal(data.working_flows.length, 1);
   assert.equal(data.broken_flows.length, 1);
   assert.equal(fs.existsSync(path.join(dir, "duckwright.spec.ts")), false);
-  assert.equal(seen[0].maxSteps, 40);
+  assert.equal(seen[0].maxSteps, 60);
   assert.equal(seen[0].consoleErrors, true);
 });
 
@@ -1710,7 +1712,7 @@ test("explore_max_steps_config_ignored_flag_wins", async () => {
   const seen: AgentOptions[] = [];
   const deps = { createAgent: exploreAgent(FLOWS, true, seen), loadConfig: () => ({ maxSteps: 7 }) };
   assert.equal(await main(e.argv, e.deps(deps)), 0);
-  assert.equal(seen[0].maxSteps, 40);
+  assert.equal(seen[0].maxSteps, 60);
   assert.equal(await main([...e.argv, "--max-steps", "10"], e.deps(deps)), 0);
   assert.equal(seen[1].maxSteps, 10);
 });
@@ -1811,7 +1813,7 @@ test("explore_write_tasks_none_and_failure", async () => {
 test("explore_usage_errors_and_preflight", async () => {
   const e = exploreEnv();
   assert.equal(await main(["explore"], e.deps()), 2);
-  assert.equal(e.err[0], "usage: duckwright explore [-h] [--write-tasks] [run options] url");
+  assert.equal(e.err[0], "usage: duckwright explore [-h] [--write-tasks] [--allow-writes] [run options] url");
   assert.equal(e.err[1], "duckwright explore: error: give a URL to explore");
   const bad = exploreEnv();
   assert.equal(await main(["explore", "ftp://x"], bad.deps()), 2);
@@ -1850,4 +1852,289 @@ test("explore_after_double_dash_is_a_task_and_never_uses_tui", async () => {
   const loadTui = async (): Promise<TuiModule> => { loaded = true; throw new Error("no"); };
   assert.equal(await main(t.argv, t.deps({ isTTY: () => true, loadTui, createAgent: exploreAgent() })), 0);
   assert.equal(loaded, false);
+});
+
+// ---- explore: site memory ----
+
+const SHOP = "https://shop.example/";
+
+function shopAgent(pages: { url: string; links: string[] }[], seen: AgentOptions[] = []) {
+  return agentWith(async (opts) => {
+    seen.push(opts);
+    const history = pages.map((p, i) => exploreEntry({ step: i + 1, page: { url: p.url, title: "T", links: p.links } }));
+    for (const r of history) opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
+    return { success: true, answer: FLOWS, steps: history.length, costUsd: 0, history };
+  });
+}
+
+const SHOP_RUN_1 = [
+  { url: SHOP, links: [`${SHOP}a`, `${SHOP}b`] },
+  { url: `${SHOP}a`, links: [SHOP] },
+];
+
+function shopEnv() {
+  const e = env();
+  const base = e.deps;
+  e.deps = (over = {}) => base({ loadConfig: () => ({}), ...over });
+  return { ...e, argv: ["explore", SHOP, "--skill", e.argv[2]] };
+}
+
+test("explore_memory_files_are_written_and_printed", async () => {
+  const e = shopEnv();
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
+  const md = path.join("environments", "shop.example.md");
+  const sm = path.join("environments", "shop.example.sitemap.json");
+  assert.ok(e.out.includes(`Environment: ${md}`));
+  assert.ok(e.out.includes(`Sitemap: ${sm}`));
+  assert.ok(e.out.indexOf(`Environment: ${md}`) > e.out.findIndex((l) => l.startsWith("Data:")));
+  assert.ok(fs.existsSync(path.join(e.tmp, md)));
+  assert.ok(fs.existsSync(path.join(e.tmp, sm)));
+  assert.ok(fs.existsSync(path.join(runDirs(e.tmp)[0], "explore-memory.json")));
+  assert.ok(seen[0].notes instanceof NoteSink);
+  assert.equal(seen[0].pageInfo, true);
+  assert.equal(seen[0].environment, null);
+});
+
+test("explore_second_run_loads_and_extends_the_map", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const first: AgentOptions[] = [];
+  fs.rmSync(path.join(e.tmp, "environments"), { recursive: true, force: true });
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, first) })), 0);
+  assert.doesNotMatch(first[0].task, /Earlier exploration of this site/);
+  const run1Md = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent([{ url: SHOP, links: [`${SHOP}a`, `${SHOP}b`] }], seen) })), 0);
+  assert.equal(seen[0].environment, run1Md.trim());
+  assert.match(seen[0].task, /Earlier exploration of this site/);
+  assert.ok(seen[0].task.includes(`${SHOP}b`));
+  const mdText = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  assert.ok(mdText.length > 0);
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.equal(sm.runs, 2);
+  const urls = sm.pages.map((p: { url: string }) => p.url);
+  assert.equal(new Set(urls).size, urls.length);
+  // The second run was given the environment the first run wrote.
+  const third: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1, third) })), 0);
+  assert.equal(third[0].environment, mdText.trim());
+});
+
+test("explore_explicit_env_wins_but_memory_files_still_update", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const shopMd = fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8");
+  fs.writeFileSync(path.join(e.tmp, "environments", "other.md"), "OTHER ENV\n");
+  const seen: AgentOptions[] = [];
+  assert.equal(await main([...e.argv, "--env", "other"], e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
+  assert.equal(seen[0].environment, "OTHER ENV");
+  assert.equal(fs.readFileSync(path.join(e.tmp, "environments", "other.md"), "utf8"), "OTHER ENV\n");
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.equal(sm.runs, 2);
+  assert.match(shopMd, /run=1 /);
+  assert.match(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8"), /run=2 /);
+});
+
+test("explore_env_path_receives_the_generated_environment", async () => {
+  const e = shopEnv();
+  const custom = path.join(e.tmp, "mine.md");
+  fs.writeFileSync(custom, "My notes\n");
+  assert.equal(await main([...e.argv, "--env", custom], e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  assert.ok(e.out.includes(`Environment: ${custom}`));
+  assert.ok(fs.existsSync(custom));
+  assert.ok(fs.existsSync(path.join(e.tmp, "environments", "shop.example.sitemap.json")));
+  assert.equal(fs.existsSync(path.join(e.tmp, "environments", "shop.example.md")), false);
+});
+
+test("task_runs_ignore_the_generated_environment", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+  const t = env();
+  const seen: AgentOptions[] = [];
+  const createAgent = agentWith(async (opts) => { seen.push(opts); return result(true); });
+  assert.equal(await main(["open shop.example", "--skill", t.argv[2]], t.deps({ createAgent })), 0);
+  assert.equal(seen[0].environment, null);
+  assert.equal(seen[0].notes, undefined);
+  assert.ok(!seen[0].pageInfo);
+});
+
+test("explore_memory_write_failure_warns_and_fails_an_otherwise_good_run", async () => {
+  const e = shopEnv();
+  fs.writeFileSync(path.join(e.tmp, "environments"), "file");
+  assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 1);
+  assert.ok(e.out.some((l) => l.startsWith("# Exploration report")));
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot save site memory")));
+  assert.ok(!e.out.some((l) => l.startsWith("Environment:")));
+});
+
+test("explore_without_a_recorded_page_creates_no_memory_files", async () => {
+  const e = shopEnv();
+  assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent() })), 0);
+  assert.equal(fs.existsSync(path.join(e.tmp, "environments")), false);
+  assert.ok(!e.out.some((l) => l.startsWith("Environment:") || l.startsWith("Sitemap:")));
+});
+
+test("explore_env_none_switches_the_auto_environment_off", async () => {
+  for (const flag of [["--env", "none"], ["--env=none"]]) {
+    const e = shopEnv();
+    assert.equal(await main(e.argv, e.deps({ createAgent: shopAgent(SHOP_RUN_1) })), 0);
+    const seen: AgentOptions[] = [];
+    assert.equal(await main([...e.argv, ...flag], e.deps({ createAgent: shopAgent(SHOP_RUN_1, seen) })), 0);
+    assert.equal(seen[0].environment, null);
+    assert.match(seen[0].task, /Earlier exploration of this site/);
+    const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+    assert.equal(sm.runs, 2);
+    assert.match(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.md"), "utf8"), /run=2 /);
+  }
+});
+
+test("explore_failed_preflight_leaves_a_corrupt_sitemap_alone", async () => {
+  const e = shopEnv();
+  fs.mkdirSync(path.join(e.tmp, "environments"));
+  const sm = path.join(e.tmp, "environments", "shop.example.sitemap.json");
+  fs.writeFileSync(sm, "{ not json");
+  assert.equal(await main(e.argv, e.deps({ which: () => null })), 2);
+  assert.equal(fs.readFileSync(sm, "utf8"), "{ not json");
+  assert.deepEqual(fs.readdirSync(path.join(e.tmp, "environments")), ["shop.example.sitemap.json"]);
+  assert.ok(!e.err.some((l) => l.startsWith("warning:")));
+});
+
+test("explore_memory_write_failure_keeps_a_nonzero_exit_code", async () => {
+  const e = shopEnv();
+  fs.writeFileSync(path.join(e.tmp, "environments"), "file");
+  const aborted = agentWith(async (opts) => {
+    opts.events!.emit({ type: "step:end", record: exploreEntry({ page: { url: SHOP, title: "T", links: [] } }), cost: 0, durationMs: 0 });
+    throw new AbortedError();
+  });
+  assert.equal(await main(e.argv, e.deps({ createAgent: aborted })), 130);
+  assert.ok(e.err.some((l) => l.startsWith("explore: cannot save site memory")));
+});
+
+// ---- explore: --allow-writes ----
+
+test("explore_allow_writes_wires_the_marker_sink_guard_and_budget", async () => {
+  const e = exploreEnv();
+  const seen: AgentOptions[] = [];
+  assert.equal(await main([...e.argv, "--allow-writes"], e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0);
+  const o = seen[0];
+  assert.equal(o.maxSteps, 100);
+  assert.ok(o.notes instanceof NoteSink && o.notes.marker !== undefined);
+  assert.ok(o.guard instanceof WriteGuard && o.guard.marker === o.notes.marker);
+  assert.match(o.task, /Writes are allowed in this run/);
+  assert.ok(o.task.includes(o.notes.marker!));
+  assert.ok(e.out.some((l) => l === `Writes enabled. Marker: ${o.notes!.marker}`));
+  const json = JSON.parse(fs.readFileSync(path.join(runDirs(e.tmp)[0], "explore.json"), "utf8"));
+  assert.equal(json.writes.marker, o.notes.marker);
+});
+
+test("explore_without_the_flag_has_no_marker_guard_or_writes_report", async () => {
+  const e = exploreEnv();
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0);
+  assert.equal(seen[0].maxSteps, 60);
+  assert.equal(seen[0].guard, undefined);
+  assert.equal((seen[0].notes as NoteSink).marker, undefined);
+  assert.ok(!seen[0].task.includes("Writes are allowed"));
+  const json = JSON.parse(fs.readFileSync(path.join(runDirs(e.tmp)[0], "explore.json"), "utf8"));
+  assert.equal("writes" in json, false);
+  assert.match((seen[0].notes as NoteSink).add(["created", "DW-1-x"]), /only available with --allow-writes/);
+});
+
+const W_ANSWER = JSON.stringify({
+  flows: [{ title: "Browse", start_url: SHOP, steps: ["Open"], expected: "Home", status: "ok", notes: "" }],
+  functions: [
+    { name: "Create recipe", area_url: `${SHOP}r/create`, status: "ok", steps: ["Open Create", "Save"], expected: "Opens", notes: "" },
+    { name: "Delete recipe", area_url: null, status: "broken", steps: [], expected: "", notes: "500" },
+  ],
+});
+
+/** An explore agent that declares functions through the real sink, like the model would, and records one page. */
+function writesAgent(answer: string, declare: string[], seen: AgentOptions[] = []) {
+  return agentWith(async (opts) => {
+    seen.push(opts);
+    for (const name of declare) opts.notes!.add(["function", name, `${SHOP}r/${name.toLowerCase().replace(/\W+/g, "-")}`]);
+    const r = exploreEntry({ page: { url: SHOP, title: "T", links: [] } });
+    opts.events!.emit({ type: "step:end", record: r, cost: 0, durationMs: 0 });
+    return { success: true, answer, steps: 1, costUsd: 0, history: [r] };
+  });
+}
+
+test("explore_allow_writes_second_run_brief_lists_untested_functions", async () => {
+  const e = shopEnv();
+  const argv = [...e.argv, "--allow-writes"];
+  const answer1 = JSON.stringify({ flows: [], functions: [{ name: "Create recipe", area_url: null, status: "ok", steps: ["a"], expected: "e", notes: "" }] });
+  const first: AgentOptions[] = [];
+  assert.equal(await main(argv, e.deps({ createAgent: writesAgent(answer1, ["Create recipe", "Delete recipe"], first) })), 0);
+  assert.doesNotMatch(first[0].task, /Functions still to exercise/);
+  const second: AgentOptions[] = [];
+  assert.equal(await main(argv, e.deps({ createAgent: writesAgent(answer1, [], second) })), 0);
+  assert.match(second[0].task, /Functions still to exercise/);
+  assert.ok(second[0].task.includes("- Delete recipe (untested)"));
+  assert.ok(!second[0].task.includes("- Create recipe (ok)"));
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.deepEqual(sm.functions.map((f: { name: string; status: string }) => [f.name, f.status]).sort(), [["Create recipe", "ok"], ["Delete recipe", "untested"]]);
+});
+
+test("explore_without_the_flag_shows_known_functions_as_information_only", async () => {
+  const e = shopEnv();
+  assert.equal(await main([...e.argv, "--allow-writes"], e.deps({ createAgent: writesAgent(W_ANSWER, ["Delete recipe"]) })), 0);
+  const seen: AgentOptions[] = [];
+  assert.equal(await main(e.argv, e.deps({ createAgent: writesAgent(FLOWS, [], seen) })), 0);
+  assert.ok(seen[0].task.includes("Known functions (information only; do not write)"));
+  assert.doesNotMatch(seen[0].task, /Functions still to exercise/);
+});
+
+test("explore_write_tasks_with_allow_writes_writes_function_tasks", async () => {
+  const e = shopEnv();
+  assert.equal(await main([...e.argv, "--allow-writes", "--write-tasks"], e.deps({ createAgent: writesAgent(W_ANSWER, []) })), 0);
+  const [folder] = fs.readdirSync(path.join(e.tmp, "tasks"));
+  const files = fs.readdirSync(path.join(e.tmp, "tasks", folder)).sort();
+  assert.deepEqual(files, ["01-browse.md", "02-fn-create-recipe.md"]); // the broken function gets no task
+  const fnText = fs.readFileSync(path.join(e.tmp, "tasks", folder, "02-fn-create-recipe.md"), "utf8");
+  assert.match(fnText, /^env: shop\.example$/m);
+  assert.ok(fnText.includes("RT-"));
+  assert.ok(e.out.some((l) => l.includes("02-fn-create-recipe.md")));
+});
+
+test("explore_write_tasks_without_the_flag_ignores_functions", async () => {
+  const e = shopEnv();
+  assert.equal(await main([...e.argv, "--write-tasks"], e.deps({ createAgent: writesAgent(W_ANSWER, []) })), 0);
+  const [folder] = fs.readdirSync(path.join(e.tmp, "tasks"));
+  assert.deepEqual(fs.readdirSync(path.join(e.tmp, "tasks", folder)), ["01-browse.md"]);
+});
+
+test("explore_allow_writes_cut_off_run_keeps_ledger_and_declared_functions", async () => {
+  const e = shopEnv();
+  const cut = agentWith(async (opts) => {
+    opts.notes!.add(["function", "Delete recipe"]);
+    opts.notes!.add(["created", `${opts.notes!.marker}Pasta`, `${SHOP}r/1`]);
+    opts.events!.emit({ type: "step:end", record: exploreEntry({ page: { url: SHOP, title: "T", links: [] } }), cost: 0, durationMs: 0 });
+    throw new AbortedError();
+  });
+  assert.equal(await main([...e.argv, "--allow-writes"], e.deps({ createAgent: cut })), 130);
+  const sm = JSON.parse(fs.readFileSync(path.join(e.tmp, "environments", "shop.example.sitemap.json"), "utf8"));
+  assert.deepEqual(sm.functions.map((f: { name: string; status: string }) => [f.name, f.status]), [["Delete recipe", "untested"]]);
+  assert.equal(sm.created.length, 1);
+  assert.match(sm.created[0].name, /^DW-\d{6}-[0-9a-f]{4}-Pasta$/);
+});
+
+test("explore_allow_writes_guard_refusals_reach_the_report", async () => {
+  const e = shopEnv();
+  const refusing = agentWith(async (opts) => {
+    opts.guard!.begin(1, "### Result\n- 0: (current) [Recipes](https://shop.example/g/home)\n", '- button "Delete" [ref=e9]');
+    opts.guard!.check({ cmd: "click", args: ["e9"] });
+    opts.events!.emit({ type: "step:end", record: exploreEntry({ page: { url: SHOP, title: "T", links: [] } }), cost: 0, durationMs: 0 });
+    return { success: true, answer: FLOWS, steps: 1, costUsd: 0, history: [exploreEntry({ page: { url: SHOP, title: "T", links: [] } })] };
+  });
+  assert.equal(await main([...e.argv, "--allow-writes"], e.deps({ createAgent: refusing })), 0);
+  const json = JSON.parse(fs.readFileSync(path.join(runDirs(e.tmp)[0], "explore.json"), "utf8"));
+  assert.deepEqual(json.writes.refused.map((r: { control: string }) => r.control), ["Delete"]);
+  assert.ok(e.out.some((l) => l.startsWith("## Refused actions (1)")));
+});
+
+test("explore_allow_writes_on_other_commands_is_a_usage_error", async () => {
+  const e = exploreEnv();
+  assert.equal(await main(["--allow-writes", "do a thing", "--skill", e.argv[3]], e.deps({})), 2);
+  assert.ok(e.err.some((l) => l.includes("unrecognized arguments: --allow-writes")));
 });

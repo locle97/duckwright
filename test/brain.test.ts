@@ -152,13 +152,14 @@ test("malformed_action_message_shows_the_action", async () => {
 const anyOf = (DECISION_SCHEMA as any).properties.actions.items.anyOf;
 
 test("schema_restricts_cmd_to_allowed", () => {
-  const [done, expect, other, expectRequest, request, twofa] = anyOf;
+  const [done, expect, other, expectRequest, request, twofa, note] = anyOf;
   assert.deepEqual(done.properties.cmd, { const: "done" });
   assert.deepEqual(expect.properties.cmd, { const: "expect" });
   assert.deepEqual(expectRequest.properties.cmd, { const: "expect-request" });
   assert.deepEqual(request.properties.cmd, { const: "request" });
   assert.deepEqual(twofa.properties.cmd, { const: "twofa" });
-  const cmds = new Set<string>([...other.properties.cmd.enum, "done", "expect", "expect-request", "request", "twofa"]);
+  assert.deepEqual(note.properties.cmd, { const: "note" });
+  const cmds = new Set<string>([...other.properties.cmd.enum, "done", "expect", "expect-request", "request", "twofa", "note"]);
   assert.deepEqual(cmds, new Set<string>(ALLOWED_COMMANDS));
   assert.ok(!cmds.has("playwright-cli"));
 });

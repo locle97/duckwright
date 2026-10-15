@@ -72,6 +72,7 @@ export interface HistoryStep {
   network?: NetworkEntry[];
   network_errors?: string[];
   console_errors?: string[];
+  page?: { url: string; title: string; links: string[] };
   request_origins?: (string | null)[];
   screenshot?: string;
   screenshot_error?: string;

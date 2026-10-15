@@ -3,6 +3,11 @@ import path from "node:path";
 
 import type { HistoryData } from "../export.ts";
 import { fixed4, flat } from "../text.ts";
+import { readAudit, readRefusals } from "./guard.ts";
+import type { AuditEntry, Refusal } from "./guard.ts";
+import { normalizeUrl } from "./site.ts";
+import { readLedger } from "./writes.ts";
+import type { CreatedEntry, LedgerItem } from "./writes.ts";
 
 export type FlowStatus = "ok" | "dead-end" | "broken";
 
@@ -28,6 +33,26 @@ export interface ConsoleError {
   steps: number[];
 }
 
+export type FunctionStatus = "ok" | "broken" | "blocked";
+
+export interface ReportedFunction {
+  name: string;
+  area_url: string | null;
+  status: FunctionStatus;
+  steps: string[];
+  expected: string;
+  notes: string;
+}
+
+export interface WritesReport {
+  marker: string;
+  created: LedgerItem[];
+  refused: Refusal[];
+  audit: AuditEntry[];
+  functions: ReportedFunction[];
+  leftovers: CreatedEntry[];
+}
+
 export interface ExploreReport {
   version: 1;
   url: string;
@@ -42,6 +67,9 @@ export interface ExploreReport {
   dropped_flows: number;
   broken_flows: Flow[];
   working_flows: Flow[];
+  functions?: ReportedFunction[];
+  dropped_functions?: number;
+  writes?: WritesReport;
 }
 
 const STATUSES: readonly string[] = ["ok", "dead-end", "broken"];
@@ -93,6 +121,49 @@ export function parseFlows(answer: string, base: string): { flows: Flow[]; dropp
   return { flows, dropped, error: null };
 }
 
+const FN_STATUSES: readonly string[] = ["ok", "broken", "blocked"];
+const FN_NAME_MAX = 120;
+
+function toFunction(item: unknown, base: string): ReportedFunction | null {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
+  const o = item as Record<string, unknown>;
+  if (typeof o.name !== "string" || flat(o.name).trim() === "") return null;
+  if (typeof o.status !== "string" || !FN_STATUSES.includes(o.status)) return null;
+  const area = typeof o.area_url === "string" ? normalizeUrl(o.area_url, base) : null;
+  return {
+    name: [...flat(o.name).trim()].slice(0, FN_NAME_MAX).join(""),
+    area_url: area,
+    status: o.status as FunctionStatus,
+    steps: Array.isArray(o.steps) ? o.steps.filter((s): s is string => typeof s === "string").map((s) => flat(s)) : [],
+    expected: typeof o.expected === "string" ? flat(o.expected) : "",
+    notes: typeof o.notes === "string" ? flat(o.notes) : "",
+  };
+}
+
+/** The optional `functions` list of the agent's answer. Never throws; `present` is false for old-style answers. */
+export function parseFunctions(answer: string, base: string): { functions: ReportedFunction[]; dropped: number; present: boolean } {
+  const none = { functions: [], dropped: 0, present: false };
+  const first = answer.indexOf("{");
+  const last = answer.lastIndexOf("}");
+  if (first < 0 || last < first) return none;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(answer.slice(first, last + 1));
+  } catch {
+    return none;
+  }
+  const list = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>).functions : undefined;
+  if (!Array.isArray(list)) return none;
+  const functions: ReportedFunction[] = [];
+  let dropped = 0;
+  for (const item of list) {
+    const f = toFunction(item, base);
+    if (f) functions.push(f);
+    else dropped++;
+  }
+  return { functions, dropped, present: true };
+}
+
 export function failedRequests(data: HistoryData): FailedRequest[] {
   const groups = new Map<string, FailedRequest>();
   for (const s of data.history) {
@@ -129,9 +200,21 @@ export function consoleErrors(data: HistoryData): ConsoleError[] {
 }
 
 export function buildExploreReport(
-  data: HistoryData, o: { url: string; runDir: string; network: boolean },
+  data: HistoryData,
+  o: { url: string; runDir: string; network: boolean; writes?: { marker: string; previous: CreatedEntry[] } },
 ): ExploreReport {
   const parsed = parseFlows(data.answer ?? "", o.url);
+  const fns = parseFunctions(data.answer ?? "", o.url);
+  const writes: WritesReport | undefined = o.writes
+    ? {
+        marker: o.writes.marker,
+        created: readLedger(o.runDir),
+        refused: readRefusals(o.runDir),
+        audit: readAudit(o.runDir),
+        functions: fns.functions,
+        leftovers: o.writes.previous.filter((c) => !c.removed),
+      }
+    : undefined;
   return {
     version: 1,
     url: o.url,
@@ -146,6 +229,8 @@ export function buildExploreReport(
     dropped_flows: parsed.dropped,
     broken_flows: parsed.flows.filter((f) => f.status !== "ok"),
     working_flows: parsed.flows.filter((f) => f.status === "ok"),
+    ...(fns.present || o.writes ? { functions: fns.functions, dropped_functions: fns.dropped } : {}),
+    ...(writes ? { writes } : {}),
   };
 }
 
@@ -163,8 +248,10 @@ export function renderExploreMarkdown(r: ExploreReport): string {
   const parts: string[][] = [];
   parts.push([`# Exploration report: ${flat(r.url)}`]);
   parts.push([`Run: ${flat(r.run_dir)}  Steps: ${r.steps}  Cost: $${fixed4(r.cost_usd)}  Result: ${r.success ? "success" : "failure"}`]);
+  if (r.writes) parts.push([`Marker: ${flat(r.writes.marker)}`]);
   if (r.answer_error) parts.push([`The agent's answer could not be read as a flow list: ${flat(r.answer_error)}.`]);
   if (r.dropped_flows > 0) parts.push([`${r.dropped_flows} flow(s) in the answer were unreadable and left out.`]);
+  if (r.writes && (r.dropped_functions ?? 0) > 0) parts.push([`${r.dropped_functions} function(s) in the answer were unreadable and left out.`]);
 
   parts.push([`## Broken links and failed requests (${r.network_checked ? r.failed_requests.length : "-"})`]);
   if (!r.network_checked) parts.push(["Network capture was off (--no-network), so requests were not checked."]);
@@ -190,6 +277,26 @@ export function renderExploreMarkdown(r: ExploreReport): string {
   parts.push([`## Flows that worked (${r.working_flows.length})`]);
   if (!r.working_flows.length) parts.push(["None."]);
   for (const f of r.working_flows) parts.push(flowBlock(f, flat(f.title), false));
+
+  if (r.writes) {
+    const w = r.writes;
+    const fns = r.functions ?? [];
+    const n = (s: FunctionStatus) => fns.filter((f) => f.status === s).length;
+    parts.push([`## Functions exercised (${n("ok")} ok, ${n("broken")} broken, ${n("blocked")} blocked)`]);
+    parts.push(fns.length
+      ? fns.map((f) => `- ${flat(f.name)}: ${f.status}${f.steps.length ? ` (${f.steps.map(flat).join("; ")})` : ""}${f.notes ? ` – ${flat(f.notes)}` : ""}`)
+      : ["None."]);
+    parts.push([`## Items created (${w.created.length})`]);
+    parts.push(w.created.length
+      ? w.created.map((c) => `- ${flat(c.name)}${c.url ? ` (${flat(c.url)})` : ""} – ${c.removed ? "removed" : "still there"}`)
+      : ["None."]);
+    parts.push([`## Refused actions (${w.refused.length})`]);
+    parts.push(w.refused.length ? w.refused.map((x) => `- step ${x.step}: '${flat(x.control)}'${x.url ? ` on ${flat(x.url)}` : ""}`) : ["None."]);
+    parts.push([`## Possible writes to unmarked items (${w.audit.length})`]);
+    parts.push(w.audit.length ? w.audit.map((x) => `- step ${x.step}: ${flat(x.cmd)} ${flat(x.control)}${x.url ? ` on ${flat(x.url)}` : ""}`) : ["None."]);
+    parts.push([`## Leftovers from earlier runs (${w.leftovers.length})`]);
+    parts.push(w.leftovers.length ? w.leftovers.map((l) => `- ${flat(l.name)}${l.url ? ` (${flat(l.url)})` : ""}`) : ["None."]);
+  }
 
   return parts.map((p) => p.join("\n")).join("\n\n") + "\n";
 }

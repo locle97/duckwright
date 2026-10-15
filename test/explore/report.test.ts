@@ -6,9 +6,14 @@ import { test } from "node:test";
 
 import type { HistoryData, HistoryStep } from "../../src/export.ts";
 import {
-  buildExploreReport, consoleErrors, failedRequests, parseFlows, renderExploreMarkdown,
+  buildExploreReport, consoleErrors, failedRequests, parseFlows, parseFunctions, renderExploreMarkdown,
   writeExploreReport, type ExploreReport, type Flow,
 } from "../../src/explore/report.ts";
+import { tmpDir } from "../helpers.ts";
+
+const makeData = (answer: string): HistoryData => ({
+  task: "t", task_file: null, success: true, answer, steps: 1, cost_usd: 0, history: [],
+});
 
 const BASE = "https://shop.example/";
 
@@ -247,4 +252,82 @@ test("markdown omits Notes line for a broken flow with empty notes", () => {
   const md = renderExploreMarkdown(base({ broken_flows: [flow({ status: "dead-end", notes: "" })] }));
   assert.ok(md.includes("### Search (dead-end)"));
   assert.ok(!md.includes("Notes:"));
+});
+
+const FN = { name: "Create recipe", area_url: "/g/home/r/create", status: "ok", steps: ["Open Create", "Name it DW-1-Pasta", "Save"], expected: "The recipe opens", notes: "" };
+
+test("parseFunctions reads the optional functions list and resolves area urls", () => {
+  const r = parseFunctions(JSON.stringify({ flows: [], functions: [FN] }), "https://s.test/g/home");
+  assert.equal(r.present, true);
+  assert.equal(r.dropped, 0);
+  assert.deepEqual(r.functions, [{ ...FN, area_url: "https://s.test/g/home/r/create" }]);
+});
+
+test("parseFunctions drops invalid entries and never reports untested", () => {
+  const answer = JSON.stringify({ functions: [FN, { ...FN, status: "untested" }, { ...FN, name: "  " }, { ...FN, status: "weird" }, 5, { ...FN, area_url: "mailto:x" }] });
+  const r = parseFunctions(answer, "https://s.test/");
+  assert.equal(r.functions.length, 2);
+  assert.equal(r.functions[1].area_url, null);
+  assert.equal(r.dropped, 4);
+});
+
+test("parseFunctions is absent for old-style answers and for unreadable ones", () => {
+  assert.deepEqual(parseFunctions(JSON.stringify({ flows: [] }), "https://s.test/"), { functions: [], dropped: 0, present: false });
+  assert.deepEqual(parseFunctions("not json", "https://s.test/"), { functions: [], dropped: 0, present: false });
+});
+
+test("function names and steps are flattened and capped", () => {
+  const long = "x".repeat(300);
+  const r = parseFunctions(JSON.stringify({ functions: [{ ...FN, name: `a\nb ${long}`, steps: ["one\ntwo"] }] }), "https://s.test/");
+  assert.ok(!r.functions[0].name.includes("\n"));
+  assert.ok([...r.functions[0].name].length <= 120);
+  assert.deepEqual(r.functions[0].steps, ["one two"]);
+});
+
+test("a report without the flag has no writes, functions or dropped_functions keys for old-style answers", () => {
+  const rep = buildExploreReport(makeData(JSON.stringify({ flows: [] })), { url: "https://s.test/", runDir: tmpDir(), network: true });
+  assert.equal("writes" in rep, false);
+  assert.equal("functions" in rep, false);
+  assert.equal("dropped_functions" in rep, false);
+  assert.ok(!renderExploreMarkdown(rep).includes("Functions exercised"));
+});
+
+test("with writes the report carries the ledger, refusals, audit, leftovers and renders the new sections", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "created.jsonl"), [
+    JSON.stringify({ step: 1, created: "DW-1-Pasta", url: "https://s.test/r/1" }),
+    JSON.stringify({ step: 2, created: "DW-1-Soup", url: null }),
+    JSON.stringify({ step: 3, removed: "DW-1-Pasta" }),
+  ].join("\n") + "\n");
+  fs.writeFileSync(path.join(dir, "refused.jsonl"), JSON.stringify({ step: 4, control: "Delete", url: "https://s.test/g/home" }) + "\n");
+  fs.writeFileSync(path.join(dir, "audit.jsonl"), JSON.stringify({ step: 5, url: "https://s.test/r/9", control: 'textbox "Name"', cmd: "fill" }) + "\n");
+  const rep = buildExploreReport(makeData(JSON.stringify({ flows: [], functions: [FN, { ...FN, name: "Delete recipe", status: "broken", notes: "500" }] })), {
+    url: "https://s.test/", runDir: dir, network: true,
+    writes: { marker: "DW-1-", previous: [{ name: "DW-0-Old", url: null, removed: false, run: 1 }, { name: "DW-0-Gone", url: null, removed: true, run: 1 }] },
+  });
+  assert.equal(rep.writes?.marker, "DW-1-");
+  assert.deepEqual(rep.writes?.created, [{ name: "DW-1-Pasta", url: "https://s.test/r/1", removed: true }, { name: "DW-1-Soup", url: null, removed: false }]);
+  assert.equal(rep.writes?.refused.length, 1);
+  assert.equal(rep.writes?.audit.length, 1);
+  assert.deepEqual(rep.writes?.functions.map((f) => f.name), ["Create recipe", "Delete recipe"]);
+  assert.deepEqual(rep.writes?.leftovers.map((l) => l.name), ["DW-0-Old"]);
+  const md = renderExploreMarkdown(rep);
+  for (const h of ["Marker: DW-1-", "## Functions exercised (1 ok, 1 broken, 0 blocked)", "## Items created (2)", "## Refused actions (1)", "## Possible writes to unmarked items (1)", "## Leftovers from earlier runs (1)"]) {
+    assert.ok(md.includes(h), h);
+  }
+});
+
+test("hostile names stay on one line in the markdown report", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "created.jsonl"), JSON.stringify({ step: 1, created: "DW-1-x\n## Injected", url: null }) + "\n");
+  const rep = buildExploreReport(makeData(JSON.stringify({ functions: [{ ...FN, name: "ok\n## Fake heading" }] })), {
+    url: "https://s.test/", runDir: dir, network: true, writes: { marker: "DW-1-", previous: [] },
+  });
+  const md = renderExploreMarkdown(rep);
+  assert.ok(!/^## (Injected|Fake heading)/m.test(md));
+});
+
+test("dropped functions are not mentioned in the markdown of a run without writes", () => {
+  const md = renderExploreMarkdown(base({ dropped_functions: 3 }));
+  assert.ok(!md.includes("function(s) in the answer were unreadable"));
 });

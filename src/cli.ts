@@ -5,11 +5,13 @@ import { RUN_USAGE, UsageError, parseExploreArgs, parseExportArgs, parseRunArgs 
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
-import { EnvError, loadEnvironment } from "./environment.ts";
+import { EnvError, isEnvPath, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun, loadHistory } from "./export.ts";
 import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
+import { loadMemory, memoryPaths, saveMemory } from "./explore/memory.ts";
 import { writeExploreTasks } from "./explore/tasks.ts";
+import { makeMarker } from "./explore/writes.ts";
 import { Agent } from "./loop.ts";
 import type { AgentOptions } from "./loop.ts";
 import { resolvePath } from "./paths.ts";
@@ -476,6 +478,12 @@ async function dispatch(deps: CliDeps, argv: string[]): Promise<number> {
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Whether argv names `--env` (or `--env=...`) before a standalone `--`; `--env none` parses to null like "not given". */
+function hasExplicitEnv(argv: string[]): boolean {
+  const dd = argv.indexOf("--");
+  return (dd === -1 ? argv : argv.slice(0, dd)).some((a) => a === "--env" || a.startsWith("--env="));
+}
+
 /** `duckwright explore URL`: one exploration run, then a report (and optionally task files) built from its history. */
 export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number> {
   let config: GlobalConfig;
@@ -496,19 +504,32 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stdout(`duckwright ${version()}`);
     return 0;
   }
-  const { url, writeTasks, run } = parsed.args;
+  const { url, writeTasks, allowWrites, run } = parsed.args;
   const badSecret = secretProblem(deps.env);
   if (badSecret !== null) {
     deps.stderr(badSecret);
     return 2;
   }
-  const problem = preflightArgs(deps, run);
+  const host = new URL(url).host;
+  // An explicit --env (even `none`) wins; otherwise an earlier run's environment file for this host is used.
+  // Nothing is written or renamed before preflight passes, so this only checks that the file exists.
+  const paths = memoryPaths(host);
+  const autoEnv = run.env === null && !hasExplicitEnv(argv) && fs.existsSync(paths.md) ? paths.slug : null;
+  const runArgs = autoEnv !== null ? { ...run, env: autoEnv } : run;
+  const problem = preflightArgs(deps, runArgs);
   if (problem) {
     deps.stderr(problem);
     return 2;
   }
+  const writes = allowWrites ? { marker: makeMarker() } : undefined;
+  const mem = loadMemory(host, undefined, { writes: allowWrites });
+  for (const w of mem.warnings) deps.stderr(`warning: ${w}`);
+  if (writes) deps.stdout(`Writes enabled. Marker: ${writes.marker}`);
   const handle = startRun(
-    { task: exploreTask(url), taskFile: null, args: run, exportTest: false, consoleErrors: true },
+    {
+      task: exploreTask(url, { brief: mem.brief, writes }), taskFile: null, args: runArgs, exportTest: false,
+      consoleErrors: true, explore: { host, ...(writes ? { writes } : {}) },
+    },
     {
       ...deps,
       humanFor: () => (deps.isTTY() ? deps.human("duckwright explore") : null),
@@ -530,7 +551,10 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     deps.stderr(`explore: cannot read history: ${errMsg(e)}`);
     return code === 0 ? 1 : code;
   }
-  const report = buildExploreReport(data, { url, runDir: handle.workdir, network: run.network });
+  const report = buildExploreReport(data, {
+    url, runDir: handle.workdir, network: run.network,
+    ...(writes ? { writes: { marker: writes.marker, previous: mem.sitemap?.created ?? [] } } : {}),
+  });
   const md = renderExploreMarkdown(report);
   deps.stdout("");
   deps.stdout(md.trimEnd());
@@ -543,10 +567,23 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
     writeFailed = true;
     deps.stderr(`explore: cannot write report: ${errMsg(e)}`);
   }
+  try {
+    const m = await saveMemory({
+      host, runDir: handle.workdir, data, report, startUrl: url,
+      envFile: run.env !== null && isEnvPath(run.env) ? path.resolve(run.env) : null,
+    });
+    for (const w of m.warnings) deps.stderr(`warning: ${w}`);
+    if (m.md !== null) deps.stdout(`Environment: ${m.md}`);
+    if (m.sitemap !== null) deps.stdout(`Sitemap: ${m.sitemap}`);
+  } catch (e) {
+    writeFailed = true;
+    deps.stderr(`explore: cannot save site memory: ${errMsg(e)}`);
+  }
   if (writeTasks) {
     try {
-      const t = writeExploreTasks(report.working_flows, url, handle.workdir);
-      if (t === null) deps.stdout("Tasks: no working flows, no task files written");
+      const extra = allowWrites ? { functions: report.functions ?? [], env: fs.existsSync(paths.md) ? paths.slug : null } : undefined;
+      const t = writeExploreTasks(report.working_flows, url, handle.workdir, "tasks", extra);
+      if (t === null) deps.stdout(allowWrites ? "Tasks: no working flows or functions, no task files written" : "Tasks: no working flows, no task files written");
       else {
         deps.stdout(`Tasks: ${t.files.length} task file(s) in ${t.folder}/`);
         for (const f of t.files) deps.stdout(`  ${f}`);

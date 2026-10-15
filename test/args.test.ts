@@ -516,3 +516,28 @@ test("explore: the first violation wins", () => {
   exErr("argument --write-tasks: ignored explicit argument '1'", U, "--write-tasks=1", "--max-steps", "abc");
   exErr("argument --max-steps: invalid int value: 'abc'", U, "--max-steps", "abc");
 });
+
+test("explore accepts --allow-writes, defaults the budget to 100 with it and keeps --max-steps in charge", () => {
+  const SKILL = "/skill.md";
+  const plain = parseExploreArgs(["https://x.test/"], SKILL, { maxSteps: 60 });
+  assert.equal(plain.kind === "args" && plain.args.allowWrites, false);
+  assert.equal(plain.kind === "args" && plain.args.run.maxSteps, 60);
+  const w = parseExploreArgs(["https://x.test/", "--allow-writes"], SKILL, { maxSteps: 60 });
+  assert.equal(w.kind === "args" && w.args.allowWrites, true);
+  assert.equal(w.kind === "args" && w.args.run.maxSteps, 100);
+  const explicit = parseExploreArgs(["--allow-writes", "--max-steps", "60", "https://x.test/"], SKILL, { maxSteps: 60 });
+  assert.equal(explicit.kind === "args" && explicit.args.run.maxSteps, 60);
+  const eq = parseExploreArgs(["--allow-writes", "--max-steps=7", "https://x.test/"], SKILL, { maxSteps: 60 });
+  assert.equal(eq.kind === "args" && eq.args.run.maxSteps, 7);
+});
+
+test("--allow-writes takes no value and is listed in the explore usage and help", () => {
+  assert.throws(() => parseExploreArgs(["https://x.test/", "--allow-writes=yes"], "/skill.md", { maxSteps: 60 }), /ignored explicit argument/);
+  assert.ok(EXPLORE_USAGE.includes("[--allow-writes]"));
+  const help = parseExploreArgs(["-h"], "/skill.md", { maxSteps: 60 });
+  assert.ok(help.kind === "help" && help.text.includes("--allow-writes") && help.text.includes("default 100 with --allow-writes"));
+});
+
+test("--allow-writes is rejected outside explore", () => {
+  assert.throws(() => parseRunArgs(["--allow-writes", "do something"], "/skill.md"), /unrecognized arguments/);
+});
