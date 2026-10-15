@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// Mirrors src/taskfile.ts KEYS. a drift test against src/taskfile.ts is proposed in docs/design/task-authoring-skill/docs/.
+// Mirrors src/taskfile.ts KEYS. test/skill-check.test.ts fails when they drift.
 export const KEYS = {
   "max-steps": "int", model: "str", headed: "bool", skill: "path", session: "str", state: "path",
   network: "bool", video: "bool", screenshot: "bool", "twofa-timeout": "int", jev: "bool", debug: "bool",

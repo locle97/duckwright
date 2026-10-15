@@ -473,6 +473,52 @@ export function parseExploreArgs(argv: string[], defaultSkill: string, settings:
   return { kind: "args", args: { url: url!, writeTasks, allowWrites, run } };
 }
 
+export const CHECK_USAGE = "usage: duckwright check [-h] file_or_folder [file_or_folder ...]";
+
+export const CHECK_HELP = `${CHECK_USAGE}
+
+Check task files without running them: front matter, task text, the setup file
+and the environment file, as a run would load them. Needs no browser, Claude or
+playwright-cli. Folders are read like -f (their .md and .txt files). Run it from
+the folder you run duckwright from: a bare env name is read from ./environments/.
+
+positional arguments:
+  file_or_folder        task files or folders of task files
+
+options:
+  -h, --help            show this help message and exit
+
+exit codes: 0 no errors (warnings are printed), 2 an error or a bad usage
+`;
+
+const CHECK_SPEC: OptionSpec = {
+  names: { "-h": "-h/--help", "--help": "-h/--help" },
+  shortWithValue: [],
+};
+
+export function parseCheckArgs(argv: string[]): Parsed<{ paths: string[] }> {
+  const fail = (msg: string): never => {
+    throw new UsageError(msg, CHECK_USAGE, "duckwright check");
+  };
+  const paths: string[] = [];
+  const extras: string[] = [];
+  let positional = false;
+  for (const a of argv) {
+    if (a === "--" && !positional) {
+      positional = true;
+      continue;
+    }
+    const opt = positional ? null : classify(a, CHECK_SPEC);
+    if (opt === null) paths.push(a);
+    else if (!opt.known) extras.push(a);
+    else if (opt.inline !== null) fail(`argument -h/--help: ignored explicit argument '${opt.inline}'`);
+    else return { kind: "help", text: CHECK_HELP };
+  }
+  if (!paths.length) fail("the following arguments are required: file_or_folder");
+  if (extras.length) fail(`unrecognized arguments: ${extras.join(" ")}`);
+  return { kind: "args", args: { paths } };
+}
+
 const EXPORT_SPEC: OptionSpec = {
   names: { "-h": "-h/--help", "--help": "-h/--help", "-o": "-o/--output", "--output": "-o/--output", "--api": "--api" },
   shortWithValue: ["-o"],

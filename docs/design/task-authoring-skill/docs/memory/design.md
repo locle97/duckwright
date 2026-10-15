@@ -147,7 +147,7 @@ warns if it is missing.
   `references/memory.md` (new), `templates/probe.md` (new), `scripts/facts.mjs` (new, ~390 lines, no deps).
 - `patches/setup-linter-convention.diff`: `investigate-envs` in `check-tasks.mjs` and `doctor.mjs` key
   lists, a probe exception in the linter, a doctor check for the facts file and `.gitattributes`, the
-  testing-map template, the CLAUDE.md section line, and `project-convention.md`. the proposed drift test (`docs/design/task-authoring-skill/docs/skill-check.test.ts.txt`)
+  testing-map template, the CLAUDE.md section line, and `project-convention.md`. `test/skill-check.test.ts`
   should also assert the probe template and memory reference exist.
 - Larder example: map key (`patches/larder-testing-map.diff`), a probe, a facts file, three tasks.
 

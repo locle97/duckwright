@@ -170,7 +170,8 @@ re-verify) and facts, only through `scripts/facts.mjs` (never edit the `.jsonl` 
 
 ## 6. Check your own output
 
-1. Run the linter and fix every error:
+1. Run `duckwright check <folder>` from the Duckwright root if the installed Duckwright has it (it loads the
+   files exactly as a run does) and fix every error. Then run the linter and fix every error:
    `node <this skill's folder>/scripts/check-tasks.mjs --root <root> --sitemap <sitemap file> <folder>`
    Each warning is either fixed or explained in your report (a missing state file is normal: a person
    makes it). Treat an off-limits warning as a question for the user, not as noise.

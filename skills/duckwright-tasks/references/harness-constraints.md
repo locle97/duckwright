@@ -1,7 +1,7 @@
 # What a Duckwright task can and cannot ask for
 
 Facts about the harness that decide whether a task can run. Each line names where it comes from in the
-Duckwright repo, so a maintainer can keep this file in step (a proposed drift test, `docs/design/task-authoring-skill/docs/skill-check.test.ts.txt`, would check the
+Duckwright repo, so a maintainer can keep this file in step (`test/skill-check.test.ts` checks the
 command and key lists).
 
 ## The agent

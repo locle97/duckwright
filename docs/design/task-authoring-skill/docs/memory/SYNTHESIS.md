@@ -41,7 +41,7 @@ change in v1; `explore --focus` is sketched for v2 (`harness-v2-explore-focus.md
   Not ported; revisit if briefs get long.
 - Candidate 3's "no `add` evidence check": kept the base's check.
 
-**Fixed in the base.** Two references to `test/skill-check.test.ts` pointed at a file that does not exist in
+**Fixed in the base.** Two references to `test/skill-check.test.ts` pointed at a file that did not exist in
 `test/`; they now name it as a proposed drift test. The candidates' patch for the base SKILL.md was replaced
 by its full text.
 
