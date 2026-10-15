@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "host": "localhost:3000",
+  "updated_run": "20261014-101500-explore",
+  "runs": 3,
+  "pages": [
+    { "url": "http://localhost:3000/", "title": "Larder", "purpose": "home", "status": "ok", "http_status": 200, "depth": 0, "first_seen_run": 1, "last_seen_run": 3, "links": ["http://localhost:3000/products", "http://localhost:3000/cart"], "pattern": null },
+    { "url": "http://localhost:3000/products", "title": "Products - Larder", "purpose": "product list", "status": "ok", "http_status": 200, "depth": 1, "first_seen_run": 1, "last_seen_run": 3, "links": [], "pattern": null },
+    { "url": "http://localhost:3000/product/oat-milk-1l", "title": "Oat Milk 1L - Larder", "purpose": "product page", "status": "ok", "http_status": 200, "depth": 2, "first_seen_run": 1, "last_seen_run": 3, "links": [], "pattern": null },
+    { "url": "http://localhost:3000/product/sourdough-loaf", "title": "Sourdough Loaf - Larder", "purpose": "product page", "status": "ok", "http_status": 200, "depth": 2, "first_seen_run": 1, "last_seen_run": 3, "links": [], "pattern": null },
+    { "url": "http://localhost:3000/product/free-range-eggs-12", "title": "Free-range Eggs (12) - Larder", "purpose": "product page", "status": "ok", "http_status": 200, "depth": 2, "first_seen_run": 2, "last_seen_run": 3, "links": [], "pattern": null },
+    { "url": "http://localhost:3000/cart", "title": "Basket - Larder", "purpose": "basket and promo code", "status": "ok", "http_status": 200, "depth": 1, "first_seen_run": 1, "last_seen_run": 3, "links": ["http://localhost:3000/checkout"], "pattern": null },
+    { "url": "http://localhost:3000/checkout", "title": "Checkout - Larder", "purpose": "delivery and card form", "status": "gated", "http_status": 200, "depth": 2, "first_seen_run": 1, "last_seen_run": 3, "links": [], "pattern": null },
+    { "url": "http://localhost:3000/account", "title": "Sign in - Larder", "purpose": "", "status": "gated", "http_status": 200, "depth": 1, "first_seen_run": 1, "last_seen_run": 3, "links": [], "pattern": null },
+    { "url": "http://localhost:3000/offers", "title": "Not found - Larder", "purpose": "", "status": "broken", "http_status": 404, "depth": 1, "first_seen_run": 2, "last_seen_run": 3, "links": [], "pattern": null }
+  ],
+  "flows": [
+    { "title": "Add a product to the basket", "start_url": "http://localhost:3000/products", "steps": ["Open Oat Milk 1L", "Click Add to basket", "Open Basket"], "expected": "Oat Milk 1L is listed in the basket", "status": "ok", "notes": "", "last_run": 3 },
+    { "title": "Apply a promo code in the basket", "start_url": "http://localhost:3000/cart", "steps": ["Type SAVE10 in Promo code", "Click Apply"], "expected": "A Discount row appears", "status": "ok", "notes": "", "last_run": 3 }
+  ],
+  "functions": [],
+  "created": [],
+  "frontier": ["http://localhost:3000/help"],
+  "external_links": ["https://dashboard.stripe.com/"],
+  "notes": {
+    "business": ["Grocery ordering: browse products, fill a basket, check out with delivery."],
+    "quirk": ["Product cards link to /product/<slug>; the slug is the product name in lower case."],
+    "off-limits": [],
+    "account": ["Checkout and account pages need a signed-in shopper; credentials come from the state file."]
+  }
+}
