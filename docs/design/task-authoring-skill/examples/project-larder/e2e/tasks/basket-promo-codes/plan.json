@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "name": "basket-promo-codes",
+  "source": "duckwright-tasks: promo codes in the basket (SAVE10, SPRING24, FREESHIP)",
+  "setup": "shared/setup.md",
+  "notes": [
+    "Run `npm run db:seed` in app/ first: it resets baskets and coupon usage.",
+    "Create the state files if missing: `npm run e2e:auth -- shopper-a`, `-- shopper-b`, `-- shopper-c` (in e2e/).",
+    "Run from e2e/: `duckwright plan tasks/basket-promo-codes/` (TUI) or `duckwright -p -f tasks/basket-promo-codes/`."
+  ],
+  "skipped": [
+    { "id": "BSK-4", "title": "The welcome email carries a working promo code", "reason": "Needs an email inbox; there is no mail catcher on local (testing map, Needs a person)." }
+  ],
+  "tasks": [
+    { "file": "01-save10-takes-10-percent-off.md", "id": "BSK-1", "title": "SAVE10 takes 10% off the subtotal" },
+    { "file": "02-expired-code-is-rejected.md", "id": "BSK-2", "title": "An expired code is rejected and the total does not change" },
+    { "file": "03-freeship-needs-20-subtotal.md", "id": "BSK-3", "title": "FREESHIP is refused below a $20.00 subtotal" }
+  ]
+}

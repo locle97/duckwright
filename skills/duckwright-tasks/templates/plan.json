@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "<feature-slug>",
+  "source": "duckwright-tasks: <one line: what the user asked for>",
+  "setup": "shared/setup.md",
+  "notes": [
+    "<what a person must do before running: seed command, state files, env vars; commands exact>"
+  ],
+  "skipped": [
+    { "id": "<ID>", "title": "<scenario title>", "reason": "<one line: why one browser cannot do it>" }
+  ],
+  "tasks": [
+    { "file": "01-<slug>.md", "id": "<ID>", "title": "<title>" }
+  ]
+}
