@@ -46,3 +46,31 @@ test("duckwright_check_accepts_the_skill_example_tasks", () => {
     process.chdir(cwd);
   }
 });
+
+test("skill_runs_brief_lists_plan_runs_and_flags_failures", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const os = await import("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-brief-"));
+  try {
+    fs.mkdirSync(path.join(dir, "01-a"));
+    fs.mkdirSync(path.join(dir, "02-b"));
+    fs.writeFileSync(path.join(dir, "plan.json"), JSON.stringify({
+      version: 1, name: "p", source: "s", setup: null, notes: [], skipped: [],
+      tasks: [{ file: "01-a.md", id: "A", title: "First" }, { file: "02-b.md", id: "B", title: "Second" }, { file: "03-c.md", id: "C", title: "Third" }],
+    }));
+    const run = (success: boolean) => JSON.stringify({
+      task: "t", task_file: null, success, answer: "", steps: 1,
+      history: [{ step: 1, actions: [{ cmd: "goto", args: ["https://x.test"], code: "await page.goto('https://x.test');" }], results: ["ok"] }],
+    });
+    fs.writeFileSync(path.join(dir, "01-a/history.json"), run(true));
+    fs.writeFileSync(path.join(dir, "02-b/history.json"), run(false));
+    const out = execFileSync("node", [path.join(root, "skills/duckwright-playwright/scripts/runs-brief.mjs"), dir, "--code"], { encoding: "utf8" });
+    assert.match(out, /## A First {2}\[success\]/);
+    assert.match(out, /## B Second {2}\[failure\][\s\S]*run FAILED/);
+    assert.match(out, /NO RUN for task C/);
+    assert.match(out, /await page\.goto/);
+    assert.match(out, /2 run\(s\), 1 convertible/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
