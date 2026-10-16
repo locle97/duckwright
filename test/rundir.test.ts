@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { ADJECTIVES, NOUNS, makeRunDir, randomLabel, runLabel, slugify } from "../src/rundir.ts";
+import { ADJECTIVES, NOUNS, makeRunDir, randomLabel, resetRunDir, runIdOf, runLabel, slugify } from "../src/rundir.ts";
 import { tmpDir } from "./helpers.ts";
 
 const NOW = new Date(2026, 9, 3, 10, 15, 0);
@@ -47,4 +47,17 @@ test("make_run_dir_names_and_clashes", () => {
 test("make_run_dir_command_line_task", () => {
   const p = makeRunDir(path.join(tmpDir(), "runs"), null, NOW);
   assert.match(path.basename(p), /^20261003-101500-[a-z]+-[a-z]+$/);
+});
+
+test("resetRunDir_replaces_the_previous_run", () => {
+  const d = path.join(tmpDir(), "plan", "01-a");
+  fs.mkdirSync(path.join(d, "screenshots"), { recursive: true });
+  fs.writeFileSync(path.join(d, "history.json"), "old");
+  assert.equal(resetRunDir(d), d);
+  assert.deepEqual(fs.readdirSync(d), []);
+});
+
+test("runIdOf_is_a_relative_posix_path", () => {
+  assert.equal(runIdOf("/w/tasks/p/01-a", "/w"), "tasks/p/01-a");
+  assert.equal(runIdOf("tasks/p/01-a", "/w"), "tasks/p/01-a");
 });

@@ -394,7 +394,11 @@ export class RunManager implements ManagerLike {
     let handle: RunHandle;
     try {
       const taskFile = task.source.kind === "file" ? task.source.path : null;
-      handle = this.#o.startRun({ task: task.text, taskFile, args: { ...args, session } }, bridge);
+      // A plan's task runs in a folder of its own inside the plan folder; the next run replaces it.
+      const plan = this.#planOf(task);
+      const entry = plan?.entries.get(task.id);
+      const workdir = plan?.folder != null && entry ? path.join(plan.folder, path.parse(entry.file).name) : undefined;
+      handle = this.#o.startRun({ task: task.text, taskFile, args: { ...args, session }, ...(workdir !== undefined ? { workdir } : {}) }, bridge);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       task.error = message;

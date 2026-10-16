@@ -5,6 +5,9 @@ import path from "node:path";
 
 export const RUN_ID = /^\d{8}-\d{6}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/** A plan task's run id: its folder inside a plan folder, as a relative path (no dot-segments). */
+const PLAN_RUN_ID = /^(?:(?!\.\.?\/)[A-Za-z0-9._-]+\/)+(?!\.\.?$)[A-Za-z0-9._-]+$/;
+
 const SHOT = /^screenshots\/step-\d{3,}\.png$/;
 const PREFIX = "/api/runs/";
 
@@ -16,20 +19,31 @@ export function matchEvidence(pathname: string): EvidenceMatch | null {
   const rest = pathname.slice(PREFIX.length);
   const i = rest.indexOf("/");
   if (i === -1) return null;
-  const runId = rest.slice(0, i);
+  let runId = rest.slice(0, i);
   const rel = rest.slice(i + 1);
-  if (!RUN_ID.test(runId)) return null;
+  if (!RUN_ID.test(runId)) {
+    try {
+      runId = decodeURIComponent(runId);
+    } catch {
+      return null;
+    }
+    if (!PLAN_RUN_ID.test(runId)) return null;
+  }
   if (rel === "video.webm") return { runId, rel, type: "video/webm" };
   if (SHOT.test(rel)) return { runId, rel, type: "image/png" };
   return null;
 }
 
 /** The real path of an existing evidence file inside the run's folder, or null. Symlinks leaving the folder are refused. */
-export function resolveEvidence(runsDir: string, runId: string, rel: string): string | null {
+export function resolveEvidence(runsDir: string, runId: string, rel: string, cwd: string = process.cwd()): string | null {
   try {
-    const realRoot = fs.realpathSync(runsDir);
-    const real = fs.realpathSync(path.join(realRoot, runId, rel));
-    if (!real.startsWith(path.join(realRoot, runId) + path.sep)) return null;
+    // A plan task's folder is under the working directory, inside a folder that holds plan.json.
+    const planRun = !RUN_ID.test(runId);
+    const realRoot = fs.realpathSync(planRun ? cwd : runsDir);
+    const folder = path.join(realRoot, runId);
+    if (planRun && !fs.statSync(path.join(path.dirname(folder), "plan.json")).isFile()) return null;
+    const real = fs.realpathSync(path.join(folder, rel));
+    if (!real.startsWith(fs.realpathSync(folder) + path.sep)) return null;
     return fs.statSync(real).isFile() ? real : null;
   } catch {
     return null;

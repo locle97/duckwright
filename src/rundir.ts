@@ -57,3 +57,18 @@ export function makeRunDir(
     }
   }
 }
+
+/**
+ * Empty and return `dir`, creating it if needed: a plan task's folder keeps only its latest run,
+ * so a new run replaces the previous one.
+ */
+export function resetRunDir(dir: string): string {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** The run id of a folder outside the runs root: its path from `cwd`, with forward slashes. */
+export function runIdOf(dir: string, cwd: string = process.cwd()): string {
+  return path.relative(cwd, path.resolve(cwd, dir)).split(path.sep).join("/");
+}

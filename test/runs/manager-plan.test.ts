@@ -276,3 +276,14 @@ test("plan_writes_env_from_global_override_else_argv", async () => {
   mgr.setGlobals({ env: null });
   assert.deepEqual(await envLines("c.md"), ["", "", ""]);
 });
+
+test("a_plan_task_runs_in_its_own_folder_inside_the_plan_folder", async () => {
+  const { mgr, fakes, planFile } = setup();
+  mgr.plan(planFile);
+  await settle();
+  const p = mgr.plans()[0]!;
+  const tasks = mgr.list();
+  assert.ok(mgr.start(tasks[1]!.id).ok);
+  const entry = JSON.parse(fs.readFileSync(path.join(p.folder!, "plan.json"), "utf8")).tasks[1].file as string;
+  assert.equal(fakes[0]!.spec.workdir, path.join(p.folder!, path.parse(entry).name));
+});
