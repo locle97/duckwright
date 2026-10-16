@@ -25,7 +25,7 @@ import { AbortedError, runProcess } from "../proc.ts";
 import type { Runner } from "../proc.ts";
 import type { StepRecord } from "../prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../pw.ts";
-import { makeRunDir } from "../rundir.ts";
+import { makeRunDir, resetRunDir, runIdOf } from "../rundir.ts";
 import { SECRET_ENV, createTwoFactor } from "../twofa.ts";
 import type { Human } from "../twofa.ts";
 import { jsonlSink } from "./sink.ts";
@@ -62,6 +62,8 @@ export interface RunSpec {
   task: string;
   taskFile: string | null;
   args: RunArgs;
+  /** Run in exactly this folder, replacing what a previous run left there (plan tasks). Default: a new `runs/<stamp>-<label>`. */
+  workdir?: string;
   exportTest?: boolean;
   consoleErrors?: boolean;
   /** Set by `explore`: the agent records notes and page info for the site memory. */
@@ -159,7 +161,7 @@ export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
 
   let workdir: string;
   try {
-    workdir = makeRunDir(deps.runsDir ?? "runs", spec.taskFile);
+    workdir = spec.workdir !== undefined ? resetRunDir(spec.workdir) : makeRunDir(deps.runsDir ?? "runs", spec.taskFile);
   } catch (e) {
     const outcome = failure(errorText(e), 1, 0, 0, null);
     const done = Promise.resolve().then(() => {
@@ -172,7 +174,7 @@ export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
   const signal = AbortSignal.any([deps.signal, runAbort.signal]);
   events.subscribe(jsonlSink(path.join(workdir, "events.jsonl"), (m) => deps.onWarning?.(m)));
   const done = execute(spec, deps, workdir, events, control, signal);
-  return { id: path.basename(workdir), workdir, events, control, done };
+  return { id: spec.workdir !== undefined ? runIdOf(workdir) : path.basename(workdir), workdir, events, control, done };
 }
 
 async function execute(

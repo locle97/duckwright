@@ -51,3 +51,17 @@ test("parse_range_cases", () => {
   assert.equal(parseRange("bytes=0-0", 0), "unsatisfiable");
   for (const h of [undefined, "bytes=abc", "bytes=5-2", "bytes=0-1,3-4", "items=0-1"]) assert.equal(parseRange(h, 10), null, String(h));
 });
+
+test("plan_task_evidence_is_served_from_the_plan_folder", () => {
+  const cwd = fs.realpathSync(tmpDir());
+  const run = path.join(cwd, "tasks", "p", "01-a");
+  fs.mkdirSync(path.join(run, "screenshots"), { recursive: true });
+  fs.writeFileSync(path.join(run, "screenshots", "step-001.png"), "x");
+  const id = "tasks/p/01-a";
+  const m = matchEvidence(`/api/runs/${encodeURIComponent(id)}/screenshots/step-001.png`);
+  assert.deepEqual(m, { runId: id, rel: "screenshots/step-001.png", type: "image/png" });
+  assert.equal(resolveEvidence(path.join(cwd, "runs"), id, m!.rel, cwd), null, "no plan.json beside it");
+  fs.writeFileSync(path.join(cwd, "tasks", "p", "plan.json"), "{}");
+  assert.equal(resolveEvidence(path.join(cwd, "runs"), id, m!.rel, cwd), path.join(run, "screenshots", "step-001.png"));
+  assert.equal(matchEvidence(`/api/runs/${encodeURIComponent("tasks/../etc")}/video.webm`), null);
+});
