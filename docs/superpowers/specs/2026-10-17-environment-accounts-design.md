@@ -1,6 +1,6 @@
 # Environment accounts and autopilot login design
 
-Status: draft for review, 2026-10-17.
+Status: approved design, 2026-10-17.
 
 ## Intent
 
@@ -39,6 +39,7 @@ The task "As admin C, create an invoice for Acme, then log in as user E and chec
 - **Moving the environment context into the database.** The context stays the human-readable `environments/<name>.md` file, committable and reviewable.
 - **Moving the explore sitemap into the database.** This was discussed as a later improvement. Environments on different hosts already get separate sitemaps, since the sitemap is keyed by host. It is a separate project.
 - **Running Duckwright itself from CI without the database** (for example accounts from environment variables). Only exported tests read environment variables. This can come later.
+- **Accounts in `duckwright explore`.** Explore keeps its current "do not log in unless the environment context gives you a test account" rule. It gets no `<accounts>` section, no substitution and no TOTP by account. This is the planned follow-up. The owner agreed to leave it out of this project.
 - **SMS, email and passkey 2FA without a person.** These keep working as today: the run pauses and asks.
 
 ## Anti-goals
