@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { AccountError, AccountStore, envVarBase } from "../../src/accounts/store.ts";
+import { openDatabase } from "../../src/accounts/sqlite.ts";
 import { tmpDir } from "../helpers.ts";
 
 function open(): AccountStore {
@@ -157,4 +158,28 @@ test("remove_env_drops_rows", () => {
 test("env_var_base_folds_punctuation", () => {
   assert.equal(envVarBase("stage.eu", "user-e"), "DW_STAGE_EU_USER_E");
   assert.equal(envVarBase("dev", "admin-c"), "DW_DEV_ADMIN_C");
+});
+
+test("unreadable_database_is_an_account_error", () => {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, ".duckwright", "local"), { recursive: true });
+  const file = path.join(dir, ".duckwright", "local", "duckwright.db");
+  fs.writeFileSync(file, "garbage, not a database\n".repeat(50));
+  for (const create of [false, true]) {
+    assert.throws(() => AccountStore.open(dir, { create }), (e: unknown) =>
+      e instanceof AccountError && e.message.startsWith(`account database unreadable: ${file}: `));
+  }
+});
+
+test("corrupt_login_origins_is_an_account_error", () => {
+  const dir = tmpDir();
+  const s = AccountStore.open(dir, { create: true })!;
+  s.setEnvSettings({ name: "dev", baseUrl: "https://dev.example.com", loginOrigins: [] });
+  s.close();
+  const db = openDatabase(path.join(dir, ".duckwright", "local", "duckwright.db"));
+  db.exec("UPDATE environments SET login_origins = '{oops'");
+  db.close();
+  const t = AccountStore.open(dir, { create: false })!;
+  assert.throws(() => t.envSettings("dev"), (e: unknown) => e instanceof AccountError && /account database unreadable: .*duckwright\.db: /.test(e.message));
+  t.close();
 });

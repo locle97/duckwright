@@ -129,3 +129,15 @@ test("globals_environments_lists_new_env", async () => {
   await call(ctx, "POST", "/api/environments", { name: "dev", context: "" });
   assert.deepEqual(manager.globals().environments, ["dev"]);
 });
+
+test("unreadable_database_is_a_400", async () => {
+  const { cwd, ctx } = setup();
+  fs.mkdirSync(path.join(cwd, ".duckwright", "local"), { recursive: true });
+  fs.writeFileSync(path.join(cwd, ".duckwright", "local", "duckwright.db"), "garbage, not a database\n".repeat(50));
+  await call(ctx, "POST", "/api/environments", { name: "dev", context: "" });
+  for (const [method, url, body] of [["GET", "/api/environments/dev"], ["PUT", "/api/environments/dev", { baseUrl: "https://dev.example.com", loginOrigins: [] }]] as const) {
+    const r = await call(ctx, method, url, body);
+    assert.equal(r.status, 400, `${method} ${url}`);
+    assert.match(JSON.stringify(r.body), /account database unreadable/);
+  }
+});

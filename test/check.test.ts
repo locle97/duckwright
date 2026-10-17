@@ -164,3 +164,13 @@ test("check_creates_nothing", () => {
   checkTasks(["t.md"]);
   assert.equal(fs.existsSync(path.join(tmp, ".duckwright")), false);
 });
+
+test("check_unreadable_database_is_an_error", () => {
+  const tmp = project({ "environments/dev.md": ENV, "t.md": "---\nenv: dev\naccounts: admin\n---\nx\n" });
+  fs.mkdirSync(path.join(tmp, ".duckwright", "local"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".duckwright", "local", "duckwright.db"), "garbage, not a database\n".repeat(50));
+  const r = checkTasks(["t.md"]);
+  assert.deepEqual(r.ok, []);
+  assert.equal(r.findings[0].level, "error");
+  assert.match(r.findings[0].message, /t\.md: account database unreadable: .*duckwright\.db: /);
+});

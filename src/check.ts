@@ -54,17 +54,17 @@ export function checkTasks(paths: string[], cwd = process.cwd()): CheckResult {
           add("warning", `${p}: accounts can't be verified here: the file has no env:`);
         } else {
           const name = envLabel(tf.settings.env) as string;
-          const store = AccountStore.open(cwd, { create: false });
-          if (store === null) {
-            add("warning", `${p}: accounts can't be verified: no accounts database`);
-          } else {
-            store.close();
-            try {
+          try {
+            const store = AccountStore.open(cwd, { create: false });
+            if (store === null) {
+              add("warning", `${p}: accounts can't be verified: no accounts database`);
+            } else {
+              store.close();
               loadRunAccounts(cwd, name, pinned);
-            } catch (e) {
-              if (!(e instanceof AccountError)) throw e;
-              add("error", `${p}: ${e.message}`);
             }
+          } catch (e) {
+            if (!(e instanceof AccountError)) throw e;
+            add("error", `${p}: ${e.message}`);
           }
         }
       }

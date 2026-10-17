@@ -2196,3 +2196,17 @@ test("explore_is_not_blocked_by_accounts_without_base_url", async () => {
   assert.equal(await main([...e.argv, "--env", "dev"], e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0, e.err.join("\n"));
   assert.equal(seen[0].accounts, undefined);
 });
+
+function garbageDb(tmp: string): void {
+  fs.mkdirSync(path.join(tmp, ".duckwright", "local"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".duckwright", "local", "duckwright.db"), "this is not a sqlite database at all, just garbage text\n".repeat(20));
+}
+
+test("preflight_unreadable_database_exit_2", async () => {
+  const e = env();
+  envFile(e.tmp, "dev", "DEV");
+  garbageDb(e.tmp);
+  assert.equal(await main(["-p", ...e.argv, "--env", "dev"], e.deps()), 2);
+  assert.equal(e.err.length, 1);
+  assert.match(e.err[0], /^account database unreadable: .*duckwright\.db: /);
+});

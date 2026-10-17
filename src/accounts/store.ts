@@ -95,11 +95,19 @@ function httpOrigin(value: string, what: string): string {
   return u.origin;
 }
 
+/** An AccountError for a database that cannot be opened or read; an AccountError is kept as it is. */
+function unreadable(file: string, e: unknown): AccountError {
+  if (e instanceof AccountError) return e;
+  return new AccountError(`account database unreadable: ${file}: ${e instanceof Error ? e.message : String(e)}`);
+}
+
 export class AccountStore {
   private readonly db: DatabaseSync;
+  private readonly file: string;
 
-  private constructor(db: DatabaseSync) {
+  private constructor(db: DatabaseSync, file: string) {
     this.db = db;
+    this.file = file;
   }
 
   /** Opens the store under `cwd`; null when it does not exist and `create` is false (nothing is written then). */
@@ -111,7 +119,12 @@ export class AccountStore {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, ".gitignore"), "*\n");
     }
-    const db = openDatabase(file);
+    let db: DatabaseSync;
+    try {
+      db = openDatabase(file);
+    } catch (e) {
+      throw unreadable(file, e);
+    }
     try {
       db.exec("PRAGMA busy_timeout = 5000");
       db.exec("PRAGMA journal_mode = WAL");
@@ -130,9 +143,9 @@ export class AccountStore {
       }
     } catch (e) {
       db.close();
-      throw e;
+      throw unreadable(file, e);
     }
-    return new AccountStore(db);
+    return new AccountStore(db, file);
   }
 
   close(): void {
@@ -144,7 +157,16 @@ export class AccountStore {
       | { base_url: string | null; login_origins: string }
       | undefined;
     if (!row) return { name: env, baseUrl: null, loginOrigins: [] };
-    return { name: env, baseUrl: row.base_url, loginOrigins: JSON.parse(row.login_origins) as string[] };
+    let loginOrigins: unknown;
+    try {
+      loginOrigins = JSON.parse(row.login_origins);
+    } catch (e) {
+      throw unreadable(this.file, e);
+    }
+    if (!Array.isArray(loginOrigins) || !loginOrigins.every((o) => typeof o === "string")) {
+      throw unreadable(this.file, new Error(`login origins of '${env}' are not a list of strings`));
+    }
+    return { name: env, baseUrl: row.base_url, loginOrigins };
   }
 
   setEnvSettings(s: EnvSettings): void {
