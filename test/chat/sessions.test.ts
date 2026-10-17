@@ -101,6 +101,11 @@ test("undelivered queued message starts the next turn", async () => {
   sessions.send(chat.id, "B", []);
   sessions.send(chat.id, "C", []);
   procs[0].push(result());
+  // The next turn waits for the process to exit.
+  assert.equal(procs.length, 1);
+  assert.equal(sessions.open(chat.id)!.turn, "running");
+  procs[0].close(0);
+  await tick();
   assert.equal(procs.length, 2);
   assert.equal(promptOf(procs[1].argv), "B\n\nC");
   assert.equal(sessions.open(chat.id)!.turn, "running");
@@ -221,4 +226,58 @@ test("send while stopping, update validation, invalid ids", async () => {
   assert.equal(sessions.send("BAD ID", "x", []).ok, false);
   assert.equal(sessions.update("nope", { model: "x" }).ok, false);
   assert.equal(sessions.list()[0].chat.id, chat.id);
+});
+
+test("the turn ends when the process exits; a second result adds no cost", async () => {
+  const { sessions, procs } = setup();
+  const chat = sessions.create();
+  sessions.send(chat.id, "A", []);
+  procs[0].push(result(0.2));
+  procs[0].push(result(0.3));
+  procs[0].push({ type: "assistant", message: { content: [{ type: "text", text: "late" }] } });
+  let open = sessions.open(chat.id)!;
+  assert.equal(open.chat.spentUsd, 0.2);
+  assert.equal(open.turn, "running");
+  assert.deepEqual(open.messages.map((m) => m.kind), ["person"]);
+  assert.deepEqual(sessions.send(chat.id, "B", []), { ok: true });
+  assert.equal(procs.length, 1);
+  procs[0].close(0);
+  await tick();
+  open = sessions.open(chat.id)!;
+  assert.equal(open.chat.spentUsd, 0.2);
+  assert.equal(procs.length, 2);
+  assert.equal(promptOf(procs[1].argv), "B");
+});
+
+test("the token is rejected after stop and after the turn ends", async () => {
+  const { sessions, procs } = setup();
+  const chat = sessions.create();
+  sessions.send(chat.id, "A", []);
+  const t1 = tokenOf(procs[0].argv);
+  await sessions.stop(chat.id);
+  assert.equal((await sessions.mcp(chat.id, t1, call("budget"))).status, 401);
+  sessions.send(chat.id, "B", []);
+  const t2 = tokenOf(procs[1].argv);
+  assert.notEqual(t1, t2);
+  procs[1].push(result());
+  procs[1].close(0);
+  await tick();
+  assert.equal((await sessions.mcp(chat.id, t2, call("budget"))).status, 401);
+});
+
+test("a stale wait from a stopped turn does not drain the next turn's queue", async () => {
+  const { sessions, procs, manager } = setup();
+  const chat = sessions.create();
+  sessions.send(chat.id, "A", []);
+  const stale = sessions.mcp(chat.id, tokenOf(procs[0].argv), call("wait", { task_ids: [1] }));
+  await tick();
+  await sessions.stop(chat.id);
+  sessions.send(chat.id, "B", []);
+  sessions.send(chat.id, "C", []);
+  manager.update(1, { state: "passed" });
+  const r = await stale;
+  assert.deepEqual(JSON.parse((r.body as any).result.content[0].text).pending_messages, []);
+  const fresh = await sessions.mcp(chat.id, tokenOf(procs[1].argv), call("budget"));
+  assert.deepEqual(JSON.parse((fresh.body as any).result.content[0].text).pending_messages, ["C"]);
+  await sessions.stopAll();
 });

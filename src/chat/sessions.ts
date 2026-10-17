@@ -28,7 +28,7 @@ const TITLE_MAX = 60;
 const MCP_PREFIX = "mcp__duckwright__";
 const KILL_WAIT_MS = 5000;
 
-interface Turn { gen: number; proc: ClaudeProcess; gotResult: boolean; ended: boolean }
+interface Turn { gen: number; proc: ClaudeProcess; gotResult: boolean }
 
 interface Session {
   meta: ChatMeta;
@@ -106,7 +106,8 @@ export class ChatSessions {
     this.#emitMeta(s);
     const cur = s.current;
     s.current = null;
-    s.gen++; // anything the killed process still says is ignored
+    s.gen++; // anything the killed process still says or asks is ignored
+    s.token = null;
     s.queue = [];
     if (cur !== null) {
       cur.proc.kill();
@@ -149,7 +150,7 @@ export class ChatSessions {
     if (s === null || s.token === null || bearer === null || !crypto.timingSafeEqual(sha(bearer), sha(s.token))) {
       return { status: 401, body: { error: "unauthorized" } };
     }
-    const body = await handleMcp(this.#host(s), msg);
+    const body = await handleMcp(this.#host(s, s.gen), msg);
     return { status: body === null ? 202 : 200, body };
   }
 
@@ -219,17 +220,19 @@ export class ChatSessions {
     this.#saveMeta(s);
   }
 
-  #host(s: Session): McpHost {
+  /** The host for one MCP call made during turn `gen`; once that turn is over its side effects are dropped. */
+  #host(s: Session, gen: number): McpHost {
+    const live = () => s.gen === gen && s.current !== null;
     return {
       manager: this.#o.manager,
       tracker: this.#tracker(s),
       spentUsd: () => this.#spent(s),
       ceilingUsd: () => s.meta.ceilingUsd,
-      takeMessages: () => s.queue.splice(0),
-      setPhase: (p) => { s.meta.phase = p; this.#saveMeta(s); },
-      ask: (questions) => this.#append(s, { kind: "questions", at: Date.now(), questions }),
-      activity: (text) => this.#append(s, { kind: "activity", at: Date.now(), text }),
-      setPlanFolder: (folder) => { s.meta.planFolder = folder; this.#saveMeta(s); },
+      takeMessages: () => (live() ? s.queue.splice(0) : []),
+      setPhase: (p) => { if (live()) { s.meta.phase = p; this.#saveMeta(s); } },
+      ask: (questions) => { if (live()) this.#append(s, { kind: "questions", at: Date.now(), questions }); },
+      activity: (text) => { if (live()) this.#append(s, { kind: "activity", at: Date.now(), text }); },
+      setPlanFolder: (folder) => { if (live()) { s.meta.planFolder = folder; this.#saveMeta(s); } },
     };
   }
 
@@ -241,14 +244,14 @@ export class ChatSessions {
       prompt, model: s.meta.model, resume: s.meta.sessionId, cwd: this.#o.root, skillsDir: this.#o.skillsDir,
       systemPrompt: this.#o.systemPrompt, mcpUrl: this.#o.mcpUrl(s.meta.id), mcpToken: s.token,
     });
-    const turn: Turn = { gen, proc: null as unknown as ClaudeProcess, gotResult: false, ended: false };
+    const turn: Turn = { gen, proc: null as unknown as ClaudeProcess, gotResult: false };
     s.current = turn;
     this.#emitMeta(s);
     try {
       turn.proc = this.#o.spawn(argv, this.#o.root, (line) => {
-        if (s.gen !== gen) return;
+        if (s.gen !== gen || turn.gotResult) return;
         for (const item of parseStreamLine(line)) {
-          if (s.gen !== gen) return;
+          if (s.gen !== gen || turn.gotResult) return;
           this.#onItem(s, turn, item);
         }
       });
@@ -259,12 +262,13 @@ export class ChatSessions {
       return;
     }
     void turn.proc.done.then(({ code, stderr }) => {
-      if (s.current !== turn && !turn.ended) return; // stopped
+      // The turn ends only once the process has exited, so two `claude --resume` never share a session.
+      if (s.current !== turn) return; // stopped
       if (!turn.gotResult || code !== 0) {
         const first = stderr.split("\n").map((l) => l.trim()).find((l) => l !== "") ?? "";
         this.#append(s, { kind: "error", at: Date.now(), text: `claude exited ${code}${first !== "" ? `: ${first}` : ""}` });
       }
-      if (!turn.ended) this.#endTurn(s, turn);
+      this.#endTurn(s, turn);
     });
   }
 
@@ -289,15 +293,14 @@ export class ChatSessions {
         s.turnCostUsd += item.costUsd;
         this.#refreshSpent(s);
         if (item.isError) this.#append(s, { kind: "error", at: Date.now(), text: item.text });
-        this.#endTurn(s, turn);
     }
   }
 
   /** Ends the turn; person messages the agent never fetched start the next one. */
   #endTurn(s: Session, turn: Turn): void {
-    turn.ended = true;
     if (s.current !== turn) return;
     s.current = null;
+    s.token = null;
     s.turn = "idle";
     const queued = s.queue.splice(0);
     if (queued.length > 0) this.#startTurn(s, queued.join("\n\n"));
