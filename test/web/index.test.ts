@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { cookieName } from "../../src/web/auth.ts";
 import { startWeb } from "../../src/web/index.ts";
 import { tmpDir } from "../helpers.ts";
+import { fakeChats } from "./chats-helper.ts";
 import { FakeManager, ev, snapshot } from "../tui/fake-manager.ts";
 
 function uiDir(): string {
@@ -107,6 +108,16 @@ test("quit() is idempotent", { timeout: 5000 }, async () => {
   const m = new FakeManager();
   const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), open: () => {} });
   web.quit();
+  web.quit();
+  await web.done;
+  assert.deepEqual(m.log.filter((l) => l === "stopAll"), ["stopAll"]);
+});
+
+test("quit() stops the runs even when stopping the chats fails", { timeout: 5000 }, async () => {
+  const m = new FakeManager();
+  const { chats } = fakeChats(m);
+  chats.stopAll = async () => { throw new Error("chat stop failed"); };
+  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), open: () => {}, chats });
   web.quit();
   await web.done;
   assert.deepEqual(m.log.filter((l) => l === "stopAll"), ["stopAll"]);

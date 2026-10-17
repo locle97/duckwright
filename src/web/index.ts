@@ -83,7 +83,8 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
   const quit = (): void => {
     quitting ??= (async () => {
       try {
-        await chats.stopAll();
+        // A chat that fails to stop must not keep the runs going.
+        await chats.stopAll().catch(() => {});
         await o.manager.stopAll();
       } finally {
         log.close();
