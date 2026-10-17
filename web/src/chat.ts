@@ -13,6 +13,7 @@ export interface ChatUiState {
 
 export type ChatAction =
   | { type: "chat:list"; items: ChatUiState["chats"] }
+  | { type: "chat:opening"; id: ChatId }
   | { type: "chat:opened"; chat: ChatMeta; turn: TurnState; messages: ChatMessage[] }
   | { type: "chat:draft"; text: string } | { type: "chat:attach"; path: string } | { type: "chat:detach"; path: string }
   | { type: "chat:sent" } | ChatEvent;
@@ -31,16 +32,34 @@ function upsert(items: ChatUiState["chats"], entry: ChatUiState["chats"][number]
   return byUpdated(found ? items.map((x) => (x.chat.id === entry.chat.id ? entry : x)) : [...items, entry]);
 }
 
+const key = (m: ChatMessage): string => JSON.stringify(m);
+
+/** The fetched history plus the streamed messages it does not already hold (events seen during the fetch or before a refetch). */
+export function mergeMessages(fetched: ChatMessage[], streamed: ChatMessage[]): ChatMessage[] {
+  const held = new Map<string, number>();
+  for (const m of fetched) held.set(key(m), (held.get(key(m)) ?? 0) + 1);
+  const extra = streamed.filter((m) => {
+    const n = held.get(key(m)) ?? 0;
+    if (n > 0) { held.set(key(m), n - 1); return false; }
+    return true;
+  });
+  return [...fetched, ...extra];
+}
+
 export function reduceChat(s: ChatUiState, a: ChatAction): ChatUiState {
   switch (a.type) {
     case "chat:list":
       return { ...s, chats: byUpdated(a.items) };
-    case "chat:opened":
+    case "chat:opening":
+      // Messages that arrive while the fetch is out are kept, then merged into what it returns.
       // Switching chats starts a fresh input: a draft or attachment belongs to the chat it was typed in.
-      return {
-        ...s, chats: upsert(s.chats, { chat: a.chat, turn: a.turn }), openId: a.chat.id, messages: a.messages,
-        ...(s.openId === a.chat.id ? {} : { draft: "", attachments: [] }),
-      };
+      return s.openId === a.id ? s : { ...s, openId: a.id, messages: [], draft: "", attachments: [] };
+    case "chat:opened": {
+      const chats = upsert(s.chats, { chat: a.chat, turn: a.turn });
+      // A reply for a chat the person has since left is dropped.
+      if (s.openId !== a.chat.id) return { ...s, chats };
+      return { ...s, chats, messages: mergeMessages(a.messages, s.messages) };
+    }
     case "chat:updated":
       return { ...s, chats: upsert(s.chats, { chat: a.chat, turn: a.turn }) };
     case "chat:message":

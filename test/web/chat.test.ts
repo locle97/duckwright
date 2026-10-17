@@ -6,14 +6,15 @@ import type { ChatMeta, ChatMessage } from "../../src/chat/types.ts";
 import { groupMessages, initialChat, planForFolder, reduceChat } from "../../web/src/chat.ts";
 import type { ChatUiState } from "../../web/src/chat.ts";
 import { initialState, reduce } from "../../web/src/store.ts";
-import { planSnapshot } from "../tui/fake-manager.ts";
+import type { Action } from "../../web/src/store.ts";
+import { planSnapshot, snapshot } from "../tui/fake-manager.ts";
 
 const meta = (id: string, updatedAt: number, over: Partial<ChatMeta> = {}): ChatMeta => ({
   id, title: id, model: "sonnet", ceilingUsd: 5, sessionId: null, spentUsd: 0, phase: null, planFolder: null,
   createdAt: 1, updatedAt, ...over,
 });
 const agent = (text: string): ChatMessage => ({ kind: "agent", at: 1, text });
-const open = (s: ChatUiState, id: string): ChatUiState => reduceChat(s, { type: "chat:opened", chat: meta(id, 1), turn: "idle", messages: [] });
+const open = (s: ChatUiState, id: string): ChatUiState => reduceChat(reduceChat(s, { type: "chat:opening", id }), { type: "chat:opened", chat: meta(id, 1), turn: "idle", messages: [] });
 
 test("chat:message for the open chat appends; for another chat it does not", () => {
   let s = open(initialChat(), "a");
@@ -76,4 +77,29 @@ test("groupMessages joins consecutive activity lines", () => {
   const act = (text: string): ChatMessage => ({ kind: "activity", at: 1, text });
   const g = groupMessages([agent("a"), act("x"), act("y"), agent("b"), act("z")]);
   assert.deepEqual(g.map((x) => (x.kind === "activity" ? x.lines : x.message.kind)), ["agent", ["x", "y"], "agent", ["z"]]);
+});
+
+test("messages streamed while a chat loads or reloads are kept, without duplicates", () => {
+  let s = reduceChat(initialChat(), { type: "chat:opening", id: "a" });
+  // An event arrives between the GET and chat:opened; the fetched history may or may not hold it.
+  s = reduceChat(s, { type: "chat:message", chatId: "a", message: agent("two") });
+  s = reduceChat(s, { type: "chat:opened", chat: meta("a", 1), turn: "idle", messages: [agent("one")] });
+  assert.deepEqual(s.messages, [agent("one"), agent("two")]);
+  // A reload after a reconnect: the history now holds "two" and a missed "three".
+  s = reduceChat(s, { type: "chat:draft", text: "typing" });
+  s = reduceChat(s, { type: "chat:opening", id: "a" });
+  s = reduceChat(s, { type: "chat:opened", chat: meta("a", 2), turn: "idle", messages: [agent("one"), agent("two"), agent("three")] });
+  assert.deepEqual(s.messages, [agent("one"), agent("two"), agent("three")]);
+  assert.equal(s.draft, "typing");
+  // A reply for a chat the person left meanwhile does not replace the open one.
+  s = reduceChat(s, { type: "chat:opening", id: "b" });
+  s = reduceChat(s, { type: "chat:opened", chat: meta("a", 3), turn: "idle", messages: [agent("late")] });
+  assert.equal(s.openId, "b");
+  assert.deepEqual(s.messages, []);
+});
+
+test("every state snapshot is counted so the open chat can be reloaded", () => {
+  const snap: Action = { type: "stream", now: 0, message: { type: "state", tasks: [], plans: [], globals: { base: snapshot(0, "").effective, overrides: {}, environments: [] }, activeCount: 0, maxParallel: 3, notices: [], theme: "auto", runs: [], chats: [] } };
+  const s = reduce(reduce(initialState(), snap), snap);
+  assert.equal(s.snapshots, 2);
 });

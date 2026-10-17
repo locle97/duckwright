@@ -17,7 +17,9 @@ import { Button, Tag } from "./ui.tsx";
 const MODELS = ["sonnet", "opus", "haiku"];
 const usd = (n: number): string => `$${n.toFixed(2)}`;
 
-async function openChat(d: Dispatch, id: string): Promise<void> {
+/** Shows a chat: marks it open at once (so streamed messages are kept), then loads its history. */
+export async function openChat(d: Dispatch, id: string): Promise<void> {
+  d({ type: "chat:opening", id });
   const r = await shown(d, api.get(`/api/chats/${encodeURIComponent(id)}`));
   if (r.ok) d({ type: "chat:opened", chat: r.chat as ChatMeta, turn: r.turn as "idle" | "running" | "stopping", messages: r.messages as ChatMessage[] });
 }

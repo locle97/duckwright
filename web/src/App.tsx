@@ -9,7 +9,7 @@ import { EditorDialog } from "./dialogs/EditorDialog.tsx";
 import { HelpDialog } from "./dialogs/HelpDialog.tsx";
 import { OptionsDialog } from "./dialogs/OptionsDialog.tsx";
 import { TwofaDialog } from "./dialogs/TwofaDialog.tsx";
-import { ChatPane } from "./ChatPane.tsx";
+import { ChatPane, openChat } from "./ChatPane.tsx";
 import { Header } from "./Header.tsx";
 import { commandFor, shouldIgnore } from "./keys.ts";
 import type { Command, KeyInfo } from "./keys.ts";
@@ -48,6 +48,11 @@ export function App() {
     if (state.theme === "auto") delete root.dataset.theme;
     else root.dataset.theme = state.theme;
   }, [state.theme]);
+
+  // A new snapshot means the stream (re)connected: events of the open chat may have been missed, so load it again.
+  useEffect(() => {
+    if (state.snapshots > 1 && state.chat.openId !== null) void openChat(dispatch, state.chat.openId);
+  }, [state.snapshots]);
 
   const ref = useRef<WebState>(state);
   ref.current = state;

@@ -62,6 +62,8 @@ export interface WebState {
   toasts: Toast[];
   view: View;
   chat: ChatUiState;
+  /** Counts the state snapshots received; a new one means the stream (re)connected. */
+  snapshots: number;
 }
 
 export type Action =
@@ -89,7 +91,7 @@ export function initialState(now = 0): WebState {
   return {
     loaded: false, connected: false, ended: false, expired: false, now, tasks: [], plans: [], globals: null, maxParallel: 3, theme: "auto",
     runs: {}, selection: null, tab: "tasks", otherTab: { selection: null, filter: "" }, collapsed: [], filter: "", dialog: null, toasts: [],
-    view: "workspace", chat: initialChat(),
+    view: "workspace", chat: initialChat(), snapshots: 0,
   };
 }
 
@@ -227,7 +229,7 @@ function applySnapshot(s: WebState, m: Extract<StreamMessage, { type: "state" }>
     if (view) runs[r.runId] = view;
   }
   let next: WebState = {
-    ...s, loaded: true, now, tasks: m.tasks, plans: m.plans, globals: m.globals, maxParallel: m.maxParallel, theme: m.theme, runs,
+    ...s, loaded: true, snapshots: s.snapshots + 1, now, tasks: m.tasks, plans: m.plans, globals: m.globals, maxParallel: m.maxParallel, theme: m.theme, runs,
   };
   next = snap({ ...next, chat: reduceChat(next.chat, { type: "chat:list", items: m.chats }) });
   // Opened with nothing but past runs: show them rather than an empty Tasks tab.
