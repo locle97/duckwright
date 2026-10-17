@@ -1,15 +1,19 @@
 // Live chats: one `claude -p` process per turn, its stream turned into chat messages, person messages
 // queued mid-turn, spend tracked against the ceiling, turns stopped, and each chat's MCP endpoint.
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 import { redactText } from "../redact.ts";
+import type { Scrubber } from "../scrub.ts";
 import type { ManagerEvent, ManagerLike, TaskId } from "../runs/manager.ts";
 import { newToken as defaultNewToken } from "../web/auth.ts";
-import { claudeArgv, parseStreamLine } from "./claude.ts";
+import { claudeArgv, mcpConfig, parseStreamLine } from "./claude.ts";
 import type { ClaudeProcess, ClaudeSpawner, StreamItem } from "./claude.ts";
 import { handleMcp } from "./mcp.ts";
 import type { JsonRpc, McpHost } from "./mcp.ts";
-import { ChatStore, isChatId } from "./store.ts";
+import { projectScrubber } from "./secrets.ts";
+import { ChatStore, isChatId, mapMessageText } from "./store.ts";
 import type { ChatEvent, ChatId, ChatMessage, ChatMeta, TurnState } from "./types.ts";
 import { RunTracker } from "./tracker.ts";
 
@@ -20,6 +24,7 @@ export interface ChatSessionsOptions {
   defaultModel?: string;                         // "sonnet"
   defaultCeilingUsd?: number;                    // 5
   newToken?: () => string;                       // per-chat MCP token; default auth.ts newToken
+  scrubber?: () => Scrubber;                     // project secrets to mask; default projectScrubber(root)
 }
 
 type Ok = { ok: true } | { ok: false; error: string };
@@ -27,8 +32,9 @@ type Ok = { ok: true } | { ok: false; error: string };
 const TITLE_MAX = 60;
 const MCP_PREFIX = "mcp__duckwright__";
 const KILL_WAIT_MS = 5000;
+const STALE_SESSION = "No conversation found";
 
-interface Turn { gen: number; proc: ClaudeProcess; gotResult: boolean }
+interface Turn { gen: number; proc: ClaudeProcess; gotResult: boolean; resultText: string }
 
 interface Session {
   meta: ChatMeta;
@@ -42,6 +48,7 @@ interface Session {
   tracker: RunTracker | null;
   unsubscribe: (() => void) | null;
   twofa: Set<TaskId>; // owned tasks already announced as waiting for 2FA
+  scrubber: Scrubber | null; // rebuilt on each send and turn, so accounts saved meanwhile are masked
 }
 
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest();
@@ -51,10 +58,17 @@ export class ChatSessions {
   #sessions = new Map<ChatId, Session>();
   #listeners = new Set<(e: ChatEvent) => void>();
   #newToken: () => string;
+  #scrubberOf: () => Scrubber;
+  #systemPromptFile: string;
 
   constructor(o: ChatSessionsOptions) {
     this.#o = o;
     this.#newToken = o.newToken ?? defaultNewToken;
+    this.#scrubberOf = o.scrubber ?? (() => projectScrubber(o.root));
+    // Passed to claude as a file: a long prompt in argv breaks on Windows' command line limit.
+    this.#systemPromptFile = path.join(o.root, ".duckwright", "chats", "system-prompt.md");
+    fs.mkdirSync(path.dirname(this.#systemPromptFile), { recursive: true });
+    fs.writeFileSync(this.#systemPromptFile, o.systemPrompt);
   }
 
   list(): Array<{ chat: ChatMeta; turn: TurnState }> {
@@ -86,10 +100,11 @@ export class ChatSessions {
     if (s === null) return { ok: false, error: "no such chat" };
     if (s.turn === "stopping") return { ok: false, error: "the chat is stopping" };
     if (text.trim() === "" && attachments.length === 0) return { ok: false, error: "the message is empty" };
+    s.scrubber = this.#scrubberOf();
     this.#append(s, { kind: "person", at: Date.now(), text, attachments: [...attachments] });
     if (!s.titled) {
       s.titled = true;
-      const title = redactText(text.trim().replace(/\s+/g, " ")).slice(0, TITLE_MAX);
+      const title = this.#clean(s, text.trim().replace(/\s+/g, " ")).slice(0, TITLE_MAX);
       s.meta.title = title !== "" ? title : attachments[0].slice(0, TITLE_MAX);
       this.#saveMeta(s);
     }
@@ -138,7 +153,8 @@ export class ChatSessions {
     if (o.ceilingUsd !== undefined) s.meta.ceilingUsd = o.ceilingUsd;
     if (o.model !== undefined) s.meta.model = o.model.trim();
     if (o.title !== undefined) {
-      s.meta.title = redactText(o.title.trim());
+      s.scrubber = this.#scrubberOf();
+      s.meta.title = this.#clean(s, o.title.trim());
       s.titled = true;
     }
     this.#saveMeta(s);
@@ -179,7 +195,7 @@ export class ChatSessions {
   #newSession(meta: ChatMeta, titled: boolean): Session {
     return {
       meta, turn: "idle", current: null, gen: 0, queue: [], token: null, turnCostUsd: meta.spentUsd,
-      titled, tracker: null, unsubscribe: null, twofa: new Set(),
+      titled, tracker: null, unsubscribe: null, twofa: new Set(), scrubber: null,
     };
   }
 
@@ -243,24 +259,37 @@ export class ChatSessions {
   }
 
   #startTurn(s: Session, prompt: string): void {
+    // --max-budget-usd caps the agent's own spend in this turn, which the chat only learns at its end.
+    const remaining = Math.floor((s.meta.ceilingUsd - this.#spent(s)) * 100 + 1e-9) / 100;
+    if (remaining <= 0) {
+      s.queue = [];
+      this.#append(s, { kind: "error", at: Date.now(), text: `Spend ceiling of $${s.meta.ceilingUsd.toFixed(2)} reached — raise it to continue` });
+      this.#saveMeta(s);
+      return;
+    }
     const gen = ++s.gen;
     s.token = this.#newToken();
     s.turn = "running";
-    const argv = claudeArgv({
-      prompt, model: s.meta.model, resume: s.meta.sessionId, cwd: this.#o.root, skillsDir: this.#o.skillsDir,
-      systemPrompt: this.#o.systemPrompt, mcpUrl: this.#o.mcpUrl(s.meta.id), mcpToken: s.token,
-    });
-    const turn: Turn = { gen, proc: null as unknown as ClaudeProcess, gotResult: false };
+    s.scrubber = this.#scrubberOf();
+    const turn: Turn = { gen, proc: null as unknown as ClaudeProcess, gotResult: false, resultText: "" };
     s.current = turn;
     this.#emitMeta(s);
     try {
+      // The bearer lives in a file only this user can read, not in the process list.
+      const mcpConfigFile = path.join(this.#o.store.folder(s.meta.id), "mcp.json");
+      fs.writeFileSync(mcpConfigFile, mcpConfig(this.#o.mcpUrl(s.meta.id), s.token), { mode: 0o600 });
+      fs.chmodSync(mcpConfigFile, 0o600);
+      const argv = claudeArgv({
+        model: s.meta.model, resume: s.meta.sessionId, skillsDir: this.#o.skillsDir,
+        systemPromptFile: this.#systemPromptFile, mcpConfigFile, maxBudgetUsd: remaining,
+      });
       turn.proc = this.#o.spawn(argv, this.#o.root, (line) => {
         if (s.gen !== gen || turn.gotResult) return;
         for (const item of parseStreamLine(line)) {
           if (s.gen !== gen || turn.gotResult) return;
           this.#onItem(s, turn, item);
         }
-      });
+      }, prompt);
     } catch (e) {
       this.#append(s, { kind: "error", at: Date.now(), text: `could not start claude: ${e instanceof Error ? e.message : String(e)}` });
       s.queue = [];
@@ -273,6 +302,13 @@ export class ChatSessions {
       if (!turn.gotResult || code !== 0) {
         const first = stderr.split("\n").map((l) => l.trim()).find((l) => l !== "") ?? "";
         this.#append(s, { kind: "error", at: Date.now(), text: `claude exited ${code}${first !== "" ? `: ${first}` : ""}` });
+      }
+      if ((!turn.gotResult || code !== 0 || turn.resultText !== "") && s.meta.sessionId !== null
+        && (stderr.includes(STALE_SESSION) || turn.resultText.includes(STALE_SESSION))) {
+        // The saved session is gone (deleted, or made on another machine): the next turn starts a fresh one.
+        s.meta.sessionId = null;
+        this.#saveMeta(s);
+        this.#append(s, { kind: "error", at: Date.now(), text: "The agent's earlier conversation could not be resumed. Send your message again to start a fresh one." });
       }
       this.#endTurn(s, turn);
     });
@@ -298,7 +334,13 @@ export class ChatSessions {
         if (item.sessionId !== "" && s.meta.sessionId === null) s.meta.sessionId = item.sessionId;
         s.turnCostUsd += item.costUsd;
         this.#refreshSpent(s);
-        if (item.isError) this.#append(s, { kind: "error", at: Date.now(), text: item.text });
+        for (const d of item.denials) {
+          this.#append(s, { kind: "activity", at: Date.now(), text: `Not allowed: ${d.name}${d.summary !== "" ? ` ${d.summary}` : ""}` });
+        }
+        if (item.isError) {
+          turn.resultText = item.text;
+          this.#append(s, { kind: "error", at: Date.now(), text: item.text });
+        }
     }
   }
 
@@ -313,8 +355,14 @@ export class ChatSessions {
     else this.#saveMeta(s);
   }
 
+  /** redactText plus the project's secrets. */
+  #clean(s: Session, text: string): string {
+    s.scrubber ??= this.#scrubberOf();
+    return s.scrubber.scrub(redactText(text));
+  }
+
   #append(s: Session, m: ChatMessage): void {
-    const clean = this.#o.store.append(s.meta.id, m);
+    const clean = this.#o.store.append(s.meta.id, mapMessageText(m, (t) => this.#clean(s, t)));
     this.#emit({ type: "chat:message", chatId: s.meta.id, message: clean });
   }
 

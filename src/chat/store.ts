@@ -13,13 +13,16 @@ function stamp(d: Date): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-function redactMessage(m: ChatMessage): ChatMessage {
+/** A copy of `m` with every text it shows passed through `fn`. */
+export function mapMessageText(m: ChatMessage, fn: (text: string) => string): ChatMessage {
   switch (m.kind) {
-    case "person": return { ...m, text: redactText(m.text) };
-    case "questions": return { ...m, questions: m.questions.map(redactText) };
-    default: return { ...m, text: redactText(m.text) };
+    case "person": return { ...m, text: fn(m.text) };
+    case "questions": return { ...m, questions: m.questions.map(fn) };
+    default: return { ...m, text: fn(m.text) };
   }
 }
+
+const redactMessage = (m: ChatMessage): ChatMessage => mapMessageText(m, redactText);
 
 export class ChatStore {
   private readonly root: string;

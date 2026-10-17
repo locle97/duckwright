@@ -10,7 +10,7 @@ import { isChatId } from "../chat/store.ts";
 
 import { handleApi, MAX_UPLOAD, snapshotOf, UPLOAD_RE } from "./api.ts";
 import type { ApiContext } from "./api.ts";
-import { authorize } from "./auth.ts";
+import { authorize, hostOk } from "./auth.ts";
 import { matchEvidence, parseRange, resolveEvidence } from "./evidence.ts";
 
 export interface ServerOptions {
@@ -222,6 +222,10 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     const id = rawPath.slice("/mcp/".length);
     if (!isChatId(id)) return sendJson(res, 404, { ok: false, error: "not found" });
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "method not allowed" }, { Allow: "POST" });
+    // Same DNS-rebinding guard as authorize(); both checks run before the body is read.
+    if (!hostOk(req.headers.host, port)) return sendJson(res, 403, { ok: false, error: "forbidden" });
+    const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+    if (m === null) return sendJson(res, 401, { ok: false, error: "unauthorized" });
     if (!/^application\/json\s*(;|$)/i.test(req.headers["content-type"] ?? "")) {
       return sendJson(res, 415, { ok: false, error: "send application/json" });
     }
@@ -229,8 +233,7 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     if (typeof msg !== "object" || msg === null || Array.isArray(msg) || typeof (msg as JsonRpc).method !== "string") {
       return sendJson(res, 400, { ok: false, error: "send one JSON-RPC message" });
     }
-    const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
-    const r = await o.ctx.chats.mcp(id, m ? m[1] : null, msg as JsonRpc);
+    const r = await o.ctx.chats.mcp(id, m[1], msg as JsonRpc);
     if (r.body === null) {
       res.writeHead(r.status, { "Content-Length": 0, "Cache-Control": "no-store", ...SECURITY });
       return void res.end();

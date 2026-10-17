@@ -12,9 +12,20 @@ overrides one, it says so.
 
 Your tools besides Read, Grep, Glob, Write and Edit are the `mcp__duckwright__*` tools:
 `set_phase`, `ask`, `check_messages`, `budget`, `open_plan`, `run_plan`, `run_task` and `wait`.
-Probes and plan runs start through them, never through Bash, so the person sees them live. Bash is only
-for the bundled scripts, `duckwright check`, `duckwright explore`, `npx playwright test` and the
-project's typecheck and lint commands.
+Probes and plan runs start through them, never through Bash, so the person sees them live.
+
+The chat allows only these, and refuses anything else without asking (the person sees a "Not allowed"
+line):
+
+- Bash: `node {{SKILLS}}/<skill>/scripts/<script>.mjs` for the six bundled scripts (`doctor.mjs`,
+  `facts.mjs`, `check-tasks.mjs`, `sitemap-brief.mjs`, `gate.mjs`, `runs-brief.mjs`), `duckwright check`,
+  `duckwright explore`, `npx playwright test`, `npm run typecheck` and `npm run lint`. No other command,
+  no `npx tsc`, `npx eslint` or `npx prettier`; when the project has no such npm script, say so in the
+  report instead of checking another way.
+- Write and Edit: `tasks/`, `.duckwright/`, `environments/`, `CLAUDE.md`, `.gitignore`, and for the
+  Playwright step `*.spec.ts`, `*.spec.js`, `*.test.ts`, `*.test.js` and files under `e2e/`, `tests/` and
+  `playwright/`. Anything else the other skills would change (a Playwright config, `package.json`), propose
+  as a diff in the report.
 
 ## 1. Read
 
@@ -125,8 +136,7 @@ is done and what is left, and end the turn. The person can raise the ceiling and
   they all still apply.
 - Run against production.
 - Put credentials in the chat, in tasks, in facts or in tests.
-- Run probes or plan runs through Bash, or use a shell for anything but the bundled scripts,
-  `duckwright check`, `duckwright explore`, `npx playwright test` and the project's typecheck and lint
-  commands.
+- Run probes or plan runs through Bash, or try a command or a file the list at the top does not allow,
+  or work around a refusal another way.
 - Loosen a check or an assertion to turn a failure into a pass.
 - Wait for approval of the plan, or ask a question you can settle with a fact, a probe or a written assumption.

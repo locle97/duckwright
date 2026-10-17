@@ -30,3 +30,11 @@ test("prompt names exactly the Phase values", () => {
   assert.ok(!p.includes("triage`"));
   assert.ok(!/`triage`/.test(p));
 });
+
+test("prompt promises only what the allow-list allows", async () => {
+  const { SKILL_SCRIPTS } = await import("../../src/chat/claude.ts");
+  const p = chatSystemPrompt("/pkg/skills");
+  for (const s of SKILL_SCRIPTS) assert.ok(p.includes(s.split("/").at(-1)!), s);
+  for (const c of ["`npm run typecheck`", "`npm run lint`", "`npx playwright test`", "`.gitignore`", "`e2e/`"]) assert.ok(p.includes(c), c);
+  assert.ok(!/project's typecheck and lint commands/.test(p));
+});

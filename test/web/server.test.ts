@@ -384,7 +384,7 @@ async function runningChat(): Promise<{ id: string; bearer: string }> {
   const id = ctx.chats.create().id;
   assert.deepEqual(ctx.chats.send(id, "hello", []), { ok: true });
   const argv = argvs[argvs.length - 1];
-  const bearer = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]).mcpServers.duckwright.headers.Authorization;
+  const bearer = JSON.parse(fs.readFileSync(argv[argv.indexOf("--mcp-config") + 1], "utf8")).mcpServers.duckwright.headers.Authorization;
   return { id, bearer };
 }
 
@@ -424,6 +424,18 @@ test("mcp rejects other methods, content types, ids and bodies", async () => {
   assert.equal((await request(server.port, "POST", "/mcp/nope", { headers: h, body: rpc("ping") })).status, 401);
   assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: h, body: "{" })).status, 400);
   assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: h, body: "x".repeat(1024 * 1024 + 1) })).status, 413);
+});
+
+test("mcp checks Host and the Authorization header before reading the body", async () => {
+  const { id, bearer } = await runningChat();
+  const big = "x".repeat(1024 * 1024 + 1); // over the body cap: a 413 would mean the body was read
+  const evil = await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ authorization: bearer, host: "evil.example" }), body: rpc("ping") });
+  assert.equal(evil.status, 403);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ host: "evil.example" }), body: big })).status, 403);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders(), body: big })).status, 401);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ authorization: "Basic abc" }), body: big })).status, 401);
+  const local = await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ authorization: bearer, host: `localhost:${server.port}` }), body: rpc("ping") });
+  assert.equal(local.status, 200);
 });
 
 test("upload saves a file and refuses one over 10 MiB", async () => {

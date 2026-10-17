@@ -5,54 +5,72 @@ import { constants } from "node:os";
 import { escapeCommandForCmd, isBatchFile, quoteForCmd, which } from "../which.ts";
 
 export interface ClaudeTurn {
-  prompt: string;
   model: string;
   resume: string | null;
-  cwd: string;          // the Duckwright root
-  skillsDir: string;    // <package>/skills
-  systemPrompt: string;
-  mcpUrl: string;
-  mcpToken: string;
+  skillsDir: string;          // <package>/skills
+  systemPromptFile: string;   // the skill, written once per server
+  mcpConfigFile: string;      // holds the turn's bearer, so it stays out of the process list
+  maxBudgetUsd: number;       // what is left under the chat's ceiling; > 0
 }
 
-/** Edit(...) rules also cover the Write tool; there is no bare Bash. */
+/** The bundled scripts the agent may run, relative to the skills folder. */
+export const SKILL_SCRIPTS = [
+  "duckwright-setup/scripts/doctor.mjs",
+  "duckwright-tasks/scripts/facts.mjs",
+  "duckwright-tasks/scripts/check-tasks.mjs",
+  "duckwright-tasks/scripts/sitemap-brief.mjs",
+  "duckwright-tasks/scripts/gate.mjs",
+  "duckwright-playwright/scripts/runs-brief.mjs",
+];
+
+/** Edit(...) rules also cover the Write tool; there is no bare Bash. A guard rail, not a sandbox. */
 export const ALLOWED_TOOLS = (skillsDir: string): string[] => [
   "Read", "Grep", "Glob",
-  "Edit(tasks/**)", "Edit(.duckwright/**)", "Edit(environments/**)", "Edit(CLAUDE.md)",
-  `Bash(node ${skillsDir}/*:*)`,
+  "Edit(tasks/**)", "Edit(.duckwright/**)", "Edit(environments/**)", "Edit(CLAUDE.md)", "Edit(.gitignore)",
+  ...SKILL_SCRIPTS.map((s) => `Bash(node ${skillsDir}/${s}:*)`),
   "Bash(duckwright check:*)", "Bash(duckwright explore:*)",
-  "Bash(npx playwright test:*)", "Bash(npx tsc:*)",
+  "Bash(npx playwright test:*)",
   "Bash(npm run lint:*)", "Bash(npm run typecheck:*)",
-  "Bash(npx eslint:*)", "Bash(npx prettier:*)",
   // The Playwright phase.
-  "Edit(**/*.spec.ts)", "Edit(**/*.spec.js)",
+  "Edit(**/*.spec.ts)", "Edit(**/*.spec.js)", "Edit(**/*.test.ts)", "Edit(**/*.test.js)",
+  "Edit(e2e/**)", "Edit(tests/**)", "Edit(playwright/**)",
   "mcp__duckwright__*",
 ];
 
+/** The prompt goes on stdin, so a message starting with "-" or holding newlines is never parsed as argv. */
 export function claudeArgv(t: ClaudeTurn): string[] {
-  const mcp = {
-    mcpServers: {
-      duckwright: { type: "http", url: t.mcpUrl, headers: { Authorization: `Bearer ${t.mcpToken}` } },
-    },
-  };
   return [
-    "claude", "-p", t.prompt, "--output-format", "stream-json", "--verbose", "--model", t.model,
+    "claude", "-p", "--output-format", "stream-json", "--verbose", "--model", t.model,
     ...(t.resume !== null ? ["--resume", t.resume] : []),
+    "--max-budget-usd", t.maxBudgetUsd.toFixed(2),
+    // Only these flags decide what runs: no prompts, and no user, project or local settings widening them.
+    "--permission-mode", "dontAsk",
+    "--setting-sources", "",
     "--tools", "Read,Grep,Glob,Write,Edit,Bash",
     // --allowedTools takes several values, so a -- flag must follow it.
     "--allowedTools", ...ALLOWED_TOOLS(t.skillsDir),
     "--add-dir", t.skillsDir,
-    "--append-system-prompt", t.systemPrompt,
-    "--mcp-config", JSON.stringify(mcp),
+    "--append-system-prompt-file", t.systemPromptFile,
+    "--mcp-config", t.mcpConfigFile,
     "--strict-mcp-config",
   ];
+}
+
+/** The --mcp-config file's content for one turn. */
+export function mcpConfig(url: string, token: string): string {
+  return JSON.stringify({
+    mcpServers: { duckwright: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } },
+  });
 }
 
 export type StreamItem =
   | { kind: "init"; sessionId: string }
   | { kind: "text"; text: string }
   | { kind: "tool"; name: string; summary: string }
-  | { kind: "result"; sessionId: string; costUsd: number; isError: boolean; text: string };
+  | { kind: "result"; sessionId: string; costUsd: number; isError: boolean; text: string; denials: Denial[] };
+
+/** A tool call the allow-list refused. */
+export interface Denial { name: string; summary: string }
 
 const SUMMARY_MAX = 120;
 const MCP_PREFIX = "mcp__duckwright__";
@@ -92,12 +110,18 @@ export function parseStreamLine(line: string): StreamItem[] {
     return out;
   }
   if (j.type === "result") {
+    const denials: Denial[] = [];
+    for (const d of Array.isArray(j.permission_denials) ? j.permission_denials : []) {
+      if (!isObj(d) || typeof d.tool_name !== "string") continue;
+      denials.push({ name: d.tool_name, summary: summarize(d.tool_name, isObj(d.tool_input) ? d.tool_input : {}) });
+    }
     return [{
       kind: "result",
       sessionId: typeof j.session_id === "string" ? j.session_id : "",
       costUsd: typeof j.total_cost_usd === "number" ? j.total_cost_usd : 0,
       isError: j.is_error === true,
       text: typeof j.result === "string" ? j.result : "",
+      denials,
     }];
   }
   return [];
@@ -108,18 +132,21 @@ export interface ClaudeProcess {
   kill(): void;
 }
 
-export type ClaudeSpawner = (argv: string[], cwd: string, onLine: (line: string) => void) => ClaudeProcess;
+/** `stdin` (the person's prompt) is written to the process, then its stdin is closed. */
+export type ClaudeSpawner = (argv: string[], cwd: string, onLine: (line: string) => void, stdin?: string) => ClaudeProcess;
 
-/** Real spawner: argv list only, never a shell; stdin ignored. */
-export const spawnClaude: ClaudeSpawner = (argv, cwd, onLine) => {
+/** Real spawner: argv list only, never a shell. */
+export const spawnClaude: ClaudeSpawner = (argv, cwd, onLine, stdin) => {
   // Windows starts only .exe by name; resolve npm's .cmd shims through PATHEXT.
   const exe = process.platform === "win32" ? which(argv[0]) ?? argv[0] : argv[0];
-  const stdio: ["ignore", "pipe", "pipe"] = ["ignore", "pipe", "pipe"];
+  const stdio: ["pipe", "pipe", "pipe"] = ["pipe", "pipe", "pipe"];
   const child = process.platform === "win32" && isBatchFile(exe)
     ? spawn(process.env.ComSpec ?? "cmd.exe",
       ["/d", "/s", "/c", `"${[escapeCommandForCmd(exe), ...argv.slice(1).map(quoteForCmd)].join(" ")}"`],
       { cwd, stdio, windowsVerbatimArguments: true })
     : spawn(exe, argv.slice(1), { cwd, stdio });
+  child.stdin.on("error", () => {}); // a process that exits early closes the pipe; its exit code tells the story
+  child.stdin.end(stdin ?? "");
   let tail = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {

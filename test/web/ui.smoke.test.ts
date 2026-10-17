@@ -187,8 +187,8 @@ test("chat_view_new_chat_send_reply_cost_stop_upload", { skip, timeout: 60_000 }
   // A fake claude: it prints init, one tool line, a text reply and a result costing $0.84, then exits.
   // A prompt that says "hang" never answers, so Stop can be tried.
   const prompts: string[] = [];
-  const spawn: ClaudeSpawner = (argv, _cwd, onLine) => {
-    const prompt = argv[argv.indexOf("-p") + 1]!;
+  const spawn: ClaudeSpawner = (_argv, _cwd, onLine, stdin) => {
+    const prompt = stdin ?? "";
     prompts.push(prompt);
     let resolve!: (r: { code: number; stderr: string }) => void;
     const done = new Promise<{ code: number; stderr: string }>((r) => { resolve = r; });
