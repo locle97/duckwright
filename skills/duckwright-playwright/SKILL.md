@@ -53,7 +53,7 @@ Ask once, in one message, at most five questions, each with your best guess so "
 - a run used tabs, request setup, manual 2FA, or recorded no assertions: what to do about it;
 - grouping: one spec file per plan with one `test` per task, or per-task files.
 
-Do not ask what the repo already answers. Never ask for a password, token or cookie.
+Do not ask what the repo already answers. Never ask for a password, token or cookie. A `[SECRET <id>.password]` marker in the recorded code is an environment account: use `process.env.DW_<ENV>_<ID>_PASSWORD` (see references/history-format.md).
 
 ## 4. Write the tests
 
