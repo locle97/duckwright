@@ -74,10 +74,13 @@ async function liveOrigin(pw: PlaywrightCLI): Promise<string | null> {
   return res.code === 0 ? currentOrigin(res.stdout) : null;
 }
 
-/** Static allowlist check, so a rejected action is reported even when skipped. */
-function rejection(a: Action): string | null {
+/**
+ * Static allowlist check, so a rejected action is reported even when skipped. Placeholder-looking
+ * text outside fill and type is refused only when the run has accounts.
+ */
+function rejection(a: Action, withAccounts: boolean): string | null {
   if (!ALLOWED.has(a.cmd)) return `error: command '${a.cmd}' not allowed (allowed: ${ALLOWED_LIST})`;
-  if (!SUBSTITUTED.has(a.cmd) && a.args.some(hasPlaceholder)) return "error: account placeholders are allowed only in fill or type";
+  if (withAccounts && !SUBSTITUTED.has(a.cmd) && a.args.some(hasPlaceholder)) return "error: account placeholders are allowed only in fill or type";
   // Its args never reach playwright-cli as given, so expected text may look like a flag.
   if (a.cmd === "expect") return checkArgs(a.args);
   if (a.cmd === "expect-request") return checkRequestArgs(a.args);
@@ -185,7 +188,7 @@ export async function execute(
   const ran = new Map<number, string>();
   const origins = new Map<number, string>();
   const handle = async (i: number, a: Action): Promise<void> => {
-    const rejected = rejection(a);
+    const rejected = rejection(a, !!accounts);
     if (rejected !== null) {
       results.push(rejected);
       return;

@@ -749,6 +749,13 @@ test("placeholder_in_click_args_rejected", async () => {
   assert.deepEqual(calls, [["goto", "x"]]);
 });
 
+test("placeholder_text_in_other_commands_untouched_without_accounts", async () => {
+  const { pw, calls } = pagePw(APP);
+  const { results } = await run9(pw, [A("hover", "{{admin-c.password}}"), A("press", "{{x.username}}")], undefined, null);
+  assert.deepEqual(results, ["ok", "ok"]);
+  assert.deepEqual(calls, [["hover", "{{admin-c.password}}"], ["press", "{{x.username}}"]]);
+});
+
 test("failed_substituted_fill_never_echoes_the_password", async () => {
   for (const stderr of ["cannot fill 'hunter2' into e3", "x".repeat(MAX_ERROR_CHARS - 4) + "hunter2 tail"]) {
     const { pw } = pagePw(APP, 1, stderr, "");

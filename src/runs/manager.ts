@@ -332,8 +332,13 @@ export class RunManager implements ManagerLike {
     this.#updated(task);
   }
 
-  #cwd(): string {
+  /** The project folder: task files, environments and the accounts database are found from it. */
+  get cwd(): string {
     return this.#o.cwd ?? process.cwd();
+  }
+
+  #cwd(): string {
+    return this.cwd;
   }
 
   globals(): Globals {

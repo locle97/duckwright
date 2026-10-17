@@ -90,6 +90,11 @@ export interface RunDeps {
   runner?: Runner;
   /** The inner Jev transport (default `fetchTransport`); a test seam. */
   jevTransport?: JevTransport;
+  /**
+   * The project folder whose `.duckwright/local/duckwright.db` holds the accounts. Default: the
+   * process's current folder. The web and the run manager pass the same folder.
+   */
+  cwd?: string;
 }
 
 export interface RunHandle {
@@ -223,7 +228,7 @@ async function execute(
     });
     scrubber = twofa.scrubber;
     // Explore runs get no accounts.
-    accounts = !spec.explore && env ? loadRunAccounts(process.cwd(), env.name, args.accounts) : null;
+    accounts = !spec.explore && env ? loadRunAccounts(deps.cwd ?? process.cwd(), env.name, args.accounts) : null;
     accounts?.seed(twofa.scrubber);
     const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
     let log: DebugLog | null = null;
@@ -288,6 +293,8 @@ async function execute(
     } else {
       message = errorText(e);
     }
+    // An error may echo a typed value (a failed fill); scrub it once before it is kept or shown.
+    if (scrubber !== null) message = scrubber.scrub(message);
     const ev = agent?.evidence ?? { video: null, warnings: [] };
     let written: string | null = historyPath;
     try {

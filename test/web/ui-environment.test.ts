@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { accountBody, envBody, envDraft, envOptions, envValue, shortPasswordWarning } from "../../web/src/environment.ts";
+import { accountBody, duplicateAccountWarning, envBody, envDraft, envOptions, envValue, shortPasswordWarning } from "../../web/src/environment.ts";
 
 test("envValue shows none for no environment", () => {
   assert.equal(envValue(null), "none");
@@ -49,4 +49,11 @@ test("short_password_warns_under_8", () => {
   assert.equal(shortPasswordWarning(""), null);
   assert.match(shortPasswordWarning("abc") ?? "", /8/);
   assert.equal(shortPasswordWarning("12345678"), null);
+});
+
+test("duplicateAccountWarning flags an id already in the list only when adding", () => {
+  assert.equal(duplicateAccountWarning("admin", ["admin", "user-e"], false), "An account admin already exists; edit it instead.");
+  assert.equal(duplicateAccountWarning("admin", ["admin"], true), null);
+  assert.equal(duplicateAccountWarning("other", ["admin"], false), null);
+  assert.equal(duplicateAccountWarning("", [], false), null);
 });

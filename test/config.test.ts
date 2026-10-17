@@ -34,8 +34,8 @@ test("config reads run settings and TUI options; paths resolve from the config f
   });
 });
 
-test("config rejects unknown keys, setup and allow-file-access with the line", () => {
-  for (const key of ["colour: red", "setup: s.md", "allow-file-access: true", "theme: pink"]) {
+test("config rejects unknown keys, setup, accounts and allow-file-access with the line", () => {
+  for (const key of ["colour: red", "setup: s.md", "accounts: admin", "allow-file-access: true", "theme: pink"]) {
     const dir = conf(tmpDir(), `model: opus\n${key}\n`);
     assert.throws(() => loadConfig(dir), (e) => e instanceof TaskFileError && /duckwright\.conf:2:/.test(e.message), key);
   }

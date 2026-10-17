@@ -221,19 +221,20 @@ export class Agent {
         // Ctrl-C reaches claude too, and its exit can arrive before the abort does.
         if (this.signal?.aborted) throw new AbortedError();
         failures += 1;
-        this.events.emit({ type: "brain:error", step, message: e.message, cost: e.cost, failures });
+        const message = this.scrub(e.message);
+        this.events.emit({ type: "brain:error", step, message, cost: e.cost, failures });
         if (this.network) await clearRequests(this.pw);
         await this.record(history, {
           step,
           decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [], source: "claude", jev: e.jev },
-          results: [`brain error: ${e.message}`],
+          results: [`brain error: ${message}`],
           codes: [],
           costUsd: e.cost,
         }, e.cost, startedAt);
         if (failures >= this.maxFailures) {
           return {
             success: false,
-            answer: `stopped after ${failures} consecutive brain failures: ${e.message}`,
+            answer: `stopped after ${failures} consecutive brain failures: ${message}`,
             steps,
             costUsd: this.costUsd,
             history,

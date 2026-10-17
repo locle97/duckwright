@@ -142,6 +142,11 @@ test("environments_page_create_and_add_account", { skip, timeout: 60_000 }, asyn
     await page.waitForSelector("text=shorter than 8");
     await page.getByRole("button", { name: "Add account" }).click();
     await page.waitForSelector("text=password set");
+    // Adding the same id again would overwrite it: refused inline.
+    await page.locator("#acc-id").fill("admin");
+    await page.waitForSelector("text=An account admin already exists");
+    assert.equal(await page.getByRole("button", { name: "Add account" }).isDisabled(), true);
+    await page.locator("#acc-id").fill("");
     // Reopening the account shows empty secret fields.
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     assert.equal(await page.locator("#acc-password").inputValue(), "");

@@ -25,7 +25,11 @@ export interface StartWebOptions {
   notices?: string[];
   theme?: ThemeName;
   uiDir?: string;
-  /** The folder `@` completion searches. Default: the process's current folder. */
+  /**
+   * The project folder: `@` completion searches it and the environments page reads and writes its
+   * `environments/` and accounts database. Pass the run manager's folder, so runs read the same
+   * accounts. Default: the process's current folder.
+   */
   cwd?: string;
   /** Where run folders live. Default: ./runs. */
   runsDir?: string;
@@ -57,6 +61,7 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
   if (!fs.existsSync(index)) throw new Error(`the web UI is not built: ${index} is missing (run npm run build)`);
 
   const token = newToken();
+  const cwd = o.cwd ?? process.cwd();
   const log = new RunLog(o.manager);
   let server: RunningServer | null = null;
   let resolveDone!: () => void;
@@ -78,8 +83,8 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
 
   const ctx: ApiContext = {
     manager: o.manager, maxParallel: o.maxParallel, notices: o.notices ?? [], theme: o.theme ?? "auto",
-    quit, runs: () => log.entries(), candidates: () => walk(nodeReadDir(o.cwd ?? process.cwd())),
-    environments: createEnvironments(o.cwd ?? process.cwd()),
+    quit, runs: () => log.entries(), candidates: () => walk(nodeReadDir(cwd)),
+    environments: createEnvironments(cwd),
   };
   try {
     server = await startServer({ ctx, token, port: o.port, uiDir, runsDir: o.runsDir ?? path.resolve("runs") });

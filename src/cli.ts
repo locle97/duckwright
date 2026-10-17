@@ -176,10 +176,10 @@ function preflight(deps: CliDeps, skill: string, state: string | null, env: stri
 const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : null);
 
 /** `explore` runs get no accounts, so their accounts are not checked. */
-function preflightArgs(deps: CliDeps, args: RunArgs, { explore = false } = {}): string | null {
+function preflightArgs(deps: CliDeps, args: RunArgs, { explore = false, cwd = process.cwd() } = {}): string | null {
   const err = preflight(deps, args.skill, statePath(args), args.env);
   if (err) return err;
-  const accounts = explore ? null : accountsProblem(args, process.cwd());
+  const accounts = explore ? null : accountsProblem(args, cwd);
   if (accounts) return accounts;
   if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
   return null;
@@ -308,8 +308,9 @@ async function interactiveMain(
       prompts: deps.prompts, signal: deps.signal, createAgent: deps.createAgent, env: deps.env,
       humanFor: () => human,
       onWarning: (m) => manager.notify("error", m),
+      cwd: manager.cwd,
     }),
-    preflight: (a) => preflightArgs(deps, a),
+    preflight: (a) => preflightArgs(deps, a, { cwd: manager.cwd }),
     planner: plannerOf(deps),
   });
   // Load every file before the frontend opens, so a bad one is reported on the plain terminal.
@@ -364,7 +365,7 @@ function webMain(deps: CliDeps, argv: string[], args: RunArgs, config: GlobalCon
     try {
       handle = await web.startWeb({
         manager, port: args.port ?? undefined, maxParallel: args.maxParallel ?? config.maxParallel ?? 3, notices,
-        theme: args.theme ?? config.theme ?? "auto",
+        theme: args.theme ?? config.theme ?? "auto", cwd: manager.cwd,
       });
     } catch (e) {
       throw new StartError(e instanceof Error ? e.message : String(e));

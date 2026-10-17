@@ -1062,3 +1062,14 @@ for (const [id, username, password] of [["admin", "admin", "admin"], ["admin-c",
     assert.ok(r.history[0].codes.some((c) => c?.includes(`fill('[SECRET ${id}.password]')`)));
   });
 }
+
+test("loop_brain_error_text_is_scrubbed", async () => {
+  const events = new RunEvents();
+  const seen: RunEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  const r = await agent(new LoginPW(), new FakeBrain([new BrainError(`bad output ${PASSWORD}`)]), { events, accounts: loopAccounts(), maxFailures: 1 }).run();
+  assert.equal(r.answer, `stopped after 1 consecutive brain failures: bad output ${MARKER}`);
+  assert.deepEqual(r.history[0].results, [`brain error: bad output ${MARKER}`]);
+  assert.ok(!JSON.stringify([r, seen]).includes(PASSWORD));
+  assert.ok(JSON.stringify(seen.filter((e) => e.type === "brain:error")).includes(MARKER));
+});

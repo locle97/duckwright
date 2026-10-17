@@ -38,3 +38,7 @@ export function accountBody(d: AccountDraft): Record<string, unknown> {
 
 export const shortPasswordWarning = (pw: string): string | null =>
   pw !== "" && pw.length < 8 ? "This password is shorter than 8 characters." : null;
+
+/** Why a new account's id cannot be added (it would overwrite one in the list), or null. */
+export const duplicateAccountWarning = (id: string, existing: readonly string[], editing: boolean): string | null =>
+  !editing && id !== "" && existing.includes(id) ? `An account ${id} already exists; edit it instead.` : null;

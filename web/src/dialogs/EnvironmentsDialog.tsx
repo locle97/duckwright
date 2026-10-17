@@ -114,7 +114,7 @@ export function EnvironmentsDialog(p: { dispatch: Dispatch }) {
             </tbody>
           </table>
           <AccountForm key={`${name}:${editing?.id ?? "new"}`} env={name} hasBaseUrl={(current?.baseUrl ?? null) !== null} editing={editing}
-            dispatch={p.dispatch} onDone={() => { setEditing(null); void reload(); }} />
+            existingIds={(current?.accounts ?? []).map((a) => a.id)} dispatch={p.dispatch} onDone={() => { setEditing(null); void reload(); }} />
         </section>
       ) : null}
     </Modal>

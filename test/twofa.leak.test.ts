@@ -10,7 +10,7 @@ import { Agent } from "../src/loop.ts";
 import type { AgentOptions } from "../src/loop.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { stepLine } from "../src/prompt.ts";
-import { PlaywrightCLI } from "../src/pw.ts";
+import { PlaywrightCLI, PlaywrightError } from "../src/pw.ts";
 import { PROMPTS, startRun } from "../src/runs/run.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
@@ -278,4 +278,35 @@ test("explore_run_gets_no_accounts", async () => {
     createAgent: (opts) => { seen.push(opts); return { costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }; },
   }).done;
   assert.equal(seen[0].accounts, undefined);
+});
+
+test("run_failure_text_is_scrubbed", async () => {
+  for (const err of [new PlaywrightError(`fill failed: "${PASSWORD}"`), new Error(`boom ${PASSWORD}`)]) {
+    const tmp = project();
+    seedAccount(tmp);
+    const handle = startRun({ task: "t", taskFile: null, args: runArgs({ env: "dev", debug: false }) }, {
+      prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+      createAgent: () => ({ costUsd: 0, run: async () => { throw err; } }),
+    });
+    const outcome = await handle.done;
+    assert.equal(outcome.status, "fail");
+    assert.ok(outcome.error!.includes(MARKER), outcome.error!);
+    const blob = JSON.stringify(outcome) + fs.readFileSync(path.join(handle.workdir, "history.json"), "utf8") + fs.readFileSync(path.join(handle.workdir, "events.jsonl"), "utf8");
+    assert.ok(!blob.includes(PASSWORD));
+  }
+});
+
+test("run_reads_accounts_from_the_given_folder", async () => {
+  const tmp = tmpDir();
+  fs.mkdirSync(path.join(tmp, "environments"));
+  const envPath = path.join(tmp, "environments", "dev.md");
+  fs.writeFileSync(envPath, "Base URL: https://app.test");
+  seedAccount(tmp);
+  const seen: AgentOptions[] = [];
+  // The process stays in another folder: the run's base is passed in, as the web and manager use it.
+  await startRun({ task: "t", taskFile: null, args: runArgs({ env: envPath, debug: false }) }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {}, cwd: tmp,
+    createAgent: (opts) => { seen.push(opts); return { costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }; },
+  }).done;
+  assert.equal(seen[0].accounts?.has("a"), true);
 });
