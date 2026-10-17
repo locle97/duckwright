@@ -165,8 +165,10 @@ re-reads the plan folder and the run folders, and carries on from the first task
 ### Persistence
 
 Each chat lives in `<root>/.duckwright/chats/<id>/`: `chat.json` (title, model, Claude session id,
-created/updated, plan folder it produced), `transcript.jsonl` (the rendered messages, for reload), and
-`uploads/`. Reopening the web UI lists past chats and can continue one (via `--resume`). Transcripts must
+created/updated, plan folder it produced) and `transcript.jsonl` (the rendered messages, for reload).
+Uploaded files go to `<root>/.duckwright/uploads/<id>/`, outside the chats folder, because the agent is
+denied reading `.duckwright/chats/**` (other transcripts, the shared system prompt, the turn's MCP
+bearer) and `.duckwright/local/**` (the accounts database). Reopening the web UI lists past chats and can continue one (via `--resume`). Transcripts must
 not contain secrets: account passwords are already placeholders; anything matching the existing
 redaction (`src/redact.ts`, `src/scrub.ts`) is masked before it is written.
 
