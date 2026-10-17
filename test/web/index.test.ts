@@ -34,7 +34,7 @@ const cookieOf = (url: URL) => ({ cookie: `${cookieName(Number(url.port))}=${url
 test("startWeb serves on loopback, prints a tokened URL and opens the browser", async () => {
   const m = new FakeManager([snapshot(1, "one")]);
   const opened: string[] = [];
-  const web = await startWeb({ manager: m, maxParallel: 2, uiDir: uiDir(), open: (u) => void opened.push(u) });
+  const web = await startWeb({ manager: m, maxParallel: 2, uiDir: uiDir(), cwd: tmpDir(), open: (u) => void opened.push(u) });
   try {
     const url = new URL(web.url);
     assert.equal(url.hostname, "127.0.0.1");
@@ -51,7 +51,7 @@ test("startWeb serves on loopback, prints a tokened URL and opens the browser", 
 test("startWeb refuses when the UI is not built", async () => {
   const empty = path.join(tmpDir(), "none");
   await assert.rejects(
-    startWeb({ manager: new FakeManager(), maxParallel: 1, uiDir: empty, open: () => {} }),
+    startWeb({ manager: new FakeManager(), maxParallel: 1, uiDir: empty, cwd: tmpDir(), open: () => {} }),
     /the web UI is not built: .*index\.html is missing \(run npm run build\)/,
   );
 });
@@ -62,7 +62,7 @@ test("startWeb says when the port is taken", async () => {
   const port = (busy.address() as net.AddressInfo).port;
   try {
     await assert.rejects(
-      startWeb({ manager: new FakeManager(), maxParallel: 1, port, uiDir: uiDir(), open: () => {} }),
+      startWeb({ manager: new FakeManager(), maxParallel: 1, port, uiDir: uiDir(), cwd: tmpDir(), open: () => {} }),
       new RegExp(`port ${port} is already in use`),
     );
   } finally {
@@ -72,7 +72,7 @@ test("startWeb says when the port is taken", async () => {
 
 test("the snapshot carries a running run's events", async () => {
   const m = new FakeManager([snapshot(1, "one")]);
-  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), open: () => {} });
+  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), cwd: tmpDir(), open: () => {} });
   try {
     m.run(1, "r1", [ev.start(), ev.step(1)]);
     const url = new URL(web.url);
@@ -96,7 +96,7 @@ test("the snapshot carries a running run's events", async () => {
 
 test("POST /api/quit stops the runs, closes the server and resolves done", { timeout: 5000 }, async () => {
   const m = new FakeManager();
-  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), open: () => {} });
+  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), cwd: tmpDir(), open: () => {} });
   const url = new URL(web.url);
   assert.equal(await request(url, "POST", "/api/quit", cookieOf(url)), 200);
   await web.done;
@@ -106,7 +106,7 @@ test("POST /api/quit stops the runs, closes the server and resolves done", { tim
 
 test("quit() is idempotent", { timeout: 5000 }, async () => {
   const m = new FakeManager();
-  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), open: () => {} });
+  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), cwd: tmpDir(), open: () => {} });
   web.quit();
   web.quit();
   await web.done;
@@ -117,7 +117,7 @@ test("quit() stops the runs even when stopping the chats fails", { timeout: 5000
   const m = new FakeManager();
   const { chats } = fakeChats(m);
   chats.stopAll = async () => { throw new Error("chat stop failed"); };
-  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), open: () => {}, chats });
+  const web = await startWeb({ manager: m, maxParallel: 1, uiDir: uiDir(), cwd: tmpDir(), open: () => {}, chats });
   web.quit();
   await web.done;
   assert.deepEqual(m.log.filter((l) => l === "stopAll"), ["stopAll"]);

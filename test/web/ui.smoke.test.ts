@@ -40,7 +40,7 @@ const manager = new FakeManager([snapshot(1, "Open the shop and add a hat", { cr
 
 before(async () => {
   if (skip) return;
-  web = await startWeb({ manager, maxParallel: 3, open: () => {} });
+  web = await startWeb({ manager, maxParallel: 3, open: () => {}, cwd: tmpDir() });
   const executablePath = chromiumPath();
   browser = await chromium.launch(executablePath ? { executablePath } : { channel: "chrome" });
 });
