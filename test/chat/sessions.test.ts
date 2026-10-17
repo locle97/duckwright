@@ -281,3 +281,13 @@ test("a stale wait from a stopped turn does not drain the next turn's queue", as
   assert.deepEqual(JSON.parse((fresh.body as any).result.content[0].text).pending_messages, ["C"]);
   await sessions.stopAll();
 });
+
+test("upload saves into the chat folder and refuses unknown chats", () => {
+  const { sessions, root } = setup();
+  const chat = sessions.create();
+  const r = sessions.upload(chat.id, "../note.txt", Buffer.from("hi"));
+  assert.ok(r.ok);
+  assert.equal(fs.readFileSync(path.join(root, (r as { path: string }).path), "utf8"), "hi");
+  assert.deepEqual(sessions.upload("nope", "a.txt", Buffer.from("x")), { ok: false, error: "no such chat" });
+  assert.deepEqual(sessions.upload("../x", "a.txt", Buffer.from("x")), { ok: false, error: "no such chat" });
+});

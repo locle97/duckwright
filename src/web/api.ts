@@ -2,6 +2,8 @@
 // No HTTP in here, so it runs against a fake manager.
 import type { AccountInput } from "../accounts/store.ts";
 import { AccountError } from "../accounts/store.ts";
+import type { ChatSessions } from "../chat/sessions.ts";
+import type { ChatMeta, TurnState } from "../chat/types.ts";
 import { ENV_NONE, EnvError, isEnvName } from "../environment.ts";
 import type { RunEvent } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
@@ -29,7 +31,13 @@ export interface ApiContext {
   runs(): LoggedRun[];
   /** Environment files, base URLs and accounts. */
   environments: EnvironmentsLike;
+  /** The test chats: the browser drives them here and the claude process calls their MCP endpoint. */
+  chats: ChatSessions;
 }
+
+/** The upload route takes a raw body, not JSON, so the server reads it with its own cap. */
+export const UPLOAD_RE = /^\/api\/chats\/([a-z0-9-]{1,80})\/uploads$/;
+export const MAX_UPLOAD = 10 * 1024 * 1024;
 
 export interface ApiRequest { method: string; path: string; query: URLSearchParams; body: unknown }
 export interface ApiResponse { status: number; body: unknown }
@@ -44,6 +52,7 @@ export interface WebSnapshot {
   notices: string[];
   theme: ThemeName;
   runs: LoggedRun[];
+  chats: Array<{ chat: ChatMeta; turn: TurnState }>;
 }
 
 export function snapshotOf(ctx: ApiContext): WebSnapshot {
@@ -51,6 +60,7 @@ export function snapshotOf(ctx: ApiContext): WebSnapshot {
   return {
     tasks: m.list(), plans: m.plans(), globals: m.globals(), activeCount: m.activeCount(),
     maxParallel: ctx.maxParallel, notices: ctx.notices, theme: ctx.theme, runs: ctx.runs(),
+    chats: ctx.chats.list(),
   };
 }
 
@@ -116,6 +126,8 @@ const planExists = (ctx: ApiContext, m: RegExpExecArray): number | null => {
   return ctx.manager.plans().some((p) => p.id === id) ? id : null;
 };
 const fromResult = (r: { ok: true } | { ok: false; error: string }): ApiResponse => (r.ok ? ok() : bad(409, r.error));
+
+const CHAT_RE = /^\/api\/chats\/([a-z0-9-]{1,80})$/;
 
 const ROUTES: Route[] = [
   { method: "GET", re: /^\/api\/state$/, run: (ctx) => ({ status: 200, body: snapshotOf(ctx) }) },
@@ -328,6 +340,78 @@ const ROUTES: Route[] = [
   {
     method: "DELETE", re: /^\/api\/environments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)\/accounts\/([a-z0-9-]+)$/,
     run: (ctx, m) => (ctx.environments.removeAccount(m[1], m[2]) ? ok() : bad(404, "no such account")),
+  },
+  {
+    method: "GET", re: /^\/api\/chats$/,
+    run: (ctx) => ok({ items: ctx.chats.list() }),
+  },
+  {
+    method: "POST", re: /^\/api\/chats$/,
+    run: (ctx, _m, req) => {
+      const b = req.body === undefined ? {} : req.body;
+      if (!isObject(b) || (b.model !== undefined && typeof b.model !== "string")
+        || (b.ceilingUsd !== undefined && typeof b.ceilingUsd !== "number")) {
+        return bad(400, "send { model?: string, ceilingUsd?: number }");
+      }
+      const o: { model?: string; ceilingUsd?: number } = {};
+      if (b.model !== undefined) o.model = b.model as string;
+      if (b.ceilingUsd !== undefined) o.ceilingUsd = b.ceilingUsd as number;
+      return ok({ chat: ctx.chats.create(o) });
+    },
+  },
+  {
+    method: "GET", re: CHAT_RE,
+    run: (ctx, m) => {
+      const c = ctx.chats.open(m[1]);
+      return c === null ? bad(404, "no such chat") : ok({ chat: c.chat, turn: c.turn, messages: c.messages });
+    },
+  },
+  {
+    method: "POST", re: /^\/api\/chats\/([a-z0-9-]{1,80})\/messages$/,
+    run: (ctx, m, req) => {
+      const b = isObject(req.body) ? req.body : {};
+      if (typeof b.text !== "string" || (b.attachments !== undefined
+        && (!Array.isArray(b.attachments) || !b.attachments.every((x) => typeof x === "string")))) {
+        return bad(400, "send { text: string, attachments?: string[] }");
+      }
+      const attachments = (b.attachments as string[] | undefined) ?? [];
+      if (b.text.trim() === "" && attachments.length === 0) return bad(400, "the message is empty");
+      if (ctx.chats.open(m[1]) === null) return bad(404, "no such chat");
+      return fromResult(ctx.chats.send(m[1], b.text, attachments));
+    },
+  },
+  {
+    method: "POST", re: /^\/api\/chats\/([a-z0-9-]{1,80})\/stop$/,
+    run: async (ctx, m) => {
+      if (ctx.chats.open(m[1]) === null) return bad(404, "no such chat");
+      await ctx.chats.stop(m[1]);
+      return ok();
+    },
+  },
+  {
+    method: "PUT", re: CHAT_RE,
+    run: (ctx, m, req) => {
+      const b = isObject(req.body) ? req.body : null;
+      if (b === null) return bad(400, "send { model?, ceilingUsd?, title? }");
+      if (ctx.chats.open(m[1]) === null) return bad(404, "no such chat");
+      const o: { model?: string; ceilingUsd?: number; title?: string } = {};
+      if (b.model !== undefined) o.model = b.model as string;
+      if (b.ceilingUsd !== undefined) o.ceilingUsd = b.ceilingUsd as number;
+      if (b.title !== undefined) o.title = b.title as string;
+      const r = ctx.chats.update(m[1], o);
+      return r.ok ? ok() : bad(400, r.error);
+    },
+  },
+  {
+    method: "POST", re: UPLOAD_RE,
+    run: (ctx, m, req) => {
+      const name = req.query.get("name") ?? "";
+      if (name.trim() === "") return bad(400, "give ?name=<file>");
+      if (!Buffer.isBuffer(req.body)) return bad(400, "send the file as the request body");
+      if (ctx.chats.open(m[1]) === null) return bad(404, "no such chat");
+      const r = ctx.chats.upload(m[1], name, req.body);
+      return r.ok ? ok({ path: r.path }) : bad(400, r.error);
+    },
   },
   {
     method: "POST", re: /^\/api\/quit$/,

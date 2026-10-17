@@ -102,3 +102,8 @@ test("unknown method is -32601 and notification returns null", async () => {
   assert.equal(r.error.code, -32601);
   assert.equal(await handleMcp(host, { jsonrpc: "2.0", method: "notifications/initialized" }), null);
 });
+
+test("ping answers with an empty result", async () => {
+  const { host } = setup();
+  assert.deepEqual(await handleMcp(host, { jsonrpc: "2.0", id: 7, method: "ping" }), { jsonrpc: "2.0", id: 7, result: {} });
+});

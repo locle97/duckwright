@@ -154,6 +154,12 @@ export class ChatSessions {
     return { status: body === null ? 202 : 200, body };
   }
 
+  /** Saves a file the person attached; the path is relative to the project root, ready to hand to `send`. */
+  upload(id: ChatId, name: string, data: Buffer): { ok: true; path: string } | { ok: false; error: string } {
+    if (!isChatId(id) || this.#o.store.load(id) === null) return { ok: false, error: "no such chat" };
+    return { ok: true, path: this.#o.store.saveUpload(id, name, data) };
+  }
+
   subscribe(fn: (e: ChatEvent) => void): () => void {
     this.#listeners.add(fn);
     return () => { this.#listeners.delete(fn); };

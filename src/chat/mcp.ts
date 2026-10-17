@@ -171,6 +171,7 @@ export async function handleMcp(host: McpHost, msg: JsonRpc, waitCapSec = 600): 
       capabilities: { tools: {} }, serverInfo: { name: "duckwright", version: version() },
     });
   }
+  if (msg.method === "ping") return reply({});
   if (msg.method === "tools/list") return reply({ tools: MCP_TOOLS });
   if (msg.method === "tools/call") {
     const name = typeof params.name === "string" ? params.name : "";
