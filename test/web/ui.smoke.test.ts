@@ -7,10 +7,13 @@ import { after, before, test } from "node:test";
 import { chromium } from "playwright-core";
 import type { Browser } from "playwright-core";
 
+import type { ClaudeSpawner } from "../../src/chat/claude.ts";
+import { ChatSessions } from "../../src/chat/sessions.ts";
+import { ChatStore } from "../../src/chat/store.ts";
 import { listEnvironments } from "../../src/environment.ts";
 import { startWeb } from "../../src/web/index.ts";
 import type { WebHandle } from "../../src/web/index.ts";
-import { ROOT } from "../helpers.ts";
+import { ROOT, tmpDir } from "../helpers.ts";
 import { FakeManager, decision, ev, snapshot } from "../tui/fake-manager.ts";
 
 const enabled = process.env.DUCKWRIGHT_UI_SMOKE === "1";
@@ -175,5 +178,84 @@ test("environments_page_create_and_add_account", { skip, timeout: 60_000 }, asyn
     own.quit();
     await own.done;
     fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("chat_view_new_chat_send_reply_cost_stop_upload", { skip, timeout: 60_000 }, async () => {
+  const root = tmpDir();
+  const fake = new FakeManager([snapshot(1, "Open the shop", { createdAt: 1 })]);
+  // A fake claude: it prints init, one tool line, a text reply and a result costing $0.84, then exits.
+  // A prompt that says "hang" never answers, so Stop can be tried.
+  const prompts: string[] = [];
+  const spawn: ClaudeSpawner = (argv, _cwd, onLine) => {
+    const prompt = argv[argv.indexOf("-p") + 1]!;
+    prompts.push(prompt);
+    let resolve!: (r: { code: number; stderr: string }) => void;
+    const done = new Promise<{ code: number; stderr: string }>((r) => { resolve = r; });
+    if (!prompt.includes("hang")) {
+      setTimeout(() => {
+        onLine(JSON.stringify({ type: "system", subtype: "init", session_id: "s1" }));
+        onLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "CLAUDE.md" } }] } }));
+        onLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Hello from the fake agent" }] } }));
+        onLine(JSON.stringify({ type: "result", session_id: "s1", total_cost_usd: 0.84, is_error: false, result: "" }));
+        resolve({ code: 0, stderr: "" });
+      }, 50);
+    }
+    return { done, kill: () => resolve({ code: -15, stderr: "" }) };
+  };
+  const chats = new ChatSessions({
+    root, manager: fake, store: new ChatStore(root), spawn, skillsDir: "/skills", systemPrompt: "sys",
+    mcpUrl: (id) => `http://127.0.0.1:1/mcp/${id}`,
+  });
+  const own = await startWeb({ manager: fake, maxParallel: 3, open: () => {}, cwd: root, chats });
+  const page = await browser.newPage();
+  try {
+    await page.goto(own.url);
+    await page.getByRole("button", { name: "Add task" }).first().waitFor();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("button", { name: "+ New chat" }).click();
+    const box = page.getByRole("textbox", { name: "Message" });
+    await box.waitFor();
+    // Typing a task shortcut letter in the chat input does not open dialogs or act on the workspace.
+    await box.pressSequentially("hello? x a i");
+    assert.equal(await page.getByRole("dialog").count(), 0);
+    assert.equal(await box.inputValue(), "hello? x a i");
+    // Shift+Enter adds a line; Enter sends.
+    await box.press("Shift+Enter");
+    await box.pressSequentially("more");
+    assert.equal(await box.inputValue(), "hello? x a i\nmore");
+    await box.press("Enter");
+    await page.waitForSelector("text=Hello from the fake agent");
+    assert.equal(await box.inputValue(), "");
+    assert.ok(prompts[0]!.includes("hello? x a i"));
+    await page.getByLabel("Spend").filter({ hasText: "$0.84 / $5.00" }).waitFor();
+    // The tool line is a collapsible activity group; the phase strip lists every phase.
+    await page.locator("details.chat-activity summary", { hasText: "Read: CLAUDE.md" }).waitFor();
+    assert.equal(await page.locator(".phases .phase").count(), 8);
+    assert.ok(await page.getByRole("button", { name: "Stop" }).count() === 0);
+
+    // Model and ceiling are editable and saved.
+    const ceiling = page.getByLabel("Spend ceiling");
+    await ceiling.fill("7");
+    await ceiling.blur();
+    await page.getByLabel("Spend").filter({ hasText: "/ $7.00" }).waitFor();
+
+    // An upload becomes an attachment chip and goes with the next message.
+    await page.locator("input[data-chat-upload]").setInputFiles({ name: "note.txt", mimeType: "text/plain", buffer: Buffer.from("hi") });
+    await page.waitForSelector(".tag:has-text('note.txt')");
+    await box.fill("hang please");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByRole("button", { name: "Stop" }).waitFor();
+    assert.ok(prompts[1]!.includes("note.txt"));
+    await page.getByRole("button", { name: "Stop" }).click();
+    await page.getByRole("button", { name: "Stop" }).waitFor({ state: "detached" });
+
+    // Back to the workspace.
+    await page.getByRole("button", { name: "Workspace" }).click();
+    await page.getByRole("button", { name: "Add task" }).first().waitFor();
+  } finally {
+    await page.close();
+    own.quit();
+    await own.done;
   }
 });

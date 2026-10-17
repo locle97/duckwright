@@ -146,3 +146,9 @@ test("i adds a task like a, and t switches the sidebar tab", () => {
 test("key_v_opens_environments", () => {
   assert.deepEqual(commandFor("v", state()), { type: "action", action: { type: "dialog", value: { kind: "environments" } } });
 });
+
+test("shouldIgnore keeps every task shortcut inactive in the chat view, typing or not", () => {
+  const chat = { ...state(), view: "chat" as const };
+  assert.equal(shouldIgnore(press({ key: "x" }), chat), true);
+  assert.equal(shouldIgnore(press({ key: "x", inEditable: true }), chat), true);
+});
