@@ -1,4 +1,4 @@
-import { PLACEHOLDER, substitute } from "./accounts/placeholders.ts";
+import { PLACEHOLDER, findRefs, substitute } from "./accounts/placeholders.ts";
 import type { Ref } from "./accounts/placeholders.ts";
 import type { RunAccounts } from "./accounts/runAccounts.ts";
 import { ALLOWED_COMMANDS } from "./brain.ts";
@@ -6,6 +6,7 @@ import type { Action } from "./brain.ts";
 import { checkArgs, runExpect } from "./expect.ts";
 import { checkRequestArgs, runExpectRequest } from "./expectRequest.ts";
 import type { RequestContext } from "./expectRequest.ts";
+import { currentOrigin } from "./network.ts";
 import { checkRequestCallArgs, runRequest } from "./request.ts";
 import type { RequestCallContext } from "./request.ts";
 import { PlaywrightCLI } from "./pw.ts";
@@ -60,6 +61,18 @@ export interface ActionAccounts {
 }
 
 const hasPlaceholder = (arg: string): boolean => new RegExp(PLACEHOLDER.source).test(arg);
+const hasPassword = (args: string[]): boolean => args.some((x) => findRefs(x).some((r) => r.field === "password"));
+/** fill/type with --submit submit a form, so they may change the page like a click. */
+const submits = (a: Action): boolean => SUBSTITUTED.has(a.cmd) && a.args.some((x) => x.split("=", 1)[0] === "--submit");
+
+/**
+ * The current tab's origin, read now rather than at the start of the step (an earlier action may
+ * have navigated). Null when it cannot be read, so a secret is refused.
+ */
+async function liveOrigin(pw: PlaywrightCLI): Promise<string | null> {
+  const res = await pw.run("tab-list", []);
+  return res.code === 0 ? currentOrigin(res.stdout) : null;
+}
 
 /** Static allowlist check, so a rejected action is reported even when skipped. */
 function rejection(a: Action): string | null {
@@ -101,11 +114,13 @@ export interface ExecuteHooks {
 }
 
 /** The account's TOTP secret, or the error result when it cannot be used here. Never asks a human. */
-function accountTotp(id: string, accounts: ActionAccounts | null): { secret: string } | { error: string } {
+async function accountTotp(
+  pw: PlaywrightCLI, id: string, accounts: ActionAccounts | null,
+): Promise<{ secret: string } | { error: string }> {
   if (accounts === null || !accounts.run.has(id)) return { error: `error: no account '${id}' in this run` };
   const secret = accounts.run.totpSecret(id);
   if (secret === null) return { error: `error: account '${id}' has no TOTP secret` };
-  const { origin } = accounts;
+  const origin = await liveOrigin(pw);
   if (origin === null) return { error: "error: refusing to enter a TOTP code: no page origin" };
   if (!accounts.run.allowedOrigins.includes(origin)) {
     return { error: `error: refusing to enter a TOTP code on ${origin}: not an allowed origin` };
@@ -129,7 +144,7 @@ async function runTwofa(
     }
     let code: string;
     if (kind === "totp" && args.length === 3) {
-      const found = accountTotp(args[2], accounts);
+      const found = await accountTotp(pw, args[2], accounts);
       if ("error" in found) return [found.error, null, false];
       code = await tf.totpFor(found.secret);
     } else {
@@ -229,7 +244,9 @@ export async function execute(
     let args = a.args;
     let used: Ref[] = [];
     if (SUBSTITUTED.has(a.cmd)) {
-      const sub = substitute(a.args, accounts?.run ?? null, accounts?.origin ?? null);
+      // A password is only typed where the tab is right now; usernames go anywhere.
+      const origin = accounts && hasPassword(a.args) ? await liveOrigin(pw) : accounts?.origin ?? null;
+      const sub = substitute(a.args, accounts?.run ?? null, origin);
       if ("error" in sub) {
         results.push(sub.error);
         return;
@@ -254,7 +271,7 @@ export async function execute(
       results.push(clip(message));
     }
     // A timeout (-1) may still have navigated, so treat it like success here.
-    if (PAGE_CHANGING.has(a.cmd) && (res.code === 0 || res.code === -1)) {
+    if ((PAGE_CHANGING.has(a.cmd) || submits(a)) && (res.code === 0 || res.code === -1)) {
       skip = "skipped: page may have changed";
     }
   };

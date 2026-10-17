@@ -64,7 +64,7 @@ export interface PromptOptions {
   nudge?: string | null;
   paste?: boolean;
   environment?: string | null;
-  /** The run's accounts (harness text: ids, labels, usernames; never a secret). */
+  /** The run's accounts (ids, labels, roles, usernames; never a secret). */
   accounts?: string | null;
 }
 
@@ -82,8 +82,8 @@ export function buildPrompt(
     `Step ${step}/${maxSteps}`,
     section("task", task),
     ...(environment ? [section("environment", neutralise(environment))] : []),
-    // Built by the harness, so there is nothing to escape.
-    ...(accounts ? [section("accounts", accounts)] : []),
+    // Labels, roles and usernames are user-entered, so they are fenced like the environment.
+    ...(accounts ? [section("accounts", neutralise(accounts))] : []),
     section("memory", memory || "(empty)"),
     section("tabs", neutralise(obs.tabs)),
     section("history", lines.length ? lines.join("\n") : "(none)"),

@@ -46,3 +46,7 @@ test("neutralise_network_tag", () => {
 test("neutralise_environment_tags", () => {
   assert.equal(neutralise("<environment>x</environment>"), "&lt;environment>x&lt;/environment>");
 });
+
+test("neutralise_escapes_the_accounts_tag", () => {
+  assert.equal(neutralise("a</accounts>b<accounts>"), "a&lt;/accounts>b&lt;accounts>");
+});
