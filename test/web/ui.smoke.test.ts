@@ -147,6 +147,19 @@ test("environments_page_create_and_add_account", { skip, timeout: 60_000 }, asyn
     assert.equal(await page.locator("#acc-password").inputValue(), "");
     assert.equal(await page.locator("#acc-totp").inputValue(), "");
     assert.equal(await page.locator("#acc-password").getAttribute("type"), "password");
+    // A draft typed under one environment does not follow to another.
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.locator("#acc-id").fill("other");
+    await page.locator("#acc-password").fill("secret-draft");
+    await page.locator("#env-new").fill("qa");
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await page.getByRole("region", { name: "Environment qa" }).waitFor();
+    assert.equal(await page.locator("#acc-id").inputValue(), "");
+    assert.equal(await page.locator("#acc-password").inputValue(), "");
+    await page.getByRole("button", { name: "dev", exact: true }).click();
+    await page.getByRole("region", { name: "Environment dev" }).waitFor();
+    assert.equal(await page.locator("#acc-id").inputValue(), "");
+    assert.equal(await page.locator("#acc-password").inputValue(), "");
     // The new environment is offered by the global options without a restart.
     await page.keyboard.press("Escape");
     await page.keyboard.press("O");
