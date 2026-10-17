@@ -190,6 +190,15 @@ export class AccountStore {
     }));
   }
 
+  /** Every account of every environment. */
+  allAccounts(): Account[] {
+    const rows = this.db.prepare("SELECT * FROM accounts ORDER BY env, id").all() as unknown as AccountRow[];
+    return rows.map((r) => ({
+      env: r.env, id: r.id, label: r.label, role: r.role, username: r.username,
+      password: r.password, totpSecret: r.totp_secret,
+    }));
+  }
+
   summaries(env: string): AccountSummary[] {
     return this.accounts(env).map(({ password, totpSecret, ...rest }) => ({
       ...rest,
