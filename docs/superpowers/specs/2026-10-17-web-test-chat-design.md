@@ -189,6 +189,11 @@ redaction (`src/redact.ts`, `src/scrub.ts`) is masked before it is written.
   do not need a per-action yes.
 - At the end, offer Playwright tests via `duckwright-playwright`.
 - Chat model selectable, `sonnet` by default.
+- Spend: the probe limit in `close-gaps.md` gate 5 (5 probes, one explore, then a new yes) does not
+  apply in the chat. Instead each chat has a dollar ceiling, asked in the Clarify message with a default
+  of $5 (also editable in the chat header). The ceiling covers the agent's own cost plus every run it
+  starts. When the next action would cross it, the agent stops starting work, lets running runs finish,
+  and reports what is done and what is left; the person can raise the ceiling and say "continue".
 
 ## Calls I made (the person has not agreed to these specifically)
 
@@ -202,6 +207,12 @@ redaction (`src/redact.ts`, `src/scrub.ts`) is masked before it is written.
 - Explore runs as an allow-listed command in this version, not through `RunManager`.
 - A server restart ends the turn; "continue" resumes from what is on disk.
 - Existing guardrails kept: never production, writes only on `write-envs`, no credentials anywhere.
+- Playwright phase: the person's "yes" also covers running the new tests (`npx playwright test <files>`)
+  against the environment the chat used, when it is in `investigate-envs` (and `write-envs` if the tests
+  write). The agent fixes failing locators from the recorded code, never weakens an assertion, and
+  reports a failing assertion as a possible app bug. The Bash allow-list includes that command.
+  If the environment is not reachable, the tests are delivered typechecked, linted and listed, and
+  the report says they were not run.
 
 ## Left to the builder
 
