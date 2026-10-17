@@ -10,7 +10,8 @@ import type { WebSnapshot } from "../../src/web/api.ts";
 export type StreamMessage = ({ type: "state" } & WebSnapshot) | ManagerEvent;
 export type Selection = { kind: "task"; id: TaskId } | { kind: "plan"; id: PlanId } | null;
 export type Confirm =
-  | { kind: "quit"; count: number } | { kind: "remove"; taskId: TaskId } | { kind: "removePlan"; planId: PlanId };
+  | { kind: "quit"; count: number } | { kind: "remove"; taskId: TaskId } | { kind: "removePlan"; planId: PlanId }
+  | { kind: "removeEnvironment"; name: string };
 export interface EditDraft { target: EditTarget; title: string; original: string; text: string; error: string | null }
 export type Dialog =
   | { kind: "add"; mode: "task" | "plan" }
@@ -18,6 +19,7 @@ export type Dialog =
   | { kind: "options"; taskId: TaskId | null }
   | { kind: "confirm"; confirm: Confirm }
   | { kind: "help" }
+  | { kind: "environments" }
   | { kind: "image"; src: string; title: string };
 /** The sidebar's two tabs: the tasks of this session (and plans), and past runs not run again. */
 export type Tab = "tasks" | "history";

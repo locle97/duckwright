@@ -1,5 +1,5 @@
 // The browser's operations on the server: each is one API call whose failure is shown as a toast.
-import type { EditTarget, PlanId, TaskId, TaskSnapshot } from "../../src/runs/manager.ts";
+import type { EditTarget, Globals, PlanId, TaskId, TaskSnapshot } from "../../src/runs/manager.ts";
 import { api } from "./api.ts";
 import type { Reply } from "./api.ts";
 import type { Action, EditDraft } from "./store.ts";
@@ -59,4 +59,17 @@ export async function saveEditor(d: Dispatch, draft: EditDraft): Promise<boolean
 export async function quitServer(d: Dispatch): Promise<void> {
   const r = await shown(d, api.post("/api/quit"));
   if (r.ok) d({ type: "ended" });
+}
+
+/** Reloads the global options after an environment was created or removed, so the Options selects list the new set. */
+export async function refreshEnvironments(d: Dispatch): Promise<void> {
+  try {
+    // /api/state is the bare snapshot (no `ok` field), so it does not go through `api`.
+    const res = await fetch("/api/state");
+    if (!res.ok) return;
+    const g = ((await res.json()) as { globals?: Globals }).globals;
+    if (g) d({ type: "stream", now: Date.now(), message: { type: "globals:updated", globals: g } });
+  } catch {
+    // The next state message from the stream carries the globals anyway.
+  }
 }

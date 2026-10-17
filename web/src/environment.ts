@@ -21,3 +21,20 @@ export function envOptions(
   if (draft !== "" && draft !== "none" && !environments.includes(draft)) out.push({ value: draft, label: draft });
   return out;
 }
+
+/** The account form's fields. Secrets always start empty: the server never sends one back. */
+export interface AccountDraft {
+  id: string; label: string; role: string; username: string; password: string; totpSecret: string; clearTotp: boolean;
+}
+
+/** The PUT body for an account. An empty secret is left out (the server keeps it); clearTotp sends null. */
+export function accountBody(d: AccountDraft): Record<string, unknown> {
+  const b: Record<string, unknown> = { label: d.label, role: d.role, username: d.username };
+  if (d.password !== "") b.password = d.password;
+  if (d.clearTotp) b.totpSecret = null;
+  else if (d.totpSecret !== "") b.totpSecret = d.totpSecret;
+  return b;
+}
+
+export const shortPasswordWarning = (pw: string): string | null =>
+  pw !== "" && pw.length < 8 ? "This password is shorter than 8 characters." : null;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { envBody, envDraft, envOptions, envValue } from "../../web/src/environment.ts";
+import { accountBody, envBody, envDraft, envOptions, envValue, shortPasswordWarning } from "../../web/src/environment.ts";
 
 test("envValue shows none for no environment", () => {
   assert.equal(envValue(null), "none");
@@ -30,4 +30,23 @@ test("envOptions lists inherit, none, names and an unlisted draft", () => {
     ["", "none", "qa", "staging", "old"],
   );
   assert.equal(envOptions("staging", ["qa", "staging"], "old")[0]?.label, "inherit (staging)");
+});
+
+const draft = { id: "admin", label: "Admin", role: "admin", username: "root", password: "", totpSecret: "", clearTotp: false };
+
+test("account_body_omits_empty_secrets", () => {
+  assert.deepEqual(accountBody(draft), { label: "Admin", role: "admin", username: "root" });
+  assert.deepEqual(accountBody({ ...draft, password: "hunter22x" }), { label: "Admin", role: "admin", username: "root", password: "hunter22x" });
+  assert.deepEqual(accountBody({ ...draft, totpSecret: "JBSW" }), { label: "Admin", role: "admin", username: "root", totpSecret: "JBSW" });
+});
+
+test("account_body_clear_totp_sends_null", () => {
+  assert.equal(accountBody({ ...draft, clearTotp: true }).totpSecret, null);
+  assert.equal(accountBody({ ...draft, clearTotp: true, totpSecret: "JBSW" }).totpSecret, null);
+});
+
+test("short_password_warns_under_8", () => {
+  assert.equal(shortPasswordWarning(""), null);
+  assert.match(shortPasswordWarning("abc") ?? "", /8/);
+  assert.equal(shortPasswordWarning("12345678"), null);
 });

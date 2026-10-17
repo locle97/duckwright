@@ -2,7 +2,7 @@ import { liveCount, totalCost } from "./store.ts";
 import type { WebState } from "./store.ts";
 import { Button } from "./ui.tsx";
 
-export function Header(p: { state: WebState; onHelp(): void; onQuit(): void; onDrawer(): void }) {
+export function Header(p: { state: WebState; onHelp(): void; onEnvironments(): void; onQuit(): void; onDrawer(): void }) {
   const s = p.state;
   return (
     <header className="header">
@@ -11,6 +11,7 @@ export function Header(p: { state: WebState; onHelp(): void; onQuit(): void; onD
       <span className="status">
         {liveCount(s)}/{s.maxParallel} running · ${totalCost(s).toFixed(4)}
       </span>
+      <Button small onClick={p.onEnvironments} title="Environments and accounts (v)">Environments</Button>
       <Button small onClick={p.onHelp} title="Keyboard shortcuts (?)">?</Button>
       <Button small kind="red" onClick={p.onQuit} title="Stop every run and shut the server down">Quit</Button>
     </header>

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 
 import { chromium } from "playwright-core";
 import type { Browser } from "playwright-core";
 
+import { listEnvironments } from "../../src/environment.ts";
 import { startWeb } from "../../src/web/index.ts";
 import type { WebHandle } from "../../src/web/index.ts";
 import { ROOT } from "../helpers.ts";
@@ -111,4 +113,49 @@ test("add a task, watch a run, open a step, answer a 2FA prompt, quit", { skip, 
   await page.waitForSelector("text=Duckwright stopped");
   await web.done;
   assert.ok(manager.log.includes("stopAll"));
+});
+
+test("environments_page_create_and_add_account", { skip, timeout: 60_000 }, async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "dw-env-ui-"));
+  // Like the real manager, read the environment names from disk on every call.
+  const fake = new FakeManager([]);
+  const realGlobals = fake.globals.bind(fake);
+  fake.globals = () => ({ ...realGlobals(), environments: listEnvironments(cwd) });
+  const own = await startWeb({ manager: fake, maxParallel: 3, open: () => {}, cwd });
+  const page = await browser.newPage();
+  try {
+    await page.goto(own.url);
+    await page.getByRole("button", { name: "Add task" }).first().waitFor();
+    await page.keyboard.press("v");
+    await page.getByRole("dialog", { name: "Environments" }).waitFor();
+    await page.locator("#env-new").fill("dev");
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    // No base URL yet: the account form is disabled.
+    assert.equal(await page.locator("#acc-id").isDisabled(), true);
+    await page.locator("#env-base").fill("https://dev.example.test");
+    await page.getByRole("button", { name: "Save environment" }).click();
+    await page.locator("#acc-id").waitFor();
+    await page.waitForFunction(() => !(document.querySelector("#acc-id") as HTMLInputElement).disabled);
+    await page.locator("#acc-id").fill("admin");
+    await page.locator("#acc-username").fill("root");
+    await page.locator("#acc-password").fill("short");
+    await page.waitForSelector("text=shorter than 8");
+    await page.getByRole("button", { name: "Add account" }).click();
+    await page.waitForSelector("text=password set");
+    // Reopening the account shows empty secret fields.
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    assert.equal(await page.locator("#acc-password").inputValue(), "");
+    assert.equal(await page.locator("#acc-totp").inputValue(), "");
+    assert.equal(await page.locator("#acc-password").getAttribute("type"), "password");
+    // The new environment is offered by the global options without a restart.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("O");
+    await page.locator("#opt-env").waitFor();
+    assert.ok((await page.locator("#opt-env option").allTextContents()).includes("dev"));
+  } finally {
+    await page.close();
+    own.quit();
+    await own.done;
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });

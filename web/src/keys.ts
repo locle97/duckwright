@@ -44,6 +44,7 @@ export function commandFor(key: string, s: WebState): Command | null {
     case "t": return act({ type: "tab" });
     case "P": return dialog({ kind: "add", mode: "plan" });
     case "?": return dialog({ kind: "help" });
+    case "v": return dialog({ kind: "environments" });
     case "/": return { type: "focusFilter" };
     case "o": return task ? dialog({ kind: "options", taskId: task.id }) : null;
     case "O": return dialog({ kind: "options", taskId: null });
