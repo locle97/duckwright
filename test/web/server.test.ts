@@ -7,6 +7,7 @@ import { after, before, test } from "node:test";
 import type { ManagerEvent } from "../../src/runs/manager.ts";
 import type { ApiContext } from "../../src/web/api.ts";
 import { cookieName } from "../../src/web/auth.ts";
+import { createEnvironments } from "../../src/web/environments.ts";
 import { startServer } from "../../src/web/server.ts";
 import type { RunningServer } from "../../src/web/server.ts";
 import { tmpDir } from "../helpers.ts";
@@ -96,7 +97,7 @@ const changing = () => ({ ...authed, origin: `http://127.0.0.1:${server.port}`, 
 function makeCtx(m: FakeManager): ApiContext {
   return {
     manager: m, maxParallel: 3, notices: [], theme: "auto", quit: () => {}, runs: () => [],
-    candidates: () => ({ items: [], truncated: false }),
+    candidates: () => ({ items: [], truncated: false }), environments: createEnvironments(tmpDir()),
   };
 }
 

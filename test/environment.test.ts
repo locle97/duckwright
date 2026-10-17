@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  EnvError, envLabel, isEnvName, isEnvPath, listEnvironments, loadEnvironment, resolveEnv,
+  EnvError, envLabel, isEnvName, isEnvPath, listEnvironments, loadEnvironment, resolveEnv, saveEnvironmentText,
 } from "../src/environment.ts";
 import { tmpDir } from "./helpers.ts";
 
@@ -80,4 +80,14 @@ test("env_list_filters_and_sorts", () => {
   }
   fs.mkdirSync(path.join(tmp, "environments", "dir.md"));
   assert.deepEqual(listEnvironments(tmp), ["A", "a", "b"]);
+});
+
+test("save_environment_text_writes_and_limits", () => {
+  const tmp = tmpDir();
+  saveEnvironmentText("dev", "# dev\n", tmp);
+  assert.equal(fs.readFileSync(path.join(tmp, "environments", "dev.md"), "utf8"), "# dev\n");
+  assert.throws(() => saveEnvironmentText("dev", "  \n", tmp), EnvError);
+  assert.throws(() => saveEnvironmentText("dev", "a".repeat(16385), tmp), EnvError);
+  saveEnvironmentText("dev", "a".repeat(16384), tmp);
+  assert.throws(() => saveEnvironmentText("../x", "a", tmp), EnvError);
 });

@@ -1,12 +1,16 @@
 // The HTTP API as a route table: each route validates its input and makes one ManagerLike call.
 // No HTTP in here, so it runs against a fake manager.
-import { ENV_NONE, isEnvName } from "../environment.ts";
+import type { AccountInput } from "../accounts/store.ts";
+import { AccountError } from "../accounts/store.ts";
+import { ENV_NONE, EnvError, isEnvName } from "../environment.ts";
 import type { RunEvent } from "../events.ts";
 import type { SnapshotMode } from "../observe.ts";
 import type { EditTarget, Globals, ManagerLike, Overrides, PlanSnapshot, TaskId, TaskSnapshot } from "../runs/manager.ts";
 import { rank } from "../tui/candidates.ts";
 import type { CandidateIndex } from "../tui/candidates.ts";
 import type { ThemeName } from "../tui/theme.ts";
+import { EnvExists, EnvNotFound } from "./environments.ts";
+import type { EnvironmentsLike } from "./environments.ts";
 
 /** Every event of one run since the server started: how a browser opened mid-run rebuilds its timeline. */
 export interface LoggedRun { taskId: TaskId; runId: string; events: RunEvent[] }
@@ -23,6 +27,8 @@ export interface ApiContext {
   candidates(): CandidateIndex;
   /** The runs seen so far with their events, oldest first. */
   runs(): LoggedRun[];
+  /** Environment files, base URLs and accounts. */
+  environments: EnvironmentsLike;
 }
 
 export interface ApiRequest { method: string; path: string; query: URLSearchParams; body: unknown }
@@ -257,6 +263,73 @@ const ROUTES: Route[] = [
     },
   },
   {
+    method: "GET", re: /^\/api\/environments$/,
+    run: (ctx) => ok({ items: ctx.environments.list() }),
+  },
+  {
+    method: "POST", re: /^\/api\/environments$/,
+    run: (ctx, _m, req) => {
+      const b = isObject(req.body) ? req.body : {};
+      if (typeof b.name !== "string" || (b.context !== undefined && typeof b.context !== "string")) {
+        return bad(400, "send { name: string, context: string }");
+      }
+      if (!isEnvName(b.name) || b.name === ENV_NONE) return bad(400, `invalid environment name: '${b.name}'`);
+      ctx.environments.create(b.name, (b.context as string | undefined) ?? "");
+      return ok();
+    },
+  },
+  {
+    method: "GET", re: /^\/api\/environments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)$/,
+    run: (ctx, m) => {
+      const e = ctx.environments.get(m[1]);
+      return e === null ? bad(404, "no such environment") : ok({ environment: e });
+    },
+  },
+  {
+    method: "PUT", re: /^\/api\/environments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)$/,
+    run: (ctx, m, req) => {
+      const b = isObject(req.body) ? req.body : {};
+      if ((b.baseUrl !== null && typeof b.baseUrl !== "string") || !Array.isArray(b.loginOrigins)
+        || !b.loginOrigins.every((x) => typeof x === "string") || (b.context !== undefined && typeof b.context !== "string")) {
+        return bad(400, "send { baseUrl: string | null, loginOrigins: string[], context?: string }");
+      }
+      const baseUrl = typeof b.baseUrl === "string" && b.baseUrl.trim() !== "" ? b.baseUrl.trim() : null;
+      ctx.environments.update(m[1], {
+        baseUrl, loginOrigins: b.loginOrigins as string[], ...(b.context !== undefined ? { context: b.context as string } : {}),
+      });
+      return ok();
+    },
+  },
+  {
+    method: "DELETE", re: /^\/api\/environments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)$/,
+    run: (ctx, m, req) => {
+      ctx.environments.remove(m[1], req.query.get("file") === "1");
+      return ok();
+    },
+  },
+  {
+    method: "PUT", re: /^\/api\/environments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)\/accounts\/([a-z0-9-]+)$/,
+    run: (ctx, m, req) => {
+      const b = isObject(req.body) ? req.body : {};
+      const SHAPE = "send { label, role, username, password?, totpSecret? }";
+      if (typeof b.label !== "string" || typeof b.role !== "string" || typeof b.username !== "string"
+        || (b.password !== undefined && typeof b.password !== "string")
+        || (b.totpSecret !== undefined && b.totpSecret !== null && typeof b.totpSecret !== "string")) {
+        return bad(400, SHAPE);
+      }
+      const a: AccountInput = { env: m[1], id: m[2], label: b.label, role: b.role, username: b.username };
+      if (typeof b.password === "string" && b.password !== "") a.password = b.password;
+      if (b.totpSecret === null) a.totpSecret = null;
+      else if (typeof b.totpSecret === "string" && b.totpSecret !== "") a.totpSecret = b.totpSecret;
+      ctx.environments.saveAccount(a);
+      return ok();
+    },
+  },
+  {
+    method: "DELETE", re: /^\/api\/environments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)\/accounts\/([a-z0-9-]+)$/,
+    run: (ctx, m) => (ctx.environments.removeAccount(m[1], m[2]) ? ok() : bad(404, "no such account")),
+  },
+  {
     method: "POST", re: /^\/api\/quit$/,
     run: (ctx) => {
       ctx.quit();
@@ -298,7 +371,11 @@ export async function handleApi(ctx: ApiContext, req: ApiRequest): Promise<ApiRe
     if (route.method !== req.method) continue;
     try {
       return await route.run(ctx, m, req);
-    } catch {
+    } catch (e) {
+      // Account and environment errors are written for the person; anything else stays hidden.
+      if (e instanceof EnvNotFound) return bad(404, e.message);
+      if (e instanceof EnvExists) return bad(409, e.message);
+      if (e instanceof AccountError || e instanceof EnvError) return bad(400, e.message);
       // Never show a manager's error text to the browser.
       return bad(500, "internal error");
     }

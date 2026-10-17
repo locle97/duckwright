@@ -9,6 +9,7 @@ import { nodeReadDir, walk } from "../tui/candidates.ts";
 import type { ThemeName } from "../tui/theme.ts";
 import type { ApiContext } from "./api.ts";
 import { newToken } from "./auth.ts";
+import { createEnvironments } from "./environments.ts";
 import { RunLog } from "./runlog.ts";
 import { startServer } from "./server.ts";
 import type { RunningServer } from "./server.ts";
@@ -78,6 +79,7 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
   const ctx: ApiContext = {
     manager: o.manager, maxParallel: o.maxParallel, notices: o.notices ?? [], theme: o.theme ?? "auto",
     quit, runs: () => log.entries(), candidates: () => walk(nodeReadDir(o.cwd ?? process.cwd())),
+    environments: createEnvironments(o.cwd ?? process.cwd()),
   };
   try {
     server = await startServer({ ctx, token, port: o.port, uiDir, runsDir: o.runsDir ?? path.resolve("runs") });
