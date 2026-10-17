@@ -90,3 +90,34 @@ test("prefix_passwords_each_get_own_marker", () => {
   s.addNamedSecret("abc123456", secretMarker("b"));
   assert.equal(s.scrub("abc123456 abc12345"), "[SECRET b.password] [SECRET a.password]");
 });
+
+test("short_values_never_match_inside_masks", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("e", secretMarker("x"));
+  s.addSecret("RED");
+  s.addSecret("tok");
+  assert.equal(s.scrub("e tok RED hello"), "[SECRET x.password] [REDACTED] [REDACTED] h[SECRET x.password]llo");
+});
+
+test("scrub_is_idempotent_when_no_value_occurs_in_a_mask", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("e", secretMarker("x"));
+  s.addSecret("tok");
+  const once = s.scrub("e tok hello");
+  assert.equal(s.scrub(once), once);
+});
+
+test("code_equal_to_account_id_is_not_matched_inside_a_marker", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("pw", secretMarker("1234"));
+  s.addCode("1234");
+  assert.equal(s.scrub("pw 1234"), `[SECRET 1234.password] ${CODE_MASK}`);
+});
+
+test("named_marker_wins_over_plain_secret_and_code_for_the_same_value", () => {
+  const s = new Scrubber();
+  s.addSecret("samevalue");
+  s.addCode("samevalue");
+  s.addNamedSecret("samevalue", secretMarker("a"));
+  assert.equal(s.scrub("samevalue"), "[SECRET a.password]");
+});
