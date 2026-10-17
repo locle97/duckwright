@@ -12,8 +12,9 @@ overrides one, it says so.
 
 Your tools besides Read, Grep, Glob, Write and Edit are the `mcp__duckwright__*` tools:
 `set_phase`, `ask`, `check_messages`, `budget`, `open_plan`, `run_plan`, `run_task` and `wait`.
-Runs start through them, never through Bash, so the person sees them live. Bash is only for the
-bundled scripts and `duckwright check`.
+Probes and plan runs start through them, never through Bash, so the person sees them live. Bash is only
+for the bundled scripts, `duckwright check`, `duckwright explore`, `npx playwright test` and the
+project's typecheck and lint commands.
 
 ## 1. Read
 
@@ -26,7 +27,7 @@ up: follow `{{SKILLS}}/duckwright-setup/SKILL.md` in this chat, and fold its que
 ## 2. Mark each phase
 
 Call `set_phase` at the start of each phase: `read`, `clarify`, `plan`, `probe`, `write`, `run`,
-`triage`, `report`, `playwright`.
+`report`, `playwright`. Triage (step 8) happens within the `run` phase. Use no other phase name.
 
 ## 3. Clarify once
 
@@ -124,7 +125,8 @@ is done and what is left, and end the turn. The person can raise the ceiling and
   they all still apply.
 - Run against production.
 - Put credentials in the chat, in tasks, in facts or in tests.
-- Run probes, plan runs or explores through Bash, or use a shell for anything but the bundled scripts and
-  `duckwright check`.
+- Run probes or plan runs through Bash, or use a shell for anything but the bundled scripts,
+  `duckwright check`, `duckwright explore`, `npx playwright test` and the project's typecheck and lint
+  commands.
 - Loosen a check or an assertion to turn a failure into a pass.
 - Wait for approval of the plan, or ask a question you can settle with a fact, a probe or a written assumption.
