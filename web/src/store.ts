@@ -1,13 +1,16 @@
 // The browser's state: what the server sent, the run views folded from run events, and the
 // screen's own state (selection, filter, dialogs, toasts). Plain TypeScript: no DOM, no React,
 // so it is tested with node --test.
+import type { ChatEvent } from "../../src/chat/types.ts";
 import type { RunEvent } from "../../src/events.ts";
 import type { EditTarget, Globals, ManagerEvent, PlanId, PlanSnapshot, TaskId, TaskSnapshot } from "../../src/runs/manager.ts";
 import { foldPast, newRunView, reduceRunEvent, reduceTimeline } from "../../src/runviews.ts";
 import type { RunView, TimelineOp } from "../../src/runviews.ts";
 import type { WebSnapshot } from "../../src/web/api.ts";
+import { initialChat, isChatAction, reduceChat } from "./chat.ts";
+import type { ChatAction, ChatUiState } from "./chat.ts";
 
-export type StreamMessage = ({ type: "state" } & WebSnapshot) | ManagerEvent;
+export type StreamMessage = ({ type: "state" } & WebSnapshot) | ManagerEvent | ChatEvent;
 export type Selection = { kind: "task"; id: TaskId } | { kind: "plan"; id: PlanId } | null;
 export type Confirm =
   | { kind: "quit"; count: number } | { kind: "remove"; taskId: TaskId } | { kind: "removePlan"; planId: PlanId }
@@ -27,6 +30,9 @@ export type Tab = "tasks" | "history";
 export interface TabMemory { selection: Selection; filter: string }
 export interface Toast { id: number; level: "info" | "error"; message: string; until: number }
 export type Row = { kind: "plan"; plan: PlanSnapshot } | { kind: "task"; task: TaskSnapshot; planId: PlanId | null };
+
+/** Which screen fills the window: the task workspace or the test chat. */
+export type View = "workspace" | "chat";
 
 export interface WebState {
   /** The first snapshot has arrived. */
@@ -54,9 +60,15 @@ export interface WebState {
   filter: string;
   dialog: Dialog | null;
   toasts: Toast[];
+  view: View;
+  chat: ChatUiState;
+  /** Counts the state snapshots received; a new one means the stream (re)connected. */
+  snapshots: number;
 }
 
 export type Action =
+  | ChatAction
+  | { type: "view"; view: View }
   | { type: "stream"; message: StreamMessage; now: number }
   | { type: "connection"; connected: boolean }
   | { type: "ended" }
@@ -79,6 +91,7 @@ export function initialState(now = 0): WebState {
   return {
     loaded: false, connected: false, ended: false, expired: false, now, tasks: [], plans: [], globals: null, maxParallel: 3, theme: "auto",
     runs: {}, selection: null, tab: "tasks", otherTab: { selection: null, filter: "" }, collapsed: [], filter: "", dialog: null, toasts: [],
+    view: "workspace", chat: initialChat(), snapshots: 0,
   };
 }
 
@@ -216,9 +229,9 @@ function applySnapshot(s: WebState, m: Extract<StreamMessage, { type: "state" }>
     if (view) runs[r.runId] = view;
   }
   let next: WebState = {
-    ...s, loaded: true, now, tasks: m.tasks, plans: m.plans, globals: m.globals, maxParallel: m.maxParallel, theme: m.theme, runs,
+    ...s, loaded: true, snapshots: s.snapshots + 1, now, tasks: m.tasks, plans: m.plans, globals: m.globals, maxParallel: m.maxParallel, theme: m.theme, runs,
   };
-  next = snap(next);
+  next = snap({ ...next, chat: reduceChat(next.chat, { type: "chat:list", items: m.chats }) });
   // Opened with nothing but past runs: show them rather than an empty Tasks tab.
   if (!s.loaded && visibleRows(next).length === 0 && m.tasks.some(isHistory)) next = switchTab(next, "history");
   // Notices are shown once, on the first snapshot only.
@@ -270,9 +283,14 @@ function reduceManager(s: WebState, e: ManagerEvent): WebState {
 }
 
 export function reduce(s: WebState, a: Action): WebState {
+  if (isChatAction(a)) return { ...s, chat: reduceChat(s.chat, a) };
   switch (a.type) {
     case "stream":
-      return a.message.type === "state" ? applySnapshot(s, a.message, a.now) : reduceManager({ ...s, now: a.now }, a.message);
+      if (a.message.type === "state") return applySnapshot(s, a.message, a.now);
+      if (isChatAction(a.message)) return { ...s, now: a.now, chat: reduceChat(s.chat, a.message) };
+      return reduceManager({ ...s, now: a.now }, a.message);
+    case "view":
+      return { ...s, view: a.view };
     case "connection":
       return { ...s, connected: a.connected };
     case "ended":

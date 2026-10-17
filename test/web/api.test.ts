@@ -7,6 +7,7 @@ import { handleApi, parseOverrides, snapshotOf } from "../../src/web/api.ts";
 import type { ApiContext, ApiResponse } from "../../src/web/api.ts";
 import { createEnvironments } from "../../src/web/environments.ts";
 import { tmpDir } from "../helpers.ts";
+import { fakeChats } from "./chats-helper.ts";
 import { FakeManager, planSnapshot, snapshot } from "../tui/fake-manager.ts";
 
 const LOGGED = [{ taskId: 1, runId: "r1", events: [] }];
@@ -25,7 +26,7 @@ function setup(): { m: FakeManager; ctx: ApiContext; quits: number[] } {
   const quits: number[] = [];
   const ctx: ApiContext = {
     manager: m, maxParallel: 3, notices: ["note"], theme: "dark", quit: () => void quits.push(1), candidates: () => INDEX,
-    runs: () => LOGGED, environments: createEnvironments(tmpDir()),
+    runs: () => LOGGED, environments: createEnvironments(tmpDir()), chats: fakeChats(m).chats,
   };
   return { m, ctx, quits };
 }
@@ -282,4 +283,50 @@ test("GET /api/state carries inherited.jev", async () => {
   const { ctx } = setup();
   const s = (await call(ctx, "GET", "/api/state")).body as { tasks: { inherited: { jev: boolean } }[] };
   assert.equal(typeof s.tasks[0].inherited.jev, "boolean");
+});
+
+test("POST /api/chats then GET lists it", async () => {
+  const { ctx } = setup();
+  const r = await call(ctx, "POST", "/api/chats", { model: "opus", ceilingUsd: 2 });
+  assert.equal(r.status, 200);
+  const chat = (r.body as any).chat;
+  assert.equal(chat.model, "opus");
+  const list = await call(ctx, "GET", "/api/chats");
+  assert.deepEqual((list.body as any).items.map((i: any) => i.chat.id), [chat.id]);
+  const one = await call(ctx, "GET", `/api/chats/${chat.id}`);
+  assert.equal(one.status, 200);
+  assert.equal((one.body as any).turn, "idle");
+  assert.deepEqual((snapshotOf(ctx).chats).map((i) => i.chat.id), [chat.id]);
+});
+
+test("POST messages with empty text is 400", async () => {
+  const { ctx } = setup();
+  const id = ((await call(ctx, "POST", "/api/chats")).body as any).chat.id;
+  assert.equal((await call(ctx, "POST", `/api/chats/${id}/messages`, { text: "  " })).status, 400);
+  assert.equal((await call(ctx, "POST", `/api/chats/${id}/messages`, {})).status, 400);
+  assert.equal((await call(ctx, "POST", `/api/chats/${id}/messages`, { text: "hi" })).status, 200);
+  assert.equal((await call(ctx, "POST", `/api/chats/${id}/stop`)).status, 200);
+});
+
+test("PUT ceilingUsd -1 is 400", async () => {
+  const { ctx } = setup();
+  const id = ((await call(ctx, "POST", "/api/chats")).body as any).chat.id;
+  assert.equal((await call(ctx, "PUT", `/api/chats/${id}`, { ceilingUsd: -1 })).status, 400);
+  assert.equal((await call(ctx, "PUT", `/api/chats/${id}`, { ceilingUsd: 3, title: "t" })).status, 200);
+});
+
+test("GET unknown chat is 404", async () => {
+  const { ctx } = setup();
+  assert.equal((await call(ctx, "GET", "/api/chats/nope")).status, 404);
+  assert.equal((await call(ctx, "POST", "/api/chats/nope/stop")).status, 404);
+  assert.equal((await call(ctx, "POST", "/api/chats/nope/messages", { text: "x" })).status, 404);
+});
+
+test("POST uploads saves the raw body", async () => {
+  const { ctx } = setup();
+  const id = ((await call(ctx, "POST", "/api/chats")).body as any).chat.id;
+  const u = new URL(`/api/chats/${id}/uploads?name=a.txt`, "http://x");
+  const r = await handleApi(ctx, { method: "POST", path: u.pathname, query: u.searchParams, body: Buffer.from("hi") });
+  assert.equal(r.status, 200);
+  assert.match((r.body as any).path, /^\.duckwright\/uploads\/[a-z0-9-]+\/a\.txt$/);
 });

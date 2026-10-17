@@ -11,6 +11,7 @@ import { createEnvironments } from "../../src/web/environments.ts";
 import { startServer } from "../../src/web/server.ts";
 import type { RunningServer } from "../../src/web/server.ts";
 import { tmpDir } from "../helpers.ts";
+import { fakeChats } from "./chats-helper.ts";
 import { FakeManager, snapshot } from "../tui/fake-manager.ts";
 
 class CountingManager extends FakeManager {
@@ -94,10 +95,15 @@ const authedFor = (port: number) => ({ cookie: `${cookieName(port)}=${TOKEN}` })
 const authed = { get cookie() { return authedFor(server.port).cookie; } };
 const changing = () => ({ ...authed, origin: `http://127.0.0.1:${server.port}`, "content-type": "application/json" });
 
+let lastArgvs: string[][] = [];
+let argvs: string[][] = []; // those of the shared server's ctx
+
 function makeCtx(m: FakeManager): ApiContext {
+  const fc = fakeChats(m);
+  lastArgvs = fc.argvs;
   return {
     manager: m, maxParallel: 3, notices: [], theme: "auto", quit: () => {}, runs: () => [],
-    candidates: () => ({ items: [], truncated: false }), environments: createEnvironments(tmpDir()),
+    candidates: () => ({ items: [], truncated: false }), environments: createEnvironments(tmpDir()), chats: fc.chats,
   };
 }
 
@@ -117,6 +123,7 @@ before(async () => {
   fs.symlinkSync(path.join(tmp, "secret.txt"), path.join(runDir, "screenshots", "step-002.png"));
   manager = new CountingManager([snapshot(1, "one")]);
   ctx = makeCtx(manager);
+  argvs = lastArgvs;
   server = await startServer({ ctx, token: TOKEN, uiDir: path.join(tmp, "ui"), runsDir: path.join(tmp, "runs") });
 });
 after(async () => {
@@ -366,5 +373,94 @@ test("server_evidence_abort_releases_file", { skip: process.platform !== "linux"
     assert.equal(ok.status, 200);
   } finally {
     fs.rmSync(bigDir, { recursive: true, force: true });
+  }
+});
+
+const mcpHeaders = (extra: Record<string, string> = {}) => ({ "content-type": "application/json", ...extra });
+const rpc = (method: string) => JSON.stringify({ jsonrpc: "2.0", id: 1, method });
+
+/** Creates a chat, starts a turn, and returns its id and the MCP bearer the fake claude was given. */
+async function runningChat(): Promise<{ id: string; bearer: string }> {
+  const id = ctx.chats.create().id;
+  assert.deepEqual(ctx.chats.send(id, "hello", []), { ok: true });
+  const argv = argvs[argvs.length - 1];
+  const bearer = JSON.parse(fs.readFileSync(argv[argv.indexOf("--mcp-config") + 1], "utf8")).mcpServers.duckwright.headers.Authorization;
+  return { id, bearer };
+}
+
+test("mcp without bearer is 401", async () => {
+  const { id } = await runningChat();
+  const r = await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders(), body: rpc("tools/list") });
+  assert.equal(r.status, 401);
+});
+
+test("mcp with the browser token cookie but no bearer is 401", async () => {
+  const { id } = await runningChat();
+  const r = await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders(authed), body: rpc("tools/list") });
+  assert.equal(r.status, 401);
+});
+
+test("mcp tools/list with the chat token is 200 and lists 9 tools", async () => {
+  const { id, bearer } = await runningChat();
+  const r = await request(server.port, "POST", `/mcp/${id}`, {
+    headers: mcpHeaders({ authorization: bearer }), body: rpc("tools/list"),
+  });
+  assert.equal(r.status, 200);
+  assert.equal(JSON.parse(r.body).result.tools.length, 9);
+  const n = await request(server.port, "POST", `/mcp/${id}`, {
+    headers: mcpHeaders({ authorization: bearer }), body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+  });
+  assert.equal(n.status, 202);
+  assert.equal(n.body, "");
+});
+
+test("mcp rejects other methods, content types, ids and bodies", async () => {
+  const { id, bearer } = await runningChat();
+  assert.equal((await request(server.port, "GET", `/mcp/${id}`)).status, 405);
+  assert.equal((await request(server.port, "DELETE", `/mcp/${id}`)).status, 405);
+  const h = mcpHeaders({ authorization: bearer });
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: { authorization: bearer, "content-type": "text/plain" }, body: "x" })).status, 415);
+  assert.equal((await request(server.port, "POST", "/mcp/Bad_Id", { headers: h, body: rpc("ping") })).status, 404);
+  assert.equal((await request(server.port, "POST", "/mcp/nope", { headers: h, body: rpc("ping") })).status, 401);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: h, body: "{" })).status, 400);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: h, body: "x".repeat(1024 * 1024 + 1) })).status, 413);
+});
+
+test("mcp checks Host and the Authorization header before reading the body", async () => {
+  const { id, bearer } = await runningChat();
+  const big = "x".repeat(1024 * 1024 + 1); // over the body cap: a 413 would mean the body was read
+  const evil = await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ authorization: bearer, host: "evil.example" }), body: rpc("ping") });
+  assert.equal(evil.status, 403);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ host: "evil.example" }), body: big })).status, 403);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders(), body: big })).status, 401);
+  assert.equal((await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ authorization: "Basic abc" }), body: big })).status, 401);
+  const local = await request(server.port, "POST", `/mcp/${id}`, { headers: mcpHeaders({ authorization: bearer, host: `localhost:${server.port}` }), body: rpc("ping") });
+  assert.equal(local.status, 200);
+});
+
+test("upload saves a file and refuses one over 10 MiB", async () => {
+  const id = ctx.chats.create().id;
+  const h = { ...authed, origin: `http://127.0.0.1:${server.port}`, "content-type": "application/octet-stream" };
+  const ok = await request(server.port, "POST", `/api/chats/${id}/uploads?name=a.txt`, { headers: h, body: "hello" });
+  assert.equal(ok.status, 200);
+  assert.match(JSON.parse(ok.body).path, /^\.duckwright\/uploads\/[a-z0-9-]+\/a\.txt$/);
+  const big = await request(server.port, "POST", `/api/chats/${id}/uploads?name=big.bin`, { headers: h, body: "x".repeat(10 * 1024 * 1024 + 1) });
+  assert.equal(big.status, 413);
+  const noOrigin = await request(server.port, "POST", `/api/chats/${id}/uploads?name=a.txt`, { headers: authed, body: "hi" });
+  assert.equal(noOrigin.status, 403);
+});
+
+test("SSE state includes chats and chat events follow", async () => {
+  const s = await openStream(server.port, authed);
+  try {
+    const state = await s.next();
+    assert.equal(state.type, "state");
+    assert.ok(Array.isArray(state.chats));
+    const id = ctx.chats.create().id;
+    let e = await s.next();
+    while (e.type !== "chat:updated") e = await s.next();
+    assert.equal(e.chat.id, id);
+  } finally {
+    s.close();
   }
 });
