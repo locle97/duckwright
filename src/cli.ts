@@ -175,10 +175,11 @@ function preflight(deps: CliDeps, skill: string, state: string | null, env: stri
 
 const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : null);
 
-function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
+/** `explore` runs get no accounts, so their accounts are not checked. */
+function preflightArgs(deps: CliDeps, args: RunArgs, { explore = false } = {}): string | null {
   const err = preflight(deps, args.skill, statePath(args), args.env);
   if (err) return err;
-  const accounts = accountsProblem(args, process.cwd());
+  const accounts = explore ? null : accountsProblem(args, process.cwd());
   if (accounts) return accounts;
   if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
   return null;
@@ -538,7 +539,7 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
   const paths = memoryPaths(host);
   const autoEnv = run.env === null && !hasExplicitEnv(argv) && fs.existsSync(paths.md) ? paths.slug : null;
   const runArgs = autoEnv !== null ? { ...run, env: autoEnv } : run;
-  const problem = preflightArgs(deps, runArgs);
+  const problem = preflightArgs(deps, runArgs, { explore: true });
   if (problem) {
     deps.stderr(problem);
     return 2;

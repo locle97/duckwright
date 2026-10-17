@@ -10,6 +10,19 @@ const MIN_CODE_LENGTH = 4;
 /** The text a named secret is replaced with in recorded code. */
 export const secretMarker = (id: string): string => `[SECRET ${id}.password]`;
 
+/**
+ * `value` as typed, as it appears inside a JSON string and a single-quoted JS string (the form
+ * Playwright prints its code in), and URL-encoded (a captured login form or query), so an escaped
+ * password is still found.
+ */
+export function secretForms(value: string): string[] {
+  const json = JSON.stringify(value).slice(1, -1);
+  const single = json.replace(/\\"/g, '"').replace(/'/g, "\\'");
+  const url = encodeURIComponent(value);
+  const form = url.replace(/%20/g, "+");
+  return [...new Set([value, json, single, url, form])];
+}
+
 export class Scrubber {
   #codes = new Set<string>();
   #secrets = new Set<string>();
@@ -45,10 +58,13 @@ export class Scrubber {
     }
   }
 
-  /** A value replaced with its own `marker` instead of the generic mask; any length. */
+  /**
+   * A value replaced with its own `marker` instead of the generic mask; any length. Its forms inside
+   * a quoted string (as printed Playwright code shows it) or a URL-encoded form are replaced too.
+   */
   addNamedSecret(value: string, marker: string): void {
     if (value === "") return;
-    this.#named.set(value, marker);
+    for (const form of secretForms(value)) this.#named.set(form, marker);
     this.#cache = null;
   }
 

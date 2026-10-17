@@ -13,6 +13,9 @@ import { WriteGuard } from "../src/explore/guard.ts";
 import { createTwoFactor } from "../src/twofa.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
+import { RunAccounts } from "../src/accounts/runAccounts.ts";
+import { Scrubber } from "../src/scrub.ts";
+import { parseSecret, totpAt } from "../src/totp.ts";
 
 const A = (cmd: string, ...args: string[]): Action => ({ cmd, args });
 
@@ -627,4 +630,110 @@ test("the write guard stops a selector click before it reaches playwright", asyn
   const r = await execute(pw, [A("click", "#delete")], undefined, undefined, null, null, null, null, g);
   assert.match(r.results[0], /^error: refused: click targets must be a ref/);
   assert.deepEqual(calls, []);
+});
+
+// ---- account placeholders ----
+
+const APP = "https://app.test";
+const ACCT_TOTP = "JBSWY3DPEHPK3PXP";
+const PW_FILL_OUT = "### Ran Playwright code\n```js\nawait page.getByLabel('Password').fill('hunter2');\n```\n";
+function runAccounts(totpSecret: string | null = ACCT_TOTP): RunAccounts {
+  const a = { env: "dev", id: "admin-c", label: "Admin C", role: "", username: "c@x.io", password: "hunter2", totpSecret };
+  return new RunAccounts("dev", [a], [a], [APP]);
+}
+const at = (origin: string | null, run = runAccounts()) => ({ run, origin });
+const run9 = (pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], accounts?: { run: RunAccounts; origin: string | null } | null, t: ReturnType<typeof tf> | null = null) =>
+  execute(pw, actions, codes, undefined, null, null, t, null, null, accounts);
+
+test("fill_substitutes_password_on_allowed_origin", async () => {
+  const [pw, calls] = makePw(0, "", PW_FILL_OUT);
+  const action = A("fill", "e3", "{{admin-c.password}}");
+  const codes: (string | null)[] = [];
+  const { results } = await run9(pw, [action, A("fill", "e2", "user {{admin-c.username}}")], codes, at(APP));
+  assert.deepEqual(calls, [["fill", "e3", "hunter2"], ["fill", "e2", "user c@x.io"]]);
+  assert.deepEqual(results, ["ok", "ok"]);
+  assert.deepEqual(action.args, ["e3", "{{admin-c.password}}"], "the recorded action keeps the placeholder");
+  // The code is the caller's to scrub (the loop does, with the run scrubber).
+  const s = new Scrubber();
+  runAccounts().seed(s);
+  assert.equal(s.scrub(codes[0]!), "await page.getByLabel('Password').fill('[SECRET admin-c.password]');");
+});
+
+test("fill_refused_on_other_origin_types_nothing", async () => {
+  for (const origin of ["https://evil.test", null]) {
+    const [pw, calls] = makePw();
+    const { results } = await run9(pw, [A("fill", "e3", "{{admin-c.password}}")], undefined, at(origin));
+    assert.deepEqual(calls, []);
+    assert.match(results[0], /^error: refusing to enter a password/);
+  }
+});
+
+test("fill_placeholder_without_accounts_is_an_error_and_plain_fill_is_unchanged", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await run9(pw, [A("fill", "e3", "{{admin-c.password}}"), A("fill", "e4", "{{x}} plain")]);
+  assert.deepEqual(results, ["error: no accounts are configured for this run", "ok"]);
+  assert.deepEqual(calls, [["fill", "e4", "{{x}} plain"]]);
+});
+
+test("type_substitutes_like_fill", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await run9(pw, [A("type", "{{admin-c.password}}", "--submit")], undefined, at(APP));
+  assert.deepEqual(results, ["ok"]);
+  assert.deepEqual(calls, [["type", "hunter2", "--submit"]]);
+  const [pw2, calls2] = makePw();
+  const refused = await run9(pw2, [A("type", "{{admin-c.password}}")], undefined, at("https://evil.test"));
+  assert.match(refused.results[0], /^error: refusing/);
+  assert.deepEqual(calls2, []);
+});
+
+test("placeholder_in_click_args_rejected", async () => {
+  const [pw, calls] = makePw();
+  const { results } = await run9(pw, [
+    A("click", "{{admin-c.password}}"), A("expect", "text", "{{admin-c.username}}"), A("goto", "x"), A("press", "{{admin-c.password}}"),
+  ], undefined, at(APP));
+  assert.match(results[0], /only in fill or type/);
+  assert.match(results[1], /only in fill or type/);
+  assert.equal(results[2], "ok");
+  assert.match(results[3], /only in fill or type/, "reported even after a page change");
+  assert.deepEqual(calls, [["goto", "x"]]);
+});
+
+test("failed_substituted_fill_never_echoes_the_password", async () => {
+  for (const stderr of ["cannot fill 'hunter2' into e3", "x".repeat(MAX_ERROR_CHARS - 4) + "hunter2 tail"]) {
+    const [pw] = makePw(1, stderr, "");
+    const codes: (string | null)[] = [];
+    const { results } = await run9(pw, [A("fill", "e3", "{{admin-c.password}}")], codes, at(APP));
+    assert.ok(!results[0].includes("hunt"), results[0]);
+    assert.deepEqual(codes, [null]);
+  }
+  const [pw] = makePw(1, "cannot fill 'hunter2' into e3", "");
+  const { results } = await run9(pw, [A("fill", "e3", "{{admin-c.password}}")], undefined, at(APP));
+  assert.equal(results[0], "error: cannot fill '[SECRET admin-c.password]' into e3");
+});
+
+test("twofa_totp_by_account", async () => {
+  const want = totpAt(parseSecret(ACCT_TOTP), 59_000);
+  const asked: string[] = [];
+  const human: Human = { code: async (k) => { asked.push(k); return "000000"; }, approve: async () => {} };
+  const out = TWOFA_OUT.replace("287082", want);
+  const [pw, calls] = makePw(0, "", out);
+  const codes: (string | null)[] = [];
+  const ok1 = await run9(pw, [A("twofa", "totp", "e5", "admin-c")], codes, at(APP), tf(human));
+  assert.deepEqual(ok1.results, ["ok"]);
+  assert.deepEqual(calls, [["fill", "e5", want, "--submit"]]);
+  assert.deepEqual(codes, ["await page.getByLabel('Code').fill('[2FA CODE]');"]);
+
+  const [pw2, calls2] = makePw(0, "", out);
+  const refused = await run9(pw2, [A("twofa", "totp", "e5", "admin-c")], undefined, at("https://evil.test"), tf(human));
+  assert.match(refused.results[0], /^error: refusing to enter a TOTP code on https:\/\/evil\.test: not an allowed origin/);
+  const noOrigin = await run9(pw2, [A("twofa", "totp", "e5", "admin-c")], undefined, at(null), tf(human));
+  assert.match(noOrigin.results[0], /^error: refusing to enter a TOTP code: no page origin/);
+  const none = await run9(pw2, [A("twofa", "totp", "e5", "admin-c")], undefined, at(APP, runAccounts(null)), tf(human));
+  assert.deepEqual(none.results, ["error: account 'admin-c' has no TOTP secret"]);
+  const unknown = await run9(pw2, [A("twofa", "totp", "e5", "zz")], undefined, at(APP), tf(human));
+  assert.deepEqual(unknown.results, ["error: no account 'zz' in this run"]);
+  const noAccounts = await run9(pw2, [A("twofa", "totp", "e5", "admin-c")], undefined, null, tf(human));
+  assert.deepEqual(noAccounts.results, ["error: no account 'admin-c' in this run"]);
+  assert.deepEqual(calls2, []);
+  assert.deepEqual(asked, [], "the human is never asked");
 });

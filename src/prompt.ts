@@ -64,6 +64,8 @@ export interface PromptOptions {
   nudge?: string | null;
   paste?: boolean;
   environment?: string | null;
+  /** The run's accounts (harness text: ids, labels, usernames; never a secret). */
+  accounts?: string | null;
 }
 
 export function buildPrompt(
@@ -73,13 +75,15 @@ export function buildPrompt(
   history: StepRecord[],
   memory: string,
   obs: Observation,
-  { window = HISTORY_WINDOW, nudge = null, paste = true, environment = null }: PromptOptions = {},
+  { window = HISTORY_WINDOW, nudge = null, paste = true, environment = null, accounts = null }: PromptOptions = {},
 ): string {
   const lines = historyLines(history, window);
   const parts = [
     `Step ${step}/${maxSteps}`,
     section("task", task),
     ...(environment ? [section("environment", neutralise(environment))] : []),
+    // Built by the harness, so there is nothing to escape.
+    ...(accounts ? [section("accounts", accounts)] : []),
     section("memory", memory || "(empty)"),
     section("tabs", neutralise(obs.tabs)),
     section("history", lines.length ? lines.join("\n") : "(none)"),

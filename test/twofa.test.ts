@@ -190,3 +190,11 @@ test("totpFor_counts_an_attempt", async () => {
   for (let i = 0; i < MAX_TWOFA_ATTEMPTS; i++) await tf.totpFor("JBSWY3DPEHPK3PXP");
   await assert.rejects(tf.totpFor("JBSWY3DPEHPK3PXP"), TwoFactorError);
 });
+
+test("check_twofa_args_third_must_be_id", () => {
+  assert.equal(checkTwofaArgs(["totp", "e5", "admin-c"]), null);
+  assert.equal(checkTwofaArgs(["totp", "e5", "Bad!"]), "error: twofa totp: 'Bad!' is not an account id");
+  assert.equal(checkTwofaArgs(["totp", "e5", "-a"]), "error: twofa totp: '-a' is not an account id");
+  assert.equal(checkTwofaArgs(["totp", "e5", "a", "b"]), "error: twofa totp needs the element ref of the code field");
+  assert.equal(checkTwofaArgs(["sms", "e5", "admin-c"]), "error: twofa sms needs the element ref of the code field");
+});

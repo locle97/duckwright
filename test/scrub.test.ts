@@ -121,3 +121,18 @@ test("named_marker_wins_over_plain_secret_and_code_for_the_same_value", () => {
   s.addNamedSecret("samevalue", secretMarker("a"));
   assert.equal(s.scrub("samevalue"), "[SECRET a.password]");
 });
+
+test("named_secret_is_found_in_quoted_code", () => {
+  const s = new Scrubber();
+  s.addNamedSecret(`it's "x"\\`, secretMarker("a"));
+  assert.equal(s.scrub(`fill('it\\'s "x"\\\\')`), `fill('[SECRET a.password]')`);
+  assert.equal(s.scrub(`{"v":"it's \\"x\\"\\\\"}`), `{"v":"[SECRET a.password]"}`);
+  assert.equal(s.scrub(`typed it's "x"\\ here`), `typed [SECRET a.password] here`);
+});
+
+test("named_secret_is_found_url_encoded", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("p@ss word&", secretMarker("a"));
+  assert.equal(s.scrub("user=u&password=p%40ss+word%26&x=1"), "user=u&password=[SECRET a.password]&x=1");
+  assert.equal(s.scrub("?pw=p%40ss%20word%26"), "?pw=[SECRET a.password]");
+});

@@ -4,6 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadRunAccounts } from "../accounts/runAccounts.ts";
+import type { RunAccounts } from "../accounts/runAccounts.ts";
+import { AccountError } from "../accounts/store.ts";
 import type { RunArgs } from "../args.ts";
 import { Brain } from "../brain.ts";
 import { RunControl } from "../control.ts";
@@ -26,6 +29,7 @@ import type { Runner } from "../proc.ts";
 import type { StepRecord } from "../prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../pw.ts";
 import { makeRunDir, resetRunDir, runIdOf } from "../rundir.ts";
+import { Scrubber, scrubTree } from "../scrub.ts";
 import { SECRET_ENV, createTwoFactor } from "../twofa.ts";
 import type { Human } from "../twofa.ts";
 import { jsonlSink } from "./sink.ts";
@@ -154,6 +158,22 @@ function failure(
   };
 }
 
+/**
+ * playwright-cli keeps its own logs and snapshots in `.playwright-cli/` (in the current folder), which
+ * can hold what was typed: mask the run's secrets there and keep the folder out of git. Never creates it.
+ */
+function cleanPlaywrightCli(scrubber: Scrubber): void {
+  const dir = path.resolve(".playwright-cli");
+  if (!fs.existsSync(dir)) return;
+  scrubTree(dir, scrubber);
+  const ignore = path.join(dir, ".gitignore");
+  try {
+    fs.writeFileSync(ignore, "*\n", { flag: "wx" });
+  } catch {
+    // already there (or not writable): leave it
+  }
+}
+
 export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
   const events = new RunEvents();
   const runAbort = new AbortController();
@@ -186,6 +206,8 @@ async function execute(
   let agent: AgentLike | null = null;
   let outcome: RunOutcome;
   let envRecord: { name: string; path: string } | null = null;
+  let accounts: RunAccounts | null = null;
+  let scrubber: Scrubber | null = null;
   // Let the caller subscribe before anything is emitted.
   await Promise.resolve();
   try {
@@ -199,6 +221,10 @@ async function execute(
       timeoutSec: args.twofaTimeout,
       signal, events,
     });
+    scrubber = twofa.scrubber;
+    // Explore runs get no accounts.
+    accounts = !spec.explore && env ? loadRunAccounts(process.cwd(), env.name, args.accounts) : null;
+    accounts?.seed(twofa.scrubber);
     const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
     let log: DebugLog | null = null;
     if (args.debug) {
@@ -231,6 +257,7 @@ async function execute(
       maxSteps: args.maxSteps, headed: args.headed, state: args.state ? resolvePath(args.state) : null,
       snapshotMode: args.snapshot, network: args.network, consoleErrors: spec.consoleErrors ?? false, video: args.video, screenshot: args.screenshot,
       signal, events, control, twofa, environment: env?.text ?? null,
+      ...(accounts ? { accounts } : {}),
       ...(spec.explore
         ? {
           notes: new NoteSink(workdir, spec.explore.host, spec.explore.writes?.marker),
@@ -254,7 +281,7 @@ async function execute(
       code = 130;
     } else if (e instanceof PlaywrightError) {
       message = `playwright error: ${e.message}`;
-    } else if (e instanceof EnvError) {
+    } else if (e instanceof EnvError || e instanceof AccountError) {
       message = e.message;
     } else if (e instanceof JevAuthError) {
       message = "jev error: invalid TYPESAFE_API_KEY";
@@ -269,6 +296,8 @@ async function execute(
       written = null;
     }
     outcome = failure(message, code, collected.length, cost, written, [...ev.warnings], ev.video);
+  } finally {
+    if (accounts !== null && scrubber !== null) cleanPlaywrightCli(scrubber);
   }
   events.emit({ type: "run:end", outcome });
   return outcome;

@@ -2187,3 +2187,12 @@ test("preflight_without_env_never_touches_the_database", async () => {
   assert.equal(await main(["-p", ...e.argv], e.deps({ createAgent })), 0);
   assert.equal(fs.existsSync(path.join(e.tmp, ".duckwright")), false);
 });
+
+test("explore_is_not_blocked_by_accounts_without_base_url", async () => {
+  const e = exploreEnv();
+  envFile(e.tmp, "dev", "DEV");
+  seedAccounts(e.tmp, null);
+  const seen: AgentOptions[] = [];
+  assert.equal(await main([...e.argv, "--env", "dev"], e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0, e.err.join("\n"));
+  assert.equal(seen[0].accounts, undefined);
+});

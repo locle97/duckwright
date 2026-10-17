@@ -1,5 +1,6 @@
 // 2FA for a run: where the code comes from (the env secret, or a human), how long to wait for a
 // human, and how many tries. Front ends only supply a Human; nothing here knows about terminals or Ink.
+import { ID_RE } from "./accounts/store.ts";
 import type { RunEvents, RunEventInput, TwofaWait } from "./events.ts";
 import { AbortedError } from "./proc.ts";
 import { Scrubber } from "./scrub.ts";
@@ -140,14 +141,17 @@ export function createTwoFactor(o: TwoFactorOptions): TwoFactor {
   };
 }
 
-/** Static check of a `twofa` action's args; the message is the action's result. */
+/** Static check of a `twofa` action's args (`totp` may name an account); the message is the action's result. */
 export function checkTwofaArgs(args: string[]): string | null {
   const kind = args[0];
   if (kind === "passkey") return args.length === 1 ? null : "error: twofa passkey takes no other argument";
   if (kind !== "totp" && kind !== "sms" && kind !== "email") {
     return `error: twofa needs a kind: ${TWOFA_KINDS.join(", ")}`;
   }
-  if (args.length !== 2 || !REF.test(args[1])) return `error: twofa ${kind} needs the element ref of the code field`;
+  // `twofa totp <ref> <id>` uses that account's own TOTP secret.
+  const max = kind === "totp" ? 3 : 2;
+  if (args.length < 2 || args.length > max || !REF.test(args[1])) return `error: twofa ${kind} needs the element ref of the code field`;
+  if (args.length === 3 && !ID_RE.test(args[2])) return `error: twofa totp: '${args[2]}' is not an account id`;
   return null;
 }
 
