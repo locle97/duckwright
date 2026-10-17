@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALLOWED_TOOLS, claudeArgv, mcpConfig, parseStreamLine, spawnClaude, type ClaudeTurn } from "../../src/chat/claude.ts";
+import { ALLOWED_TOOLS, DISALLOWED_TOOLS, claudeArgv, mcpConfig, parseStreamLine, spawnClaude, type ClaudeTurn } from "../../src/chat/claude.ts";
 
 const turn = (resume: string | null): ClaudeTurn => ({
   model: "sonnet", resume, skillsDir: "/p/skills",
@@ -22,7 +22,11 @@ test("argv for a first turn", () => {
   assert.equal(after(argv, "--setting-sources"), "");
   assert.ok(argv.includes("--strict-mcp-config"));
   // --allowedTools is variadic: a flag must follow its values.
-  assert.equal(argv[argv.indexOf("--allowedTools") + ALLOWED_TOOLS("/p/skills").length + 1], "--add-dir");
+  assert.equal(argv[argv.indexOf("--allowedTools") + ALLOWED_TOOLS("/p/skills").length + 1], "--disallowedTools");
+  const deny = argv.indexOf("--disallowedTools");
+  assert.deepEqual(argv.slice(deny + 1, deny + 5),
+    ["Read(.duckwright/local/**)", "Read(.duckwright/chats/**)", "Edit(.duckwright/local/**)", "Edit(.duckwright/chats/**)"]);
+  assert.equal(argv[deny + DISALLOWED_TOOLS.length + 1], "--add-dir");
 });
 
 test("argv resumes", () => {
@@ -46,6 +50,9 @@ test("allowed tools: exact skill scripts, no bare Bash or Write, no npx tsc/esli
     assert.ok(t.includes(`Bash(node /p/skills/${s}:*)`), s);
   }
   assert.equal(t.filter((r) => r.startsWith("Bash(node ")).length, 6);
+  assert.ok(!t.includes("Edit(.duckwright/**)"));
+  assert.ok(!t.some((r) => r.includes(".duckwright/local") || r.includes(".duckwright/chats")));
+  for (const keep of ["Edit(.duckwright/facts/**)", "Edit(.duckwright/probes/**)", "Edit(.duckwright/testing-map.md)"]) assert.ok(t.includes(keep), keep);
   for (const gone of ["Bash(npx tsc:*)", "Bash(npx eslint:*)", "Bash(npx prettier:*)"]) assert.ok(!t.includes(gone), gone);
   for (const keep of ["Bash(npm run lint:*)", "Bash(npm run typecheck:*)", "Edit(.gitignore)", "Edit(**/*.test.ts)",
     "Edit(**/*.test.js)", "Edit(e2e/**)", "Edit(tests/**)", "Edit(playwright/**)"]) assert.ok(t.includes(keep), keep);

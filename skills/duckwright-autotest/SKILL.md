@@ -22,10 +22,12 @@ line):
   `duckwright explore`, `npx playwright test`, `npm run typecheck` and `npm run lint`. No other command,
   no `npx tsc`, `npx eslint` or `npx prettier`; when the project has no such npm script, say so in the
   report instead of checking another way.
-- Write and Edit: `tasks/`, `.duckwright/`, `environments/`, `CLAUDE.md`, `.gitignore`, and for the
+- Write and Edit: `tasks/`, `environments/`, `.duckwright/testing-map.md`, `.duckwright/facts/`,
+  `.duckwright/probes/`, `CLAUDE.md`, `.gitignore`, and for the
   Playwright step `*.spec.ts`, `*.spec.js`, `*.test.ts`, `*.test.js` and files under `e2e/`, `tests/` and
   `playwright/`. Anything else the other skills would change (a Playwright config, `package.json`), propose
   as a diff in the report.
+- Never readable or writable: `.duckwright/local/` (the accounts database) and `.duckwright/chats/`.
 
 ## 1. Read
 

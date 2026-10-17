@@ -443,7 +443,7 @@ test("upload saves a file and refuses one over 10 MiB", async () => {
   const h = { ...authed, origin: `http://127.0.0.1:${server.port}`, "content-type": "application/octet-stream" };
   const ok = await request(server.port, "POST", `/api/chats/${id}/uploads?name=a.txt`, { headers: h, body: "hello" });
   assert.equal(ok.status, 200);
-  assert.match(JSON.parse(ok.body).path, /uploads\/a\.txt$/);
+  assert.match(JSON.parse(ok.body).path, /^\.duckwright\/uploads\/[a-z0-9-]+\/a\.txt$/);
   const big = await request(server.port, "POST", `/api/chats/${id}/uploads?name=big.bin`, { headers: h, body: "x".repeat(10 * 1024 * 1024 + 1) });
   assert.equal(big.status, 413);
   const noOrigin = await request(server.port, "POST", `/api/chats/${id}/uploads?name=a.txt`, { headers: authed, body: "hi" });

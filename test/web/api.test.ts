@@ -328,5 +328,5 @@ test("POST uploads saves the raw body", async () => {
   const u = new URL(`/api/chats/${id}/uploads?name=a.txt`, "http://x");
   const r = await handleApi(ctx, { method: "POST", path: u.pathname, query: u.searchParams, body: Buffer.from("hi") });
   assert.equal(r.status, 200);
-  assert.match((r.body as any).path, /uploads\/a\.txt$/);
+  assert.match((r.body as any).path, /^\.duckwright\/uploads\/[a-z0-9-]+\/a\.txt$/);
 });

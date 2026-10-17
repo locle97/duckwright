@@ -26,7 +26,9 @@ export const SKILL_SCRIPTS = [
 /** Edit(...) rules also cover the Write tool; there is no bare Bash. A guard rail, not a sandbox. */
 export const ALLOWED_TOOLS = (skillsDir: string): string[] => [
   "Read", "Grep", "Glob",
-  "Edit(tasks/**)", "Edit(.duckwright/**)", "Edit(environments/**)", "Edit(CLAUDE.md)", "Edit(.gitignore)",
+  "Edit(tasks/**)", "Edit(environments/**)", "Edit(CLAUDE.md)", "Edit(.gitignore)",
+  // Only the parts of .duckwright/ the skills write; never the accounts database or the chats.
+  "Edit(.duckwright/facts/**)", "Edit(.duckwright/probes/**)", "Edit(.duckwright/testing-map.md)",
   ...SKILL_SCRIPTS.map((s) => `Bash(node ${skillsDir}/${s}:*)`),
   "Bash(duckwright check:*)", "Bash(duckwright explore:*)",
   "Bash(npx playwright test:*)",
@@ -35,6 +37,15 @@ export const ALLOWED_TOOLS = (skillsDir: string): string[] => [
   "Edit(**/*.spec.ts)", "Edit(**/*.spec.js)", "Edit(**/*.test.ts)", "Edit(**/*.test.js)",
   "Edit(e2e/**)", "Edit(tests/**)", "Edit(playwright/**)",
   "mcp__duckwright__*",
+];
+
+/**
+ * Denied even to Read, Grep and Glob: the plaintext accounts database, and the chats (another chat's
+ * transcript, the shared system prompt an injected instruction could persist in, the turn's MCP bearer).
+ */
+export const DISALLOWED_TOOLS = [
+  "Read(.duckwright/local/**)", "Read(.duckwright/chats/**)",
+  "Edit(.duckwright/local/**)", "Edit(.duckwright/chats/**)",
 ];
 
 /** The prompt goes on stdin, so a message starting with "-" or holding newlines is never parsed as argv. */
@@ -47,8 +58,9 @@ export function claudeArgv(t: ClaudeTurn): string[] {
     "--permission-mode", "dontAsk",
     "--setting-sources", "",
     "--tools", "Read,Grep,Glob,Write,Edit,Bash",
-    // --allowedTools takes several values, so a -- flag must follow it.
+    // --allowedTools and --disallowedTools take several values, so a -- flag must follow each.
     "--allowedTools", ...ALLOWED_TOOLS(t.skillsDir),
+    "--disallowedTools", ...DISALLOWED_TOOLS,
     "--add-dir", t.skillsDir,
     "--append-system-prompt-file", t.systemPromptFile,
     "--mcp-config", t.mcpConfigFile,

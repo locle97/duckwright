@@ -36,7 +36,7 @@ test("list is newest first", () => {
 test("saveUpload never overwrites and strips folders", () => {
   const s = mk();
   const c = s.create({ model: "m", ceilingUsd: 1 });
-  const base = `.duckwright/chats/${c.id}/uploads`;
+  const base = `.duckwright/uploads/${c.id}`; // readable by the agent, unlike .duckwright/chats/
   assert.equal(s.saveUpload(c.id, "../../x.md", Buffer.from("a")), `${base}/x.md`);
   assert.equal(s.saveUpload(c.id, "../../x.md", Buffer.from("b")), `${base}/x-2.md`);
 });

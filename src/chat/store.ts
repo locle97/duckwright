@@ -1,5 +1,6 @@
-// Chats on disk: `<root>/.duckwright/chats/<id>/` holds chat.json (meta), transcript.jsonl (one
-// message per line) and uploads/. Secrets are redacted before a message is written.
+// Chats on disk: `<root>/.duckwright/chats/<id>/` holds chat.json (meta) and transcript.jsonl (one
+// message per line); the person's uploads go to `<root>/.duckwright/uploads/<id>/`, outside the
+// chats folder the agent may not read. Secrets are redacted before a message is written.
 import fs from "node:fs";
 import path from "node:path";
 import { randomLabel } from "../rundir.ts";
@@ -104,7 +105,7 @@ export class ChatStore {
   }
 
   saveUpload(id: ChatId, name: string, data: Buffer): string {
-    const dir = path.join(this.folder(id), "uploads");
+    const dir = path.join(this.root, ".duckwright", "uploads", id);
     fs.mkdirSync(dir, { recursive: true });
     const base = path.basename(name.replaceAll("\\", "/")).replace(/^\.+$/, "") || "file";
     const { name: stem, ext } = path.parse(base);
