@@ -84,16 +84,26 @@ export class RunTracker {
     return false;
   }
 
-  settled(ids: TaskId[]): Promise<void> {
-    if (!this.#busy(ids)) return Promise.resolve();
+  /** True once every task in `ids` has settled; false if `signal` aborts first, and the wait is dropped. */
+  settled(ids: TaskId[], signal?: AbortSignal): Promise<boolean> {
+    if (!this.#busy(ids)) return Promise.resolve(true);
+    if (signal?.aborted) return Promise.resolve(false);
     return new Promise((resolve) => {
-      const check = () => {
-        if (this.#busy(ids)) return;
+      const finish = (done: boolean) => {
         this.#waiters.delete(check);
-        resolve();
+        signal?.removeEventListener("abort", onAbort);
+        resolve(done);
       };
+      const check = () => { if (!this.#busy(ids)) finish(true); };
+      const onAbort = () => finish(false);
       this.#waiters.add(check);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
+  }
+
+  /** How many settled() calls are still waiting. */
+  get waiting(): number {
+    return this.#waiters.size;
   }
 
   close(): void {

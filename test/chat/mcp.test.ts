@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { handleMcp, MCP_TOOLS } from "../../src/chat/mcp.ts";
+import { handleMcp, MCP_TOOLS, WAIT_CAP_SEC } from "../../src/chat/mcp.ts";
 import type { JsonRpc, McpHost } from "../../src/chat/mcp.ts";
 import { RunTracker } from "../../src/chat/tracker.ts";
 import type { Phase } from "../../src/chat/types.ts";
@@ -65,6 +65,29 @@ test("wait times out with done false", async () => {
   const r = body(await handleMcp(host, call("wait", { task_ids: [1] }), 0.05));
   assert.equal(r.done, false);
   assert.equal(r.results[0].state, "running");
+});
+
+test("a timed-out wait leaves no waiter behind", async () => {
+  const { host, tracker } = setup({ tasks: [snapshot(1, "a", { state: "running" })] });
+  assert.equal(body(await handleMcp(host, call("wait", { task_ids: [1] }), 0.05)).done, false);
+  assert.equal(tracker.waiting, 0);
+});
+
+test("wait defaults to and is capped at 240 s", async (t) => {
+  assert.equal(WAIT_CAP_SEC, 240);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const args of [{ task_ids: [1] }, { task_ids: [1], timeout_sec: 600 }]) {
+    const { host, tracker } = setup({ tasks: [snapshot(1, "a", { state: "running" })] });
+    let settled = false;
+    const p = handleMcp(host, call("wait", args)).then((r) => { settled = true; return r; });
+    await new Promise((r) => setImmediate(r));
+    t.mock.timers.tick(239_999);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(settled, false);
+    t.mock.timers.tick(1);
+    assert.equal(body(await p).done, false);
+    assert.equal(tracker.waiting, 0);
+  }
 });
 
 test("wait returns done true when the task finishes", async () => {

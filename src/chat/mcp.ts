@@ -28,7 +28,7 @@ export const MCP_TOOLS: { name: string; description: string; inputSchema: object
   { name: "open_plan", description: "Open a planned folder (or plan a plan file) in Duckwright.", inputSchema: obj({ folder: { type: "string" } }, ["folder"]) },
   { name: "run_plan", description: "Run an open plan's tasks.", inputSchema: obj({ plan_id: { type: "number" }, which: { type: "string", enum: ["all", "failed"] } }, ["plan_id"]) },
   { name: "run_task", description: "Run one task file.", inputSchema: obj({ file: { type: "string" }, env: { type: "string" } }, ["file"]) },
-  { name: "wait", description: "Wait for tasks or a plan to finish, up to a timeout.", inputSchema: obj({ task_ids: { type: "array", items: { type: "number" } }, plan_id: { type: "number" }, timeout_sec: { type: "number" } }) },
+  { name: "wait", description: "Wait for tasks or a plan to finish, up to timeout_sec (default and most 240). Call again while done is false.", inputSchema: obj({ task_ids: { type: "array", items: { type: "number" } }, plan_id: { type: "number" }, timeout_sec: { type: "number" } }) },
 ];
 
 function version(): string {
@@ -147,12 +147,10 @@ async function callTool(host: McpHost, name: string, a: Record<string, unknown>,
       if (Array.isArray(a.task_ids)) ids = a.task_ids.map((v) => num(v, "task_ids"));
       else if (a.plan_id !== undefined) ids = planTaskIds(host, num(a.plan_id, "plan_id"));
       else throw new ToolError("give task_ids or plan_id");
-      const sec = Math.min(a.timeout_sec === undefined ? 600 : num(a.timeout_sec, "timeout_sec"), waitCapSec);
-      let timer: NodeJS.Timeout | undefined;
-      const timeout = new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), Math.max(0, sec) * 1000);
-      });
-      const done = await Promise.race([host.tracker.settled(ids).then(() => true as const), timeout]);
+      const sec = Math.min(a.timeout_sec === undefined ? waitCapSec : num(a.timeout_sec, "timeout_sec"), waitCapSec);
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(), Math.max(0, sec) * 1000);
+      const done = await host.tracker.settled(ids, timeout.signal);
       clearTimeout(timer);
       return { done, results: host.tracker.results(ids) };
     }
@@ -161,7 +159,10 @@ async function callTool(host: McpHost, name: string, a: Record<string, unknown>,
   }
 }
 
-export async function handleMcp(host: McpHost, msg: JsonRpc, waitCapSec = 600): Promise<object | null> {
+/** Longest a `wait` holds the request; below the MCP client's own request timeout. */
+export const WAIT_CAP_SEC = 240;
+
+export async function handleMcp(host: McpHost, msg: JsonRpc, waitCapSec = WAIT_CAP_SEC): Promise<object | null> {
   const reply = (result: object) => ({ jsonrpc: "2.0", id: msg.id, result });
   if (msg.method.startsWith("notifications/")) return null;
   const params = (msg.params ?? {}) as Record<string, unknown>;

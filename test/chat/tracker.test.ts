@@ -60,3 +60,19 @@ test("settled waits for tasks queued in a plan and ownPlan owns the plan's tasks
   await p;
   t.close();
 });
+
+test("an aborted settled() resolves false and drops its waiter", async () => {
+  const m = new FakeManager([snapshot(1, "a", { state: "running", runId: "r1" })]);
+  const t = new RunTracker(m);
+  const ac = new AbortController();
+  const p = t.settled([1], ac.signal);
+  assert.equal(t.waiting, 1);
+  ac.abort();
+  assert.equal(await p, false);
+  assert.equal(t.waiting, 0);
+  assert.equal(await t.settled([1], ac.signal), false);
+  assert.equal(t.waiting, 0);
+  m.update(1, { state: "passed" });
+  assert.equal(await t.settled([1]), true);
+  t.close();
+});
