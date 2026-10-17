@@ -136,3 +136,44 @@ test("named_secret_is_found_url_encoded", () => {
   assert.equal(s.scrub("user=u&password=p%40ss+word%26&x=1"), "user=u&password=[SECRET a.password]&x=1");
   assert.equal(s.scrub("?pw=p%40ss%20word%26"), "?pw=[SECRET a.password]");
 });
+
+test("named_secret_is_found_form_urlencoded_with_reserved_marks", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("Passw0rd!", secretMarker("a"));
+  const body = new URLSearchParams([["user", "u"], ["pwd", "Passw0rd!"]]).toString();
+  assert.equal(s.scrub(body), "user=u&pwd=[SECRET a.password]");
+  s.addNamedSecret("it's (x)~ /é", secretMarker("b"));
+  const body2 = new URLSearchParams([["pwd", "it's (x)~ /é"]]).toString();
+  assert.equal(s.scrub(body2), "pwd=[SECRET b.password]");
+  assert.equal(s.scrub(`pwd=${encodeURIComponent("it's (x)~ /é").toLowerCase()}`), "pwd=[SECRET b.password]");
+});
+
+test("protected_text_is_never_partly_masked", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("password", secretMarker("admin-c"));
+  s.addProtected("{{admin-c.password}}");
+  s.addProtected("{{admin-c.username}}");
+  assert.equal(s.scrub("fill {{admin-c.password}} with password"), "fill {{admin-c.password}} with [SECRET admin-c.password]");
+  assert.equal(s.scrub("{{admin-c.username}}"), "{{admin-c.username}}");
+});
+
+test("protected_text_alone_leaves_the_scrubber_empty", () => {
+  const s = new Scrubber();
+  s.addProtected("{{a.password}}");
+  assert.equal(s.empty, true);
+});
+
+test("markers_and_masks_survive_a_second_scrub", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("admin", secretMarker("admin"));
+  s.addNamedSecret("pass", secretMarker("b"));
+  s.addSecret("RED");
+  s.addCode("1234");
+  const once = s.scrub("admin pass RED 1234 [SECRET admin.password]");
+  assert.equal(once, "[SECRET admin.password] [SECRET b.password] [REDACTED] [2FA CODE] [SECRET admin.password]");
+  assert.equal(s.scrub(once), once);
+  // a marker from another scrubber (masking only the passwords an action used) is kept too
+  const other = new Scrubber();
+  other.addNamedSecret("admin", secretMarker("admin"));
+  assert.equal(s.scrub(other.scrub("typed admin")), "typed [SECRET admin.password]");
+});

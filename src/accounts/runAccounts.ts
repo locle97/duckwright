@@ -50,8 +50,15 @@ export class RunAccounts implements Resolver {
     ].join("\n");
   }
 
-  /** Masks every account of the environment, pinned or not. */
+  /**
+   * Masks every account of the environment, pinned or not. Placeholders (and the generic ones in
+   * the rules text) are protected, so a short password never mangles one before it is substituted.
+   */
   seed(s: Scrubber): void {
+    for (const id of ["<id>", ...this.#all.map((a) => a.id)]) {
+      s.addProtected(`{{${id}.username}}`);
+      s.addProtected(`{{${id}.password}}`);
+    }
     for (const a of this.#all) {
       s.addNamedSecret(a.password, secretMarker(a.id));
       if (a.totpSecret) s.addSecret(a.totpSecret);

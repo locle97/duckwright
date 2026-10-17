@@ -1044,3 +1044,21 @@ test("loop_failed_fill_error_is_scrubbed", async () => {
   assert.deepEqual(r.history[0].results, [`error: cannot fill "${MARKER}"`]);
   assert.ok(!JSON.stringify([r, brain.prompts]).includes(PASSWORD));
 });
+
+for (const [id, username, password] of [["admin", "admin", "admin"], ["admin-c", "c@x.io", "password"], ["user-e", "e@x.io", "user"]] as const) {
+  test(`loop_short_password_keeps_placeholders_intact_${id}_${password}`, async () => {
+    const a = { env: "dev", id, label: "Acct", role: "", username, password, totpSecret: null };
+    const accounts = new RunAccounts("dev", [a], [a], ["https://app.test"]);
+    const pw = new LoginPW();
+    const brain = new FakeBrain([
+      dec([["fill", ["e2", `{{${id}.username}}`]], ["fill", ["e3", `{{${id}.password}}`]]]),
+      dec([["done", ["success", "ok"]]]),
+    ]);
+    const r = await agent(pw, brain, { accounts }).run();
+    assert.deepEqual(pw.filled, [["e2", username], ["e3", password]]);
+    assert.deepEqual(r.history[0].decision.actions.map((x) => x.args), [["e2", `{{${id}.username}}`], ["e3", `{{${id}.password}}`]]);
+    assert.ok(brain.prompts[1].includes(`{{${id}.password}}`));
+    assert.ok(brain.prompts[0].includes("use {{<id>.username}} and {{<id>.password}}"));
+    assert.ok(r.history[0].codes.some((c) => c?.includes(`fill('[SECRET ${id}.password]')`)));
+  });
+}
