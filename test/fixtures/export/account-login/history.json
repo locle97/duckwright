@@ -1,0 +1,34 @@
+{
+  "task": "log in as admin",
+  "task_file": null,
+  "env": { "name": "dev", "path": "envs/dev.md" },
+  "success": true,
+  "answer": "",
+  "steps": 4,
+  "cost_usd": 0,
+  "history": [
+    {
+      "step": 1, "evaluation_previous_goal": "", "memory": "", "next_goal": "",
+      "actions": [{ "cmd": "goto", "args": ["https://example.com/login"], "code": "await page.goto('https://example.com/login');" }],
+      "results": ["ok"]
+    },
+    {
+      "step": 2, "evaluation_previous_goal": "", "memory": "", "next_goal": "",
+      "actions": [
+        { "cmd": "fill", "args": ["e1", "{{admin-c.username}}"], "code": "await page.getByRole('textbox', { name: 'Email' }).fill('admin@example.com');" },
+        { "cmd": "fill", "args": ["e2", "{{admin-c.password}}"], "code": "await page.getByRole('textbox', { name: 'Password' }).fill('[SECRET admin-c.password]');" }
+      ],
+      "results": ["ok", "ok"]
+    },
+    {
+      "step": 3, "evaluation_previous_goal": "", "memory": "", "next_goal": "",
+      "actions": [{ "cmd": "twofa", "args": ["totp", "e5", "admin-c"], "code": "await page.getByLabel('Code').fill('[2FA CODE]');" }],
+      "results": ["ok"]
+    },
+    {
+      "step": 4, "evaluation_previous_goal": "", "memory": "", "next_goal": "",
+      "actions": [{ "cmd": "expect", "args": ["url", "https://example.com/home"], "code": "await expect(page).toHaveURL('https://example.com/home');" }],
+      "results": ["ok"]
+    }
+  ]
+}

@@ -534,3 +534,74 @@ test("export accepts history with jev fields", () => {
   const withJev = { ...run([jevStep]), jev_steps: 1, claude_steps: 0 } as HistoryData;
   assert.equal(renderSpec(withJev).spec, renderSpec(plain).spec);
 });
+
+const PW_FILL = "await page.getByRole('textbox', { name: 'Password' }).fill('[SECRET admin-c.password]');";
+const withEnv = (data: HistoryData): HistoryData => ({ ...data, env: { name: "dev", path: "envs/dev.md" } });
+
+test("password_marker_exports_env_var", () => {
+  const { spec, warnings } = renderSpec(withEnv(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["fill", ["e12", "{{admin-c.password}}"], PW_FILL]]),
+    step([["expect", ["url", "https://example.com/home"], EXPECT]]),
+  ])));
+  assert.ok(spec.includes("  await page.getByRole('textbox', { name: 'Password' }).fill(process.env.DW_DEV_ADMIN_C_PASSWORD);\n"));
+  assert.ok(!spec.includes("[SECRET"));
+  assert.deepEqual(warnings, ["this test reads these environment variables: DW_DEV_ADMIN_C_PASSWORD"]);
+});
+
+test("password_marker_handles_double_and_backtick_quotes", () => {
+  const { spec } = renderSpec(withEnv(run([
+    step([["fill", ["e1", "{{admin-c.password}}"], 'await a.fill("[SECRET admin-c.password]");\nawait b.fill(`[SECRET admin-c.password]`);']]),
+  ])));
+  assert.ok(spec.includes("await a.fill(process.env.DW_DEV_ADMIN_C_PASSWORD);"));
+  assert.ok(spec.includes("await b.fill(process.env.DW_DEV_ADMIN_C_PASSWORD);"));
+});
+
+test("password_marker_not_a_whole_string_throws", () => {
+  for (const code of ["await a.fill('x[SECRET admin-c.password]');", "await a.fill([SECRET admin-c.password]);"]) {
+    assert.throws(() => renderSpec(withEnv(run([step([["fill", ["e1", "x"], code]])]))),
+      exportError(1, /password for 'admin-c' in step 1 is not a whole string; edit the test by hand/));
+  }
+});
+
+test("twofa_totp_account_exports_named_secret", () => {
+  const { spec, warnings } = renderSpec(withEnv(run([
+    step([["goto", ["https://example.com/login"], GOTO]]),
+    step([["twofa", ["totp", "e5", "admin-c"], MASKED_FILL]]),
+    step([["expect", ["url", "https://example.com/home"], EXPECT]]),
+  ])));
+  assert.ok(spec.includes(TOTP_HELPER));
+  assert.ok(spec.includes("  await page.getByLabel('Code').fill(totp(process.env.DW_DEV_ADMIN_C_TOTP, 'DW_DEV_ADMIN_C_TOTP')); // 2FA\n"));
+  assert.deepEqual(warnings, ["this test reads these environment variables: DW_DEV_ADMIN_C_TOTP"]);
+});
+
+test("twofa_totp_without_account_unchanged", () => {
+  const { spec, warnings } = renderSpec(withEnv(run([
+    step([["twofa", ["totp", "e5"], MASKED_FILL]]),
+    step([["expect", ["url", "u"], EXPECT]]),
+  ])));
+  assert.ok(spec.includes("fill(totp()); // 2FA"));
+  assert.deepEqual(warnings, []);
+});
+
+test("marker_without_env_throws_export_error", () => {
+  assert.throws(() => renderSpec(run([step([["fill", ["e1", "{{admin-c.password}}"], PW_FILL]])])), exportError(1, /no environment/));
+  assert.throws(() => renderSpec(run([step([["twofa", ["totp", "e5", "admin-c"], MASKED_FILL]])])), exportError(1, /no environment/));
+});
+
+test("env_var_warning_listed", () => {
+  const { warnings } = renderSpec(withEnv(run([
+    step([["fill", ["e1", "{{admin-c.password}}"], PW_FILL]]),
+    step([["fill", ["e1", "{{admin-c.password}}"], PW_FILL]]),
+    step([["twofa", ["totp", "e5", "admin-c"], MASKED_FILL]]),
+    step([["fill", ["e2", "{{b.password}}"], PW_FILL.replace("admin-c", "b")]]),
+    step([["expect", ["url", "u"], EXPECT]]),
+  ])));
+  assert.deepEqual(warnings, ["this test reads these environment variables: DW_DEV_ADMIN_C_PASSWORD, DW_DEV_ADMIN_C_TOTP, DW_DEV_B_PASSWORD"]);
+});
+
+test("fixture_account_login_matches_expected", () => {
+  const dir = path.join(FIXTURES, "export", "account-login");
+  const { spec } = renderSpec(loadHistory(dir).data);
+  assert.equal(spec, fs.readFileSync(path.join(dir, "expected.spec.ts"), "utf8"));
+});
