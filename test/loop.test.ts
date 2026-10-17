@@ -17,6 +17,7 @@ import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "../src/pw.ts";
 import { createTwoFactor } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
+import { RunAccounts } from "../src/accounts/runAccounts.ts";
 import { WriteGuard, readRefusals } from "../src/explore/guard.ts";
 
 class FakePW extends PlaywrightCLI {
@@ -966,4 +967,109 @@ test("without a guard the same click runs and no refusal file is written", async
   assert.equal(r.history[0].results[0], "ok");
   assert.equal(pw.calls.some(([k]) => k === "click"), true);
   assert.equal(fs.existsSync(path.join(workdir, "refused.jsonl")), false);
+});
+
+// ---- accounts ----
+
+const PASSWORD = "hunter2";
+const MARKER = "[SECRET a.password]";
+function loopAccounts(): RunAccounts {
+  const a = { env: "dev", id: "a", label: "Admin", role: "admin", username: "a@x.io", password: PASSWORD, totpSecret: null };
+  return new RunAccounts("dev", [a], [a], ["https://app.test"]);
+}
+
+/** A login page that echoes what was typed, in the snapshot, the playwright code and the tab title. */
+class LoginPW extends FakePW {
+  filled: string[][] = [];
+  last = "";
+  override async run(cmd: string, args: string[]): Promise<ProcResult> {
+    this.calls.push([cmd, [...args]]);
+    if (cmd === "tab-list") return { code: 0, stdout: `### Result\n- 0: (current) [Login ${this.last}](https://app.test/login)\n`, stderr: "" };
+    if (cmd === "fill") {
+      this.filled.push([...args]);
+      this.last = args[1];
+      return { code: 0, stdout: `### Ran Playwright code\n\`\`\`js\nawait page.getByLabel('Password').fill('${args[1]}');\n\`\`\`\n`, stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  }
+  override async snapshot(p: string): Promise<string> {
+    const text = `- textbox "Password": "${this.last}"`;
+    fs.writeFileSync(p, text);
+    return text;
+  }
+}
+
+for (const withTwofa of [true, false]) test(`loop_echoed_password_scrubbed${withTwofa ? "" : "_without_twofa"}`, async () => {
+  const workdir = tmpDir();
+  const accounts = loopAccounts();
+  const tf = twofa();
+  if (withTwofa) accounts.seed(tf.scrubber);
+  const pw = new LoginPW();
+  const brain = new FakeBrain([
+    dec([["fill", ["e3", "{{a.password}}"]]]),
+    dec([["done", ["success", `typed ${PASSWORD}`]]]),
+  ]);
+  const files: string[] = [];
+  const base = brain.decide.bind(brain);
+  brain.decide = async (prompt: string, grep = true, s?: StepInput) => {
+    files.push(fs.readFileSync(path.join(workdir, "page", "snapshot.yml"), "utf8"));
+    return base(prompt, grep, s);
+  };
+  const events = new RunEvents();
+  const seen: RunEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  const r = await agent(pw, brain, { workdir, events, accounts, ...(withTwofa ? { twofa: tf } : {}) }).run();
+  assert.deepEqual(pw.filled, [["e3", PASSWORD]]);
+  assert.ok(brain.prompts[0].includes("<accounts>\n- a: Admin (admin) — username a@x.io"));
+  assert.ok(brain.prompts[1].includes(`"${MARKER}"`));
+  assert.equal(files[1], `- textbox "Password": "${MARKER}"`);
+  assert.deepEqual(r.history[0].codes, [`await page.getByLabel('Password').fill('${MARKER}');`]);
+  assert.deepEqual(r.history[0].decision.actions[0].args, ["e3", "{{a.password}}"]);
+  assert.equal(r.answer, `typed ${MARKER}`);
+  const blob = JSON.stringify([r, seen, brain.prompts, brain.steps, files, fs.readFileSync(path.join(workdir, "page", "snapshot.yml"), "utf8")]);
+  assert.ok(!blob.includes(PASSWORD));
+  const results = seen.filter((e) => e.type === "action:result");
+  assert.ok(JSON.stringify(results).includes(MARKER));
+});
+
+test("loop_failed_fill_error_is_scrubbed", async () => {
+  class FailPW extends LoginPW {
+    override async run(cmd: string, args: string[]): Promise<ProcResult> {
+      if (cmd === "fill") return { code: 1, stdout: "", stderr: `cannot fill "${args[1]}"` };
+      return super.run(cmd, args);
+    }
+  }
+  const brain = new FakeBrain([dec([["fill", ["e3", "{{a.password}}"]]]), dec([["done", ["failure", "x"]]])]);
+  const r = await agent(new FailPW(), brain, { accounts: loopAccounts() }).run();
+  assert.deepEqual(r.history[0].results, [`error: cannot fill "${MARKER}"`]);
+  assert.ok(!JSON.stringify([r, brain.prompts]).includes(PASSWORD));
+});
+
+for (const [id, username, password] of [["admin", "admin", "admin"], ["admin-c", "c@x.io", "password"], ["user-e", "e@x.io", "user"]] as const) {
+  test(`loop_short_password_keeps_placeholders_intact_${id}_${password}`, async () => {
+    const a = { env: "dev", id, label: "Acct", role: "", username, password, totpSecret: null };
+    const accounts = new RunAccounts("dev", [a], [a], ["https://app.test"]);
+    const pw = new LoginPW();
+    const brain = new FakeBrain([
+      dec([["fill", ["e2", `{{${id}.username}}`]], ["fill", ["e3", `{{${id}.password}}`]]]),
+      dec([["done", ["success", "ok"]]]),
+    ]);
+    const r = await agent(pw, brain, { accounts }).run();
+    assert.deepEqual(pw.filled, [["e2", username], ["e3", password]]);
+    assert.deepEqual(r.history[0].decision.actions.map((x) => x.args), [["e2", `{{${id}.username}}`], ["e3", `{{${id}.password}}`]]);
+    assert.ok(brain.prompts[1].includes(`{{${id}.password}}`));
+    assert.ok(brain.prompts[0].includes("use {{<id>.username}} and {{<id>.password}}"));
+    assert.ok(r.history[0].codes.some((c) => c?.includes(`fill('[SECRET ${id}.password]')`)));
+  });
+}
+
+test("loop_brain_error_text_is_scrubbed", async () => {
+  const events = new RunEvents();
+  const seen: RunEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  const r = await agent(new LoginPW(), new FakeBrain([new BrainError(`bad output ${PASSWORD}`)]), { events, accounts: loopAccounts(), maxFailures: 1 }).run();
+  assert.equal(r.answer, `stopped after 1 consecutive brain failures: bad output ${MARKER}`);
+  assert.deepEqual(r.history[0].results, [`brain error: bad output ${MARKER}`]);
+  assert.ok(!JSON.stringify([r, seen]).includes(PASSWORD));
+  assert.ok(JSON.stringify(seen.filter((e) => e.type === "brain:error")).includes(MARKER));
 });

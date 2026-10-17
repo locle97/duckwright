@@ -18,6 +18,7 @@ import type { StepRecord } from "../src/prompt.ts";
 import { PlaywrightError } from "../src/pw.ts";
 import { JevAuthError } from "../src/jev.ts";
 import { TwoFactorError } from "../src/twofa.ts";
+import { AccountStore } from "../src/accounts/store.ts";
 import { TaskFileError } from "../src/taskfile.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
@@ -2137,4 +2138,75 @@ test("explore_allow_writes_on_other_commands_is_a_usage_error", async () => {
   const e = exploreEnv();
   assert.equal(await main(["--allow-writes", "do a thing", "--skill", e.argv[3]], e.deps({})), 2);
   assert.ok(e.err.some((l) => l.includes("unrecognized arguments: --allow-writes")));
+});
+
+function seedAccounts(tmp: string, baseUrl: string | null = "http://localhost:3000"): void {
+  const store = AccountStore.open(tmp, { create: true })!;
+  store.setEnvSettings({ name: "dev", baseUrl: "http://localhost:3000", loginOrigins: [] });
+  store.saveAccount({ env: "dev", id: "admin", label: "Admin", role: "", username: "a@x.io", password: "pw" });
+  if (baseUrl === null) store.setEnvSettings({ name: "dev", baseUrl: null, loginOrigins: [] });
+  store.close();
+}
+
+test("preflight_accounts_without_env_exit_2", async () => {
+  const e = env();
+  taskFile(e.tmp, "---\naccounts: a\n---\nA\n");
+  assert.equal(await main(["-p", "--skill", e.argv[2], "-f", "tasks/t.md"], e.deps()), 2);
+  assert.match(e.err.join("\n"), /accounts: needs an environment/);
+  assert.equal(fs.existsSync(path.join(e.tmp, ".duckwright")), false);
+});
+
+test("preflight_unknown_account_exit_2", async () => {
+  const e = env();
+  envFile(e.tmp, "dev", "DEV");
+  seedAccounts(e.tmp);
+  taskFile(e.tmp, "---\nenv: dev\naccounts: zz\n---\nA\n");
+  assert.equal(await main(["-p", "--skill", e.argv[2], "-f", "tasks/t.md"], e.deps()), 2);
+  assert.deepEqual(e.err, ["environment 'dev' has no account 'zz'"]);
+});
+
+test("preflight_pinned_account_without_database_exit_2", async () => {
+  const e = env();
+  envFile(e.tmp, "dev", "DEV");
+  taskFile(e.tmp, "---\nenv: dev\naccounts: admin\n---\nA\n");
+  assert.equal(await main(["-p", "--skill", e.argv[2], "-f", "tasks/t.md"], e.deps()), 2);
+  assert.deepEqual(e.err, ["environment 'dev' has no account 'admin'"]);
+});
+
+test("preflight_env_accounts_no_base_url_exit_2", async () => {
+  const e = env();
+  envFile(e.tmp, "dev", "DEV");
+  seedAccounts(e.tmp, null);
+  assert.equal(await main(["-p", ...e.argv, "--env", "dev"], e.deps()), 2);
+  assert.deepEqual(e.err, ["environment 'dev' has accounts but no base URL"]);
+});
+
+test("preflight_without_env_never_touches_the_database", async () => {
+  const e = env();
+  const [, createAgent] = recordEnvs();
+  assert.equal(await main(["-p", ...e.argv], e.deps({ createAgent })), 0);
+  assert.equal(fs.existsSync(path.join(e.tmp, ".duckwright")), false);
+});
+
+test("explore_is_not_blocked_by_accounts_without_base_url", async () => {
+  const e = exploreEnv();
+  envFile(e.tmp, "dev", "DEV");
+  seedAccounts(e.tmp, null);
+  const seen: AgentOptions[] = [];
+  assert.equal(await main([...e.argv, "--env", "dev"], e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0, e.err.join("\n"));
+  assert.equal(seen[0].accounts, undefined);
+});
+
+function garbageDb(tmp: string): void {
+  fs.mkdirSync(path.join(tmp, ".duckwright", "local"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".duckwright", "local", "duckwright.db"), "this is not a sqlite database at all, just garbage text\n".repeat(20));
+}
+
+test("preflight_unreadable_database_exit_2", async () => {
+  const e = env();
+  envFile(e.tmp, "dev", "DEV");
+  garbageDb(e.tmp);
+  assert.equal(await main(["-p", ...e.argv, "--env", "dev"], e.deps()), 2);
+  assert.equal(e.err.length, 1);
+  assert.match(e.err[0], /^account database unreadable: .*duckwright\.db: /);
 });

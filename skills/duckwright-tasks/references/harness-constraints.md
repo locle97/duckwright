@@ -32,6 +32,13 @@ command and key lists).
 - Best: a **state file** (`state:` front matter, or `--state`), made once by a person with
   `playwright-cli state-save` (README, Authenticated pages). Relative to the task file. A missing file
   fails preflight with exit 2. An expired one lands the agent on the sign-in page.
+- **Accounts** (README, Accounts): an environment can hold log-in accounts, set up by a person on the web
+  UI's Environments page. The agent is told each account's id, role and username and logs in with
+  `{{<id>.username}}` and `{{<id>.password}}` as `fill`/`type` arguments (the password placeholder must be
+  the whole argument; it is typed only on the environment's base-URL or login origins). In task text, name
+  the account by id ("log in as the `admin` account"); never write a password. Optional front matter
+  `accounts: admin, member` offers only those ids (needs `env`); a missing id fails preflight (exit 2).
+  An account's TOTP comes from `twofa totp <ref> <id>`. Explore runs get no accounts.
 - The agent **cannot read environment variables**. An env file line like "password in the env var X"
   tells the agent where a secret is but gives it no way to get it. A task can only type a password
   that is written in it, so only seed-only throwaway values (the map's `allow-literals`) may appear.
@@ -53,7 +60,7 @@ command and key lists).
 - Optional front matter between `---` lines, flat `key: value`, `#` comments (also after ` #`), quote a
   value to keep a `#`. Unknown keys, duplicate keys and `allow-file-access` are errors (exit 2).
 - Keys: max-steps, model, headed, skill, session, state, network, video, screenshot, twofa-timeout,
-  snapshot, jev, jev-threshold, debug, setup, env.
+  snapshot, jev, jev-threshold, debug, setup, env, accounts.
 - `skill`, `state`, `setup` and `env` paths resolve from the task file's folder. A **bare env name**
   resolves to `environments/<name>.md` under the **current directory** of the run, so tasks must be run
   from the Duckwright root.

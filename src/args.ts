@@ -21,6 +21,8 @@ export interface RunArgs {
   state: string | null;
   /** An environment name or path; null when none (never "none"). */
   env: string | null;
+  /** Account ids pinned by the task file's `accounts:`; null offers every account of the environment. */
+  accounts: string[] | null;
   allowFileAccess: boolean;
   network: boolean;
   video: boolean;
@@ -258,7 +260,7 @@ export function parseRunArgs(
   };
   const args: RunArgs = {
     task: null, file: null, maxSteps: 25, model: "sonnet", headed: false, skill: defaultSkill,
-    session: "duckwright", state: null, env: null, allowFileAccess: false, snapshot: "hybrid", network: true, video: false, screenshot: false,
+    session: "duckwright", state: null, env: null, accounts: null, allowFileAccess: false, snapshot: "hybrid", network: true, video: false, screenshot: false,
     print: false, maxParallel: null, web: false, port: null, plan: null, twofaTimeout: 300,
     jev: false, jevThreshold: 0.8, debug: false,
     ...settings,

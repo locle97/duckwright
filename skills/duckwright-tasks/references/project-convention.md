@@ -80,7 +80,7 @@ merge never loses a line. Run folders (`runs/`) stay out of git; each fact keeps
 
 ## Environment files
 
-As in Duckwright's README (Environment context) and `examples/environments/staging.md`: Base URL, Test
+As in Duckwright's README (Environment context; logins are kept as Accounts, not in this file) and `examples/environments/staging.md`: Base URL, Test
 accounts (names and how they are signed in, never passwords), Seeded data, Feature flags, Known quirks,
 Off-limits.
 

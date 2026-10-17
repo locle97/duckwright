@@ -33,9 +33,9 @@ export type GlobalConfig = TaskSettings & Partial<{
   theme: ThemeName;
 }>;
 
-// The task-file keys, minus `setup` (it belongs to one task), plus the TUI and web options.
-// allow-file-access stays command-line only, as in task files.
-const { setup: _setup, ...RUN_KEYS } = KEYS;
+// The task-file keys, minus `setup` and `accounts` (they belong to one task), plus the TUI and web
+// options. allow-file-access stays command-line only, as in task files.
+const { setup: _setup, accounts: _accounts, ...RUN_KEYS } = KEYS;
 const CONFIG_KEYS: Readonly<Record<string, readonly [string, Kind]>> = {
   ...RUN_KEYS,
   "max-parallel": ["maxParallel", "int"],

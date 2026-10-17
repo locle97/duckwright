@@ -11,8 +11,11 @@ https://staging.example.com (the API is at https://api.staging.example.com)
 
 ## Test accounts
 
-- admin: admin@example.com, password in the env var STAGING_ADMIN_PASSWORD
-- member: member@example.com, already logged in by `--state auth.json`
+Log-in accounts (ids, usernames, passwords, TOTP secrets) are kept on the
+Environments page of the web UI, not in this file. See "Accounts" in the README.
+Do not write a password here.
+
+- member: already logged in by `--state auth.json`
 
 ## Seeded data
 

@@ -91,3 +91,18 @@ export function listEnvironments(cwd = process.cwd()): string[] {
   }
   return names.sort(compareCodePoints);
 }
+
+/** Writes `environments/<name>.md`, creating the folder; rejects empty text and text over ENV_MAX_BYTES. */
+export function saveEnvironmentText(name: string, text: string, cwd = process.cwd()): void {
+  if (!isEnvName(name)) throw new EnvError(`invalid environment: '${name}'`);
+  if (typeof text !== "string") throw new EnvError("the environment text must be a string");
+  if (text.trim() === "") throw new EnvError("the environment text is empty");
+  const bytes = Buffer.from(text, "utf8");
+  if (new TextDecoder("utf-8").decode(bytes) !== text) throw new EnvError("the environment text is not valid UTF-8");
+  if (bytes.length > ENV_MAX_BYTES) {
+    throw new EnvError(`environment text too large: ${bytes.length} bytes (limit ${ENV_MAX_BYTES})`);
+  }
+  const dir = path.join(cwd, ENV_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, name + ".md"), bytes);
+}

@@ -1,6 +1,8 @@
 import fs from "node:fs";
 
-import { ENV_MAX_BYTES, ENV_NONE, EnvError, loadEnvironment } from "./environment.ts";
+import { ENV_MAX_BYTES, ENV_NONE, EnvError, envLabel, loadEnvironment } from "./environment.ts";
+import { loadRunAccounts } from "./accounts/runAccounts.ts";
+import { AccountError, AccountStore } from "./accounts/store.ts";
 import { TaskFileError, loadTaskFile, taskPaths } from "./taskfile.ts";
 
 export interface Finding {
@@ -44,6 +46,26 @@ export function checkTasks(paths: string[], cwd = process.cwd()): CheckResult {
         } catch (e) {
           if (!(e instanceof EnvError)) throw e;
           add("error", `${p}: ${e.message}`);
+        }
+      }
+      const pinned = tf.settings.accounts;
+      if (pinned && pinned.length > 0) {
+        if (!tf.settings.env || tf.settings.env === ENV_NONE) {
+          add("warning", `${p}: accounts can't be verified here: the file has no env:`);
+        } else {
+          const name = envLabel(tf.settings.env) as string;
+          try {
+            const store = AccountStore.open(cwd, { create: false });
+            if (store === null) {
+              add("warning", `${p}: accounts can't be verified: no accounts database`);
+            } else {
+              store.close();
+              loadRunAccounts(cwd, name, pinned);
+            }
+          } catch (e) {
+            if (!(e instanceof AccountError)) throw e;
+            add("error", `${p}: ${e.message}`);
+          }
         }
       }
     } catch (e) {

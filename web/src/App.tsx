@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { openEditor, quitServer, taskControl, runPlan } from "./actions.ts";
 import { ConfirmDialog } from "./dialogs/ConfirmDialog.tsx";
 import { AddDialog } from "./dialogs/AddDialog.tsx";
+import { EnvironmentsDialog } from "./dialogs/EnvironmentsDialog.tsx";
 import { EditorDialog } from "./dialogs/EditorDialog.tsx";
 import { HelpDialog } from "./dialogs/HelpDialog.tsx";
 import { OptionsDialog } from "./dialogs/OptionsDialog.tsx";
@@ -92,6 +93,7 @@ export function App() {
     <div className="app">
       {!state.connected ? <div className="banner" role="alert">Disconnected. Retrying…</div> : null}
       <Header state={state} onHelp={() => dispatch({ type: "dialog", value: { kind: "help" } })}
+        onEnvironments={() => dispatch({ type: "dialog", value: { kind: "environments" } })}
         onQuit={() => { const c = commandFor("q", state); if (c) run(c); }}
         onDrawer={() => setDrawer((v) => !v)} />
       <div className="body">
@@ -109,6 +111,7 @@ export function App() {
           <img className="evidence-full" src={d.src} alt={d.title} />
         </Modal>
       ) : null}
+      {d?.kind === "environments" ? <EnvironmentsDialog dispatch={dispatch} /> : null}
       {d?.kind === "help" ? <HelpDialog dispatch={dispatch} /> : null}
       {twofa ? <TwofaDialog task={twofa} dispatch={dispatch} /> : null}
       <Toasts toasts={state.toasts} />

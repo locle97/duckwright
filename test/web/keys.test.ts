@@ -142,3 +142,7 @@ test("i adds a task like a, and t switches the sidebar tab", () => {
   assert.deepEqual(commandFor("i", s), commandFor("a", s));
   assert.deepEqual(commandFor("t", s), { type: "action", action: { type: "tab" } });
 });
+
+test("key_v_opens_environments", () => {
+  assert.deepEqual(commandFor("v", state()), { type: "action", action: { type: "dialog", value: { kind: "environments" } } });
+});

@@ -12,6 +12,7 @@ export const SHORTCUTS: { key: string; label: string }[] = [
   { key: "e", label: "Edit the selected task (or the plan's setup)" },
   { key: "o", label: "Options of the selected task" },
   { key: "O", label: "Global options" },
+  { key: "v", label: "Environments and their accounts" },
   { key: "x", label: "Remove the selected task or plan" },
   { key: "[ / ]", label: "Previous or next step" },
   { key: "enter", label: "Expand or collapse the selected step" },

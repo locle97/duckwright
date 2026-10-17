@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { CODE_MASK, SECRET_MASK, Scrubber, scrubTree } from "../src/scrub.ts";
+import { CODE_MASK, SECRET_MASK, Scrubber, scrubTree, secretMarker } from "../src/scrub.ts";
 import { tmpDir } from "./helpers.ts";
 
 const SECRET = "gezd gnbv GY3TQOJQ";
@@ -75,4 +75,105 @@ test("scrub_tree_ignores_a_missing_folder", () => {
   const s = new Scrubber();
   s.addCode("493817");
   assert.doesNotThrow(() => scrubTree(path.join(tmpDir(), "nope"), s));
+});
+
+test("named_secret_scrubs_to_marker", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("hunter2", secretMarker("a"));
+  assert.equal(s.empty, false);
+  assert.equal(s.scrub("fill('hunter2')"), "fill('[SECRET a.password]')");
+});
+
+test("prefix_passwords_each_get_own_marker", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("abc12345", secretMarker("a"));
+  s.addNamedSecret("abc123456", secretMarker("b"));
+  assert.equal(s.scrub("abc123456 abc12345"), "[SECRET b.password] [SECRET a.password]");
+});
+
+test("short_values_never_match_inside_masks", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("e", secretMarker("x"));
+  s.addSecret("RED");
+  s.addSecret("tok");
+  assert.equal(s.scrub("e tok RED hello"), "[SECRET x.password] [REDACTED] [REDACTED] h[SECRET x.password]llo");
+});
+
+test("scrub_is_idempotent_when_no_value_occurs_in_a_mask", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("e", secretMarker("x"));
+  s.addSecret("tok");
+  const once = s.scrub("e tok hello");
+  assert.equal(s.scrub(once), once);
+});
+
+test("code_equal_to_account_id_is_not_matched_inside_a_marker", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("pw", secretMarker("1234"));
+  s.addCode("1234");
+  assert.equal(s.scrub("pw 1234"), `[SECRET 1234.password] ${CODE_MASK}`);
+});
+
+test("named_marker_wins_over_plain_secret_and_code_for_the_same_value", () => {
+  const s = new Scrubber();
+  s.addSecret("samevalue");
+  s.addCode("samevalue");
+  s.addNamedSecret("samevalue", secretMarker("a"));
+  assert.equal(s.scrub("samevalue"), "[SECRET a.password]");
+});
+
+test("named_secret_is_found_in_quoted_code", () => {
+  const s = new Scrubber();
+  s.addNamedSecret(`it's "x"\\`, secretMarker("a"));
+  assert.equal(s.scrub(`fill('it\\'s "x"\\\\')`), `fill('[SECRET a.password]')`);
+  assert.equal(s.scrub(`{"v":"it's \\"x\\"\\\\"}`), `{"v":"[SECRET a.password]"}`);
+  assert.equal(s.scrub(`typed it's "x"\\ here`), `typed [SECRET a.password] here`);
+});
+
+test("named_secret_is_found_url_encoded", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("p@ss word&", secretMarker("a"));
+  assert.equal(s.scrub("user=u&password=p%40ss+word%26&x=1"), "user=u&password=[SECRET a.password]&x=1");
+  assert.equal(s.scrub("?pw=p%40ss%20word%26"), "?pw=[SECRET a.password]");
+});
+
+test("named_secret_is_found_form_urlencoded_with_reserved_marks", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("Passw0rd!", secretMarker("a"));
+  const body = new URLSearchParams([["user", "u"], ["pwd", "Passw0rd!"]]).toString();
+  assert.equal(s.scrub(body), "user=u&pwd=[SECRET a.password]");
+  s.addNamedSecret("it's (x)~ /é", secretMarker("b"));
+  const body2 = new URLSearchParams([["pwd", "it's (x)~ /é"]]).toString();
+  assert.equal(s.scrub(body2), "pwd=[SECRET b.password]");
+  assert.equal(s.scrub(`pwd=${encodeURIComponent("it's (x)~ /é").toLowerCase()}`), "pwd=[SECRET b.password]");
+});
+
+test("protected_text_is_never_partly_masked", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("password", secretMarker("admin-c"));
+  s.addProtected("{{admin-c.password}}");
+  s.addProtected("{{admin-c.username}}");
+  assert.equal(s.scrub("fill {{admin-c.password}} with password"), "fill {{admin-c.password}} with [SECRET admin-c.password]");
+  assert.equal(s.scrub("{{admin-c.username}}"), "{{admin-c.username}}");
+});
+
+test("protected_text_alone_leaves_the_scrubber_empty", () => {
+  const s = new Scrubber();
+  s.addProtected("{{a.password}}");
+  assert.equal(s.empty, true);
+});
+
+test("markers_and_masks_survive_a_second_scrub", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("admin", secretMarker("admin"));
+  s.addNamedSecret("pass", secretMarker("b"));
+  s.addSecret("RED");
+  s.addCode("1234");
+  const once = s.scrub("admin pass RED 1234 [SECRET admin.password]");
+  assert.equal(once, "[SECRET admin.password] [SECRET b.password] [REDACTED] [2FA CODE] [SECRET admin.password]");
+  assert.equal(s.scrub(once), once);
+  // a marker from another scrubber (masking only the passwords an action used) is kept too
+  const other = new Scrubber();
+  other.addNamedSecret("admin", secretMarker("admin"));
+  assert.equal(s.scrub(other.scrub("typed admin")), "typed [SECRET admin.password]");
 });

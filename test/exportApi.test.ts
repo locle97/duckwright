@@ -116,6 +116,14 @@ test("redactions_warn_and_never_leak", () => {
   assert.match(warnings.join("\n"), /url.*\[REDACTED\]/i);
 });
 
+test("password_markers_warn", () => {
+  const tmp = tmpDir();
+  capture(tmp, "0001", [{ name: "content-type", value: "application/x-www-form-urlencoded" }], "user=u&pwd=[SECRET admin-c.password]");
+  const { warnings } = renderApiSpec(run([[entry("0001", "POST", "http://a/login?pw=[SECRET admin-c.password]", 200)]]), tmp);
+  assert.match(warnings.join("\n"), /call 0001: body contains \[SECRET admin-c\.password\]; fix it by hand/);
+  assert.match(warnings.join("\n"), /call 0001: url contains \[SECRET admin-c\.password\]; fix it by hand/);
+});
+
 const badHistory = (re: RegExp) => (e: unknown) => e instanceof ExportError && e.exitCode === 2 && re.test(e.message);
 
 test("malformed_network_entries_rejected_with_exit_2", () => {

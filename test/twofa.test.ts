@@ -9,6 +9,7 @@ import {
 } from "../src/twofa.ts";
 import type { Human } from "../src/twofa.ts";
 import { CODE_MASK } from "../src/scrub.ts";
+import { parseSecret, totpAt } from "../src/totp.ts";
 
 const SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
 const AT_59 = "287082"; // the RFC 6238 code for t=59 s
@@ -175,4 +176,25 @@ test("a_non_finite_or_non_positive_timeout_means_the_default", async () => {
     const wait = seen.find((e) => e.type === "twofa:wait");
     assert.ok(wait && wait.type === "twofa:wait" && wait.deadline === 59_000 + 300_000);
   }
+});
+
+test("totpFor_generates_and_scrubs", async () => {
+  const tf = make();
+  const code = await tf.totpFor("JBSWY3DPEHPK3PXP");
+  assert.equal(code, totpAt(parseSecret("JBSWY3DPEHPK3PXP"), 59_000));
+  assert.equal(tf.scrubber.scrub(`fill('${code}')`), `fill('${CODE_MASK}')`);
+});
+
+test("totpFor_counts_an_attempt", async () => {
+  const tf = make();
+  for (let i = 0; i < MAX_TWOFA_ATTEMPTS; i++) await tf.totpFor("JBSWY3DPEHPK3PXP");
+  await assert.rejects(tf.totpFor("JBSWY3DPEHPK3PXP"), TwoFactorError);
+});
+
+test("check_twofa_args_third_must_be_id", () => {
+  assert.equal(checkTwofaArgs(["totp", "e5", "admin-c"]), null);
+  assert.equal(checkTwofaArgs(["totp", "e5", "Bad!"]), "error: twofa totp: 'Bad!' is not an account id");
+  assert.equal(checkTwofaArgs(["totp", "e5", "-a"]), "error: twofa totp: '-a' is not an account id");
+  assert.equal(checkTwofaArgs(["totp", "e5", "a", "b"]), "error: twofa totp needs the element ref of the code field");
+  assert.equal(checkTwofaArgs(["sms", "e5", "admin-c"]), "error: twofa sms needs the element ref of the code field");
 });

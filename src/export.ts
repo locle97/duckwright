@@ -8,6 +8,7 @@ import { renderApiSpec } from "./exportApi.ts";
 import { resolvePath } from "./paths.ts";
 import { redactBody } from "./redact.ts";
 import { checkRequestCallArgs, renderRequestSetup } from "./request.ts";
+import { envVarBase } from "./accounts/store.ts";
 import { CODE_MASK } from "./scrub.ts";
 import { splitLines } from "./text.ts";
 
@@ -24,9 +25,8 @@ const COOKIES_NOTE = "request replays use the test's own browser context; add te
 export const NO_ASSERTIONS = "no assertions recorded; add expect(...) lines by hand";
 export const TOTP_IMPORT = "import { createHmac } from 'node:crypto';\n";
 // Plain JavaScript that is also valid TypeScript (no annotations), so the tests can run it as is.
-export const TOTP_HELPER = `function totp() {
-  let secret = process.env.DUCKWRIGHT_TOTP_SECRET;
-  if (!secret) throw new Error('set DUCKWRIGHT_TOTP_SECRET to run this test');
+export const TOTP_HELPER = `function totp(secret = process.env.DUCKWRIGHT_TOTP_SECRET, name = 'DUCKWRIGHT_TOTP_SECRET') {
+  if (!secret) throw new Error(\`set \${name} to run this test\`);
   if (/^otpauth:/i.test(secret)) secret = new URL(secret).searchParams.get('secret') || '';
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const bytes = [];
@@ -51,6 +51,24 @@ export const TOTP_HELPER = `function totp() {
 `;
 const MANUAL_NOTE = "// NOTE: this test has manual 2FA steps (marked MANUAL) and cannot run unattended.\n";
 const MASKED_CODE = new RegExp(`(['"\`])${CODE_MASK.replace(/[[\]]/g, "\\$&")}\\1`, "g");
+const WHOLE_PASSWORD = /(['"`])\[SECRET ([a-z0-9-]+)\.password\]\1/g;
+const ANY_PASSWORD = /\[SECRET ([a-z0-9-]+)\.password\]/;
+
+const noEnvironment = (step: number): ExportError =>
+  new ExportError(`step ${step} uses an account but the run had no environment; cannot name its variables`, 1);
+
+/** Replace each quoted password marker with the environment variable the test reads it from. */
+function replaceSecretMarkers(code: string, env: string | null, needed: Set<string>, step: number): string {
+  const out = code.replace(WHOLE_PASSWORD, (_m, _q, id: string) => {
+    if (env === null) throw noEnvironment(step);
+    const name = `${envVarBase(env, id)}_PASSWORD`;
+    needed.add(name);
+    return `process.env.${name}`;
+  });
+  const left = ANY_PASSWORD.exec(out);
+  if (left) throw new ExportError(`password for '${left[1]}' in step ${step} is not a whole string; edit the test by hand`, 1);
+  return out;
+}
 
 /** One action in history.json, with the Playwright code playwright-cli ran for it. */
 export interface HistoryAction {
@@ -163,6 +181,8 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   let asserted = false;
   let usesTotp = false;
   const manual: string[] = [];
+  const needed = new Set<string>();
+  const envName = data.env?.name ?? null;
   for (const [index, rec] of data.history.entries()) {
     const results: unknown[] = Array.isArray(rec.results) ? rec.results : [];
     for (const [i, a] of rec.actions.entries()) {
@@ -215,11 +235,18 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
           throw new ExportError(`twofa in step ${index + 1} has no recorded code to replay`, 1);
         }
         if (kind === "totp") {
-          const filled = recorded.replace(MASKED_CODE, "totp()");
-          if (!filled.includes("totp()")) {
+          let call = "totp()";
+          if (typeof args[2] === "string" && args[2] !== "") {
+            if (envName === null) throw noEnvironment(index + 1);
+            const name = `${envVarBase(envName, args[2])}_TOTP`;
+            needed.add(name);
+            call = `totp(process.env.${name}, '${name}')`;
+          }
+          const filled = recorded.replace(MASKED_CODE, call);
+          if (!filled.includes(call)) {
             throw new ExportError(`twofa in step ${index + 1} has no recorded code to replay`, 1);
           }
-          lines[index].push(...splitLines(filled).map((line) => `  ${line.includes("totp()") ? `${line} // 2FA` : line}`));
+          lines[index].push(...splitLines(filled).map((line) => `  ${line.includes(call) ? `${line} // 2FA` : line}`));
           usesTotp = true;
         } else if (kind === "sms" || kind === "email" || kind === "passkey") {
           lines[index].push(
@@ -260,7 +287,7 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
         }
         continue;
       }
-      lines[index].push(...splitLines(code).map((line) => `  ${line}`));
+      lines[index].push(...splitLines(replaceSecretMarkers(code, envName, needed, index + 1)).map((line) => `  ${line}`));
       hasCode = true;
       asserted ||= cmd === "expect";
     }
@@ -271,6 +298,7 @@ export function renderSpec(data: HistoryData): { spec: string; warnings: string[
   if (setups > 0) warnings.push(COOKIES_NOTE);
   if (!asserted) warnings.push(NO_ASSERTIONS);
   warnings.push(...manual);
+  if (needed.size > 0) warnings.push(`this test reads these environment variables: ${[...needed].sort().join(", ")}`);
   const head = HEADER + (manual.length > 0 ? MANUAL_NOTE : "") + (usesTotp ? `${TOTP_IMPORT}\n${TOTP_HELPER}` : "");
   const spec = head + "\n"
     + `test(${JSON.stringify(data.task)}, async ({ page }) => {\n`

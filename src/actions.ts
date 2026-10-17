@@ -1,8 +1,12 @@
+import { PLACEHOLDER, findRefs, substitute } from "./accounts/placeholders.ts";
+import type { Ref } from "./accounts/placeholders.ts";
+import type { RunAccounts } from "./accounts/runAccounts.ts";
 import { ALLOWED_COMMANDS } from "./brain.ts";
 import type { Action } from "./brain.ts";
 import { checkArgs, runExpect } from "./expect.ts";
 import { checkRequestArgs, runExpectRequest } from "./expectRequest.ts";
 import type { RequestContext } from "./expectRequest.ts";
+import { currentOrigin } from "./network.ts";
 import { checkRequestCallArgs, runRequest } from "./request.ts";
 import type { RequestCallContext } from "./request.ts";
 import { PlaywrightCLI } from "./pw.ts";
@@ -10,6 +14,7 @@ import type { WriteGuard } from "./explore/guard.ts";
 import type { NoteSink } from "./explore/notes.ts";
 import { TwoFactorError, checkTwofaArgs } from "./twofa.ts";
 import type { TwoFactor } from "./twofa.ts";
+import { Scrubber, secretMarker } from "./scrub.ts";
 import { sliceCodePoints } from "./text.ts";
 
 export const ALLOWED: ReadonlySet<string> = new Set(ALLOWED_COMMANDS);
@@ -46,9 +51,36 @@ function badFlag(cmd: string, args: string[]): string | null {
   return null;
 }
 
-/** Static allowlist check, so a rejected action is reported even when skipped. */
-function rejection(a: Action): string | null {
+/** Commands whose arguments may carry account placeholders. */
+const SUBSTITUTED: ReadonlySet<string> = new Set(["fill", "type"]);
+
+/** The run's accounts and the current tab's origin, for substituting placeholders. */
+export interface ActionAccounts {
+  run: RunAccounts;
+  origin: string | null;
+}
+
+const hasPlaceholder = (arg: string): boolean => new RegExp(PLACEHOLDER.source).test(arg);
+const hasPassword = (args: string[]): boolean => args.some((x) => findRefs(x).some((r) => r.field === "password"));
+/** fill/type with --submit submit a form, so they may change the page like a click. */
+const submits = (a: Action): boolean => SUBSTITUTED.has(a.cmd) && a.args.some((x) => x.split("=", 1)[0] === "--submit");
+
+/**
+ * The current tab's origin, read now rather than at the start of the step (an earlier action may
+ * have navigated). Null when it cannot be read, so a secret is refused.
+ */
+async function liveOrigin(pw: PlaywrightCLI): Promise<string | null> {
+  const res = await pw.run("tab-list", []);
+  return res.code === 0 ? currentOrigin(res.stdout) : null;
+}
+
+/**
+ * Static allowlist check, so a rejected action is reported even when skipped. Placeholder-looking
+ * text outside fill and type is refused only when the run has accounts.
+ */
+function rejection(a: Action, withAccounts: boolean): string | null {
   if (!ALLOWED.has(a.cmd)) return `error: command '${a.cmd}' not allowed (allowed: ${ALLOWED_LIST})`;
+  if (withAccounts && !SUBSTITUTED.has(a.cmd) && a.args.some(hasPlaceholder)) return "error: account placeholders are allowed only in fill or type";
   // Its args never reach playwright-cli as given, so expected text may look like a flag.
   if (a.cmd === "expect") return checkArgs(a.args);
   if (a.cmd === "expect-request") return checkRequestArgs(a.args);
@@ -57,6 +89,16 @@ function rejection(a: Action): string | null {
   if (a.cmd === "note") return null; // validated by the sink; its text may look like a flag
   const bad = badFlag(a.cmd, a.args);
   return bad !== null ? `error: flag '${bad}' not allowed` : null;
+}
+
+/** `text` with every password `used` put in replaced by its marker (in one pass). */
+function maskPasswords(text: string, used: Ref[], run: RunAccounts | null): string {
+  const s = new Scrubber();
+  for (const ref of used) {
+    const value = ref.field === "password" ? run?.get(ref.id)?.password : undefined;
+    if (value) s.addNamedSecret(value, secretMarker(ref.id));
+  }
+  return s.scrub(text);
 }
 
 export function extractCode(stdout: string): string | null {
@@ -74,11 +116,28 @@ export interface ExecuteHooks {
   result?(index: number, result: string, code: string | null): void;
 }
 
+/** The account's TOTP secret, or the error result when it cannot be used here. Never asks a human. */
+async function accountTotp(
+  pw: PlaywrightCLI, id: string, accounts: ActionAccounts | null,
+): Promise<{ secret: string } | { error: string }> {
+  if (accounts === null || !accounts.run.has(id)) return { error: `error: no account '${id}' in this run` };
+  const secret = accounts.run.totpSecret(id);
+  if (secret === null) return { error: `error: account '${id}' has no TOTP secret` };
+  const origin = await liveOrigin(pw);
+  if (origin === null) return { error: "error: refusing to enter a TOTP code: no page origin" };
+  if (!accounts.run.allowedOrigins.includes(origin)) {
+    return { error: `error: refusing to enter a TOTP code on ${origin}: not an allowed origin` };
+  }
+  return { secret };
+}
+
 /**
  * Run one `twofa` action: [result, recorded code, whether the page may have changed]. Neither the
- * result nor the code ever contains the code itself.
+ * result nor the code ever contains the code itself. `twofa totp <ref> <id>` uses that account's secret.
  */
-async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[]): Promise<[string, string | null, boolean]> {
+async function runTwofa(
+  pw: PlaywrightCLI, tf: TwoFactor | null, args: string[], accounts: ActionAccounts | null,
+): Promise<[string, string | null, boolean]> {
   if (tf === null) return ["error: 2FA is not available in this run", null, false];
   const kind = args[0];
   try {
@@ -86,7 +145,14 @@ async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[])
       await tf.approve();
       return ["ok", null, false];
     }
-    const code = kind === "totp" ? await tf.totp() : await tf.code(kind as "sms" | "email");
+    let code: string;
+    if (kind === "totp" && args.length === 3) {
+      const found = await accountTotp(pw, args[2], accounts);
+      if ("error" in found) return [found.error, null, false];
+      code = await tf.totpFor(found.secret);
+    } else {
+      code = kind === "totp" ? await tf.totp() : await tf.code(kind as "sms" | "email");
+    }
     const res = await pw.run("fill", [args[1], code, "--submit"]);
     // A timeout (-1) may still have submitted the form.
     if (res.code !== 0) return [tf.scrubber.scrub(`error: ${res.stderr.trim() || res.stdout.trim()}`), null, res.code === -1];
@@ -107,11 +173,14 @@ async function runTwofa(pw: PlaywrightCLI, tf: TwoFactor | null, args: string[])
  * `twofa` supplies 2FA codes for `twofa` actions.
  * `notes` receives `note` actions; null or absent means this is not an explore run.
  * `guard` vets each action before it runs (explore --allow-writes); a refused action reports its error and is not run.
+ * `accounts` fills `{{<id>.username}}`/`{{<id>.password}}` in fill and type args (the actions keep the
+ * placeholders). A substituted action's code holds the real value: the caller scrubs codes and results
+ * with the run scrubber before keeping them. An error never echoes a substituted password.
  */
 export async function execute(
   pw: PlaywrightCLI, actions: Action[], codes?: (string | null)[], hooks?: ExecuteHooks,
   requests?: RequestContext | null, call?: RequestCallContext | null, twofa?: TwoFactor | null,
-  notes?: NoteSink | null, guard?: WriteGuard | null,
+  notes?: NoteSink | null, guard?: WriteGuard | null, accounts?: ActionAccounts | null,
 ): Promise<Executed> {
   const results: string[] = [];
   let done: Executed["done"] = null;
@@ -119,7 +188,7 @@ export async function execute(
   const ran = new Map<number, string>();
   const origins = new Map<number, string>();
   const handle = async (i: number, a: Action): Promise<void> => {
-    const rejected = rejection(a);
+    const rejected = rejection(a, !!accounts);
     if (rejected !== null) {
       results.push(rejected);
       return;
@@ -164,7 +233,7 @@ export async function execute(
       return;
     }
     if (a.cmd === "twofa") {
-      const [result, code, changed] = await runTwofa(pw, twofa ?? null, a.args);
+      const [result, code, changed] = await runTwofa(pw, twofa ?? null, a.args, accounts ?? null);
       results.push(clip(result));
       if (code !== null) ran.set(i, code);
       // The form was submitted (or may have been), so the page may have changed.
@@ -175,6 +244,18 @@ export async function execute(
       results.push(notes ? clip(notes.add(a.args)) : "error: command 'note' not allowed outside explore runs");
       return;
     }
+    let args = a.args;
+    let used: Ref[] = [];
+    if (SUBSTITUTED.has(a.cmd)) {
+      // A password is only typed where the tab is right now; usernames go anywhere.
+      const origin = accounts && hasPassword(a.args) ? await liveOrigin(pw) : accounts?.origin ?? null;
+      const sub = substitute(a.args, accounts?.run ?? null, origin);
+      if ("error" in sub) {
+        results.push(sub.error);
+        return;
+      }
+      ({ args, used } = sub);
+    }
     if (guard) {
       const refused = guard.check(a);
       if (refused !== null) {
@@ -182,16 +263,18 @@ export async function execute(
         return;
       }
     }
-    const res = await pw.run(a.cmd, a.args);
+    const res = await pw.run(a.cmd, args);
     if (res.code === 0) {
       results.push("ok");
       const code = extractCode(res.stdout);
       if (code !== null) ran.set(i, code);
     } else {
-      results.push(clip(`error: ${res.stderr.trim() || res.stdout.trim()}`));
+      // Masked before clipping, so a cut can never leave part of a password behind.
+      const message = maskPasswords(`error: ${res.stderr.trim() || res.stdout.trim()}`, used, accounts?.run ?? null);
+      results.push(clip(message));
     }
     // A timeout (-1) may still have navigated, so treat it like success here.
-    if (PAGE_CHANGING.has(a.cmd) && (res.code === 0 || res.code === -1)) {
+    if ((PAGE_CHANGING.has(a.cmd) || submits(a)) && (res.code === 0 || res.code === -1)) {
       skip = "skipped: page may have changed";
     }
   };

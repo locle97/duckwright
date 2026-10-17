@@ -425,3 +425,15 @@ test("debug set twice", () => {
   const p = w(tmpDir(), "---\ndebug: true\ndebug: false\n---\nGo\n");
   assert.equal(err(p), `${p}:3: "debug" is set twice`);
 });
+
+test("accounts_key_parses_list", () => {
+  const tmp = tmpDir();
+  assert.deepEqual(loadTaskFile(w(tmp, "---\naccounts: admin-c, user-e ,admin-c\n---\ntask\n")).settings.accounts, ["admin-c", "user-e"]);
+});
+
+test("accounts_key_rejects_bad_id", () => {
+  const tmp = tmpDir();
+  for (const bad of ["Admin", "a,,b", "-a", "a b"]) {
+    assert.match(err(w(tmp, `---\naccounts: ${bad}\n---\ntask\n`)), /accounts/, bad);
+  }
+});

@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { execute } from "./actions.ts";
+import type { RunAccounts } from "./accounts/runAccounts.ts";
 import { BrainError } from "./brain.ts";
 import type { DecideFn, StepInput } from "./brain.ts";
 import { RunControl } from "./control.ts";
@@ -17,7 +18,7 @@ import { buildPrompt, historyLines, latestClaudeGoal } from "./prompt.ts";
 import type { StepRecord } from "./prompt.ts";
 import { PlaywrightCLI, PlaywrightError } from "./pw.ts";
 import type { RequestCallContext } from "./request.ts";
-import { scrubTree } from "./scrub.ts";
+import { Scrubber, scrubTree } from "./scrub.ts";
 import { readPage, readSnapshot } from "./explore/pages.ts";
 import type { WriteGuard } from "./explore/guard.ts";
 import type { NoteSink } from "./explore/notes.ts";
@@ -68,6 +69,8 @@ export interface AgentOptions {
   video?: boolean;
   screenshot?: boolean;
   environment?: string | null;
+  /** The run's accounts: shown to the agent and substituted into fill/type; their secrets are scrubbed. */
+  accounts?: RunAccounts;
 }
 
 export class Agent {
@@ -92,6 +95,9 @@ export class Agent {
   readonly video: boolean;
   readonly screenshot: boolean;
   readonly environment: string | null;
+  readonly accounts: RunAccounts | undefined;
+  /** The 2FA scrubber, with the accounts' secrets added; undefined when there is nothing to scrub. */
+  private readonly scrubber: Scrubber | undefined;
   evidence: Evidence = { video: null, warnings: [] };
   private nextNetworkId = 1;
   private pendingNetworkErrors: string[] = [];
@@ -120,12 +126,16 @@ export class Agent {
     this.video = opts.video ?? false;
     this.screenshot = opts.screenshot ?? false;
     this.environment = opts.environment ?? null;
+    this.accounts = opts.accounts;
+    this.scrubber = opts.twofa?.scrubber ?? (opts.accounts ? new Scrubber() : undefined);
+    // Idempotent: run.ts has usually seeded the 2FA scrubber already.
+    if (this.scrubber) opts.accounts?.seed(this.scrubber);
     const onStep = opts.onStep;
     if (onStep) this.events.subscribe((e) => { if (e.type === "step:end") onStep(e.record); });
   }
 
-  /** Removes the TOTP secret and every code handed out so far; identity when there is no 2FA. */
-  private scrub = (text: string): string => (this.twofa ? this.twofa.scrubber.scrub(text) : text);
+  /** Removes the TOTP secret, every code handed out so far and the accounts' secrets; identity when there are none. */
+  private scrub = (text: string): string => (this.scrubber ? this.scrubber.scrub(text) : text);
 
   private async record(history: StepRecord[], rec: StepRecord, cost: number, startedAt: number): Promise<void> {
     if (this.screenshot) {
@@ -182,10 +192,10 @@ export class Agent {
       this.events.emit({ type: "phase", step, phase: "observing" });
       const obs = await observe(this.pw, this.workdir);
       // In grep mode Claude reads page/snapshot.yml itself, so the file must be clean before the brain runs.
-      if (this.twofa) scrubTree(pageDir(this.workdir), this.twofa.scrubber);
+      if (this.scrubber) scrubTree(pageDir(this.workdir), this.scrubber);
       const nudge = isRepeating(history) ? REPEAT_NUDGE : null;
       const paste = pasteSnapshot(this.snapshotMode, obs);
-      const prompt = this.scrub(buildPrompt(this.task, step, this.maxSteps, history, memory, obs, { nudge, paste, environment: this.environment }));
+      const prompt = this.scrub(buildPrompt(this.task, step, this.maxSteps, history, memory, obs, { nudge, paste, environment: this.environment, accounts: this.accounts?.promptText() ?? null }));
       steps = step;
       this.events.emit({ type: "phase", step, phase: "thinking" });
       let decision;
@@ -211,19 +221,20 @@ export class Agent {
         // Ctrl-C reaches claude too, and its exit can arrive before the abort does.
         if (this.signal?.aborted) throw new AbortedError();
         failures += 1;
-        this.events.emit({ type: "brain:error", step, message: e.message, cost: e.cost, failures });
+        const message = this.scrub(e.message);
+        this.events.emit({ type: "brain:error", step, message, cost: e.cost, failures });
         if (this.network) await clearRequests(this.pw);
         await this.record(history, {
           step,
           decision: { evaluationPreviousGoal: "", memory, nextGoal: "", actions: [], source: "claude", jev: e.jev },
-          results: [`brain error: ${e.message}`],
+          results: [`brain error: ${message}`],
           codes: [],
           costUsd: e.cost,
         }, e.cost, startedAt);
         if (failures >= this.maxFailures) {
           return {
             success: false,
-            answer: `stopped after ${failures} consecutive brain failures: ${e.message}`,
+            answer: `stopped after ${failures} consecutive brain failures: ${message}`,
             steps,
             costUsd: this.costUsd,
             history,
@@ -233,7 +244,7 @@ export class Agent {
       }
       failures = 0;
       this.costUsd += cost;
-      if (this.twofa) decision = this.twofa.scrubber.deep(decision);
+      if (this.scrubber) decision = this.scrubber.deep(decision);
       memory = decision.memory;
       const codes: (string | null)[] = [];
       this.events.emit({ type: "decision", step, decision, cost });
@@ -249,7 +260,8 @@ export class Agent {
         result: (index, result, code) => this.events.emit({
           type: "action:result", step, index, result: this.scrub(result), code: code === null ? null : this.scrub(code),
         }),
-      }, requestCtx, callCtx, this.twofa ?? null, this.notes ?? null, this.guard ?? null);
+      }, requestCtx, callCtx, this.twofa ?? null, this.notes ?? null, this.guard ?? null,
+      this.accounts ? { run: this.accounts, origin: currentOrigin(obs.tabs) } : null);
       const rec: StepRecord = {
         step, decision, results: results.map(this.scrub), codes: codes.map((c) => (c === null ? null : this.scrub(c))),
         costUsd: cost,
@@ -262,7 +274,7 @@ export class Agent {
       if (this.network) {
         const cap = await captureStep(this.pw, this.workdir, step, this.nextNetworkId);
         this.nextNetworkId = cap.nextId;
-        const scrubber = this.twofa?.scrubber;
+        const scrubber = this.scrubber;
         const entries = scrubber ? scrubber.deep(cap.entries) : cap.entries;
         if (scrubber && !scrubber.empty) {
           for (const e of cap.entries) scrubTree(path.join(networkDir(this.workdir), e.id), scrubber);

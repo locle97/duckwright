@@ -15,7 +15,7 @@ const usage = (message: string) => (e: unknown) => e instanceof UsageError && e.
 test("defaults", () => {
   assert.deepEqual(parse("x"), {
     task: "x", file: null, maxSteps: 25, model: "sonnet", headed: false, skill: "/skill.md",
-    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", env: null,
+    session: "duckwright", state: null, allowFileAccess: false, snapshot: "hybrid", env: null, accounts: null,
     print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null,
     jev: false, jevThreshold: 0.8, debug: false,
   });
@@ -31,7 +31,7 @@ test("every option", () => {
     "--state", "a.json", "--allow-file-access", "--snapshot-grep", "go",
   ), {
     task: "go", file: null, maxSteps: 7, model: "opus", headed: true, skill: "s.md",
-    session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep", env: null,
+    session: "s1", state: "a.json", allowFileAccess: true, snapshot: "grep", env: null, accounts: null,
     print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, debug: false,
   });
 });

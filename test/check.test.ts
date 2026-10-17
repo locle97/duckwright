@@ -123,3 +123,54 @@ test("check_cli_usage_errors", async () => {
   assert.equal(await main(["check", "-h"], { stdout: (s: string) => out.push(s), stderr: () => {} }), 0);
   assert.match(out.join("\n"), /usage: duckwright check/);
 });
+
+import { AccountStore } from "../src/accounts/store.ts";
+
+function seedAccounts(dir: string): void {
+  const store = AccountStore.open(dir, { create: true })!;
+  store.setEnvSettings({ name: "dev", baseUrl: "http://localhost:3000", loginOrigins: [] });
+  store.saveAccount({ env: "dev", id: "admin", label: "Admin", role: "", username: "a@x.io", password: "pw" });
+  store.close();
+}
+
+test("check_accounts_verified_against_env", () => {
+  const tmp = project({ "environments/dev.md": ENV, "t.md": "---\nenv: dev\naccounts: admin\n---\nx\n", "u.md": "---\nenv: dev\naccounts: zz\n---\nx\n" });
+  seedAccounts(tmp);
+  const r = checkTasks(["t.md", "u.md"]);
+  assert.deepEqual(r.ok, ["t.md"]);
+  assert.equal(r.findings.length, 1);
+  assert.equal(r.findings[0].level, "error");
+  assert.match(r.findings[0].message, /u\.md: environment 'dev' has no account 'zz'/);
+});
+
+test("check_accounts_without_env_warns", () => {
+  project({ "t.md": "---\naccounts: admin\n---\nx\n" });
+  const r = checkTasks(["t.md"]);
+  assert.deepEqual(r.ok, ["t.md"]);
+  assert.equal(r.findings[0].level, "warning");
+  assert.match(r.findings[0].message, /accounts can't be verified/);
+});
+
+test("check_missing_db_warns", () => {
+  project({ "environments/dev.md": ENV, "t.md": "---\nenv: dev\naccounts: admin\n---\nx\n" });
+  const r = checkTasks(["t.md"]);
+  assert.deepEqual(r.ok, ["t.md"]);
+  assert.equal(r.findings[0].level, "warning");
+  assert.match(r.findings[0].message, /accounts can't be verified: no accounts database/);
+});
+
+test("check_creates_nothing", () => {
+  const tmp = project({ "environments/dev.md": ENV, "t.md": "---\nenv: dev\naccounts: admin\n---\nx\n" });
+  checkTasks(["t.md"]);
+  assert.equal(fs.existsSync(path.join(tmp, ".duckwright")), false);
+});
+
+test("check_unreadable_database_is_an_error", () => {
+  const tmp = project({ "environments/dev.md": ENV, "t.md": "---\nenv: dev\naccounts: admin\n---\nx\n" });
+  fs.mkdirSync(path.join(tmp, ".duckwright", "local"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, ".duckwright", "local", "duckwright.db"), "garbage, not a database\n".repeat(50));
+  const r = checkTasks(["t.md"]);
+  assert.deepEqual(r.ok, []);
+  assert.equal(r.findings[0].level, "error");
+  assert.match(r.findings[0].message, /t\.md: account database unreadable: .*duckwright\.db: /);
+});

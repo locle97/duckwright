@@ -17,7 +17,7 @@ import path from "node:path";
 export const KEYS = {
   "max-steps": "int", model: "str", headed: "bool", skill: "path", session: "str", state: "path",
   network: "bool", video: "bool", screenshot: "bool", "twofa-timeout": "int", jev: "bool", debug: "bool",
-  "jev-threshold": "threshold", snapshot: "snapshot", env: "env", setup: "path",
+  "jev-threshold": "threshold", snapshot: "snapshot", env: "env", accounts: "accounts", setup: "path",
 };
 export const ENV_MAX_BYTES = 16384; // src/environment.ts
 const MAP_KEYS = new Set(["default-env", "write-envs", "investigate-envs", "data-prefix", "off-limits-terms", "allow-literals"]);
@@ -127,6 +127,7 @@ function checkValue(file, key, { value: v, line }) {
   if (kind === "bool" && v !== "true" && v !== "false") bad(`${key} must be true or false`);
   if (kind === "snapshot" && !["hybrid", "full", "grep"].includes(v)) bad(`${key} must be full, grep or hybrid`);
   if (kind === "threshold" && !(Number(v) > 0 && Number(v) <= 1)) bad(`${key} must be greater than 0 and at most 1`);
+  if (kind === "accounts" && !v.split(",").every((id) => /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(id.trim()))) bad(`${key} must be comma-separated account ids`);
   if (kind === "env" && v !== "none" && !isEnvName(v) && !isEnvPath(v)) bad("env must be an environment name or a path");
 }
 

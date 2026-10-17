@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 
 import type { RunArgs } from "../src/args.ts";
 import type { Decision } from "../src/brain.ts";
+import { AccountStore } from "../src/accounts/store.ts";
 import { Agent } from "../src/loop.ts";
+import type { AgentOptions } from "../src/loop.ts";
 import type { ProcResult } from "../src/proc.ts";
 import { stepLine } from "../src/prompt.ts";
-import { PlaywrightCLI } from "../src/pw.ts";
+import { PlaywrightCLI, PlaywrightError } from "../src/pw.ts";
 import { PROMPTS, startRun } from "../src/runs/run.ts";
 import type { Human } from "../src/twofa.ts";
 import { tmpDir } from "./helpers.ts";
@@ -73,7 +75,7 @@ for (const sc of scenarios) for (const snapshot of ["full", "grep"] as const) te
   const human: Human = { code: async (kind) => (kind === "totp" ? TYPED_TOTP : SMS), approve: async () => {} };
   const args: RunArgs = {
     task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
-    state: null, env: null, allowFileAccess: false, snapshot, print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, debug: false,
+    state: null, env: null, accounts: null, allowFileAccess: false, snapshot, print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, debug: false,
     twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8,
   };
   const printed: string[] = [];
@@ -117,4 +119,194 @@ for (const sc of scenarios) for (const snapshot of ["full", "grep"] as const) te
   assert.ok(history.history[1].actions[0].code.includes("[2FA CODE]"));
   const events = fs.readFileSync(path.join(handle.workdir, "events.jsonl"), "utf8");
   assert.ok(events.includes('"twofa:wait"'));
+});
+
+// ---- accounts ----
+
+const PASSWORD = "hunter2";
+const ACCT_TOTP = "JBSWY3DPEHPK3PXP";
+const MARKER = "[SECRET a.password]";
+const cwd = process.cwd();
+afterEach(() => process.chdir(cwd));
+
+/** A login page on https://app.test that echoes what was typed everywhere it can. */
+class LoginPW extends EchoPW {
+  override async run(cmd: string, args: string[]): Promise<ProcResult> {
+    if (cmd === "tab-list") return { code: 0, stdout: `### Result\n- 0: (current) [Login ${this.last}](https://app.test/login)\n`, stderr: "" };
+    return super.run(cmd, args);
+  }
+}
+
+class LoginBrain extends ScriptBrain {
+  override async decide(prompt: string): Promise<[Decision, number]> {
+    this.prompts.push(prompt);
+    const script: [string, string[]][] = [
+      ["fill", ["e3", "{{a.password}}"]], ["twofa", ["totp", "e5", "a"]], ["done", ["success", "logged in"]],
+    ];
+    const [cmd, args] = script[Math.min(this.calls++, script.length - 1)];
+    return [{ evaluationPreviousGoal: "ok", memory: "m", nextGoal: "g", actions: [{ cmd, args }] }, 0];
+  }
+}
+
+function runArgs(over: Partial<RunArgs> = {}): RunArgs {
+  return {
+    task: "log in", file: null, maxSteps: 5, model: "m", headed: false, skill: PROMPTS.defaultSkill, session: "s-1",
+    state: null, env: null, accounts: null, allowFileAccess: false, snapshot: "grep", print: false, maxParallel: null, plan: null, network: true, video: false, screenshot: false, debug: true,
+    twofaTimeout: 300, web: false, port: null, jev: false, jevThreshold: 0.8, ...over,
+  };
+}
+
+function project(): string {
+  const tmp = tmpDir();
+  process.chdir(tmp);
+  fs.mkdirSync(path.join(tmp, "environments"));
+  fs.writeFileSync(path.join(tmp, "environments", "dev.md"), "Base URL: https://app.test");
+  return tmp;
+}
+
+function seedAccount(tmp: string): void {
+  const s = AccountStore.open(tmp, { create: true })!;
+  s.setEnvSettings({ name: "dev", baseUrl: "https://app.test/", loginOrigins: [] });
+  s.saveAccount({ env: "dev", id: "a", label: "Admin", role: "", username: "a@x.io", password: PASSWORD, totpSecret: ACCT_TOTP });
+  s.close();
+}
+
+test("loop_echoed_password_scrubbed_through_a_run", async () => {
+  const tmp = project();
+  seedAccount(tmp);
+  const cliDir = path.join(tmp, ".playwright-cli");
+  fs.mkdirSync(cliDir);
+  const pw = new LoginPW();
+  // playwright-cli keeps its own logs of what ran.
+  const origRun = pw.run.bind(pw);
+  pw.run = async (cmd, args) => {
+    if (cmd === "fill") fs.appendFileSync(path.join(cliDir, "console.log"), `fill ${args.join(" ")}\n`);
+    return origRun(cmd, args);
+  };
+  const brain = new LoginBrain();
+  const printed: string[] = [];
+  const handle = startRun({ task: "log in", taskFile: null, args: runArgs({ env: "dev" }) }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+    humanFor: () => null,
+    createAgent: (opts) => new Agent({ ...opts, pw, brain }),
+  });
+  handle.events.subscribe((e) => { if (e.type === "step:end") printed.push(stepLine(e.record)); });
+  const outcome = await handle.done;
+  assert.equal(outcome.status, "pass", outcome.error ?? "");
+  assert.equal(pw.filled[0], PASSWORD);
+  const totp = pw.filled[1];
+  assert.match(totp, /^\d{6}$/);
+
+  assert.ok(brain.prompts[0].includes("<accounts>\n- a: Admin — username a@x.io — TOTP"));
+  const history = JSON.parse(fs.readFileSync(path.join(handle.workdir, "history.json"), "utf8"));
+  assert.equal(history.history[0].actions[0].code, `await page.getByLabel('Code').fill('${MARKER}');`);
+  assert.deepEqual(history.history[0].actions[0].args, ["e3", "{{a.password}}"]);
+  assert.equal(history.history[1].actions[0].code, "await page.getByLabel('Code').fill('[2FA CODE]');");
+  assert.ok(fs.readFileSync(path.join(handle.workdir, "page", "snapshot.yml"), "utf8").includes("[2FA CODE]"));
+
+  assert.ok(fs.existsSync(path.join(handle.workdir, "debug.log")));
+  const haystacks: [string, string][] = [
+    ...filesUnder(handle.workdir).map((f): [string, string] => [f, fs.readFileSync(f, "utf8")]),
+    ...filesUnder(cliDir).map((f): [string, string] => [f, fs.readFileSync(f, "utf8")]),
+    ...brain.prompts.map((p, i): [string, string] => [`prompt ${i + 1}`, p]),
+    ["printed steps", printed.join("\n")],
+    ["outcome", JSON.stringify(outcome)],
+  ];
+  for (const [name, text] of haystacks) {
+    for (const s of [PASSWORD, ACCT_TOTP, totp]) assert.ok(!text.includes(s), `${name} contains ${s}`);
+  }
+  assert.ok(fs.readFileSync(path.join(cliDir, "console.log"), "utf8").includes(`fill e3 ${MARKER}`));
+});
+
+test("run_end_scrubs_playwright_cli_dir", async () => {
+  const tmp = project();
+  seedAccount(tmp);
+  const cliDir = path.join(tmp, ".playwright-cli");
+  fs.mkdirSync(path.join(cliDir, "sub"), { recursive: true });
+  fs.writeFileSync(path.join(cliDir, "sub", "page.yml"), `- textbox: "${PASSWORD}"`);
+  // A run that fails still cleans up.
+  const handle = startRun({ task: "t", taskFile: null, args: runArgs({ env: "dev", debug: false }) }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+    createAgent: () => ({ costUsd: 0, run: async () => { throw new Error("boom"); } }),
+  });
+  const outcome = await handle.done;
+  assert.equal(outcome.status, "fail");
+  assert.equal(fs.readFileSync(path.join(cliDir, "sub", "page.yml"), "utf8"), `- textbox: "${MARKER}"`);
+  assert.equal(fs.readFileSync(path.join(cliDir, ".gitignore"), "utf8"), "*\n");
+  // An existing .gitignore is left alone.
+  fs.writeFileSync(path.join(cliDir, ".gitignore"), "keep\n");
+  await startRun({ task: "t", taskFile: null, args: runArgs({ env: "dev", debug: false }) }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+    createAgent: () => ({ costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }),
+  }).done;
+  assert.equal(fs.readFileSync(path.join(cliDir, ".gitignore"), "utf8"), "keep\n");
+});
+
+test("run_end_does_not_create_playwright_cli_dir", async () => {
+  const tmp = project();
+  seedAccount(tmp);
+  await startRun({ task: "t", taskFile: null, args: runArgs({ env: "dev", debug: false }) }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+    createAgent: () => ({ costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }),
+  }).done;
+  assert.equal(fs.existsSync(path.join(tmp, ".playwright-cli")), false);
+});
+
+test("run_without_accounts_creates_nothing", async () => {
+  for (const env of [null, "dev"]) {
+    const tmp = project();
+    const cliDir = path.join(tmp, ".playwright-cli");
+    fs.mkdirSync(cliDir);
+    fs.writeFileSync(path.join(cliDir, "f.txt"), "hunter2");
+    const seen: AgentOptions[] = [];
+    await startRun({ task: "t", taskFile: null, args: runArgs({ env, debug: false }) }, {
+      prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+      createAgent: (opts) => { seen.push(opts); return { costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }; },
+    }).done;
+    assert.equal(seen[0].accounts, undefined);
+    assert.equal(fs.existsSync(path.join(tmp, ".duckwright")), false);
+    assert.deepEqual(fs.readdirSync(cliDir), ["f.txt"]);
+  }
+});
+
+test("explore_run_gets_no_accounts", async () => {
+  const tmp = project();
+  seedAccount(tmp);
+  const seen: AgentOptions[] = [];
+  await startRun({ task: "t", taskFile: null, args: runArgs({ env: "dev", debug: false }), explore: { host: "app.test" } }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+    createAgent: (opts) => { seen.push(opts); return { costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }; },
+  }).done;
+  assert.equal(seen[0].accounts, undefined);
+});
+
+test("run_failure_text_is_scrubbed", async () => {
+  for (const err of [new PlaywrightError(`fill failed: "${PASSWORD}"`), new Error(`boom ${PASSWORD}`)]) {
+    const tmp = project();
+    seedAccount(tmp);
+    const handle = startRun({ task: "t", taskFile: null, args: runArgs({ env: "dev", debug: false }) }, {
+      prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
+      createAgent: () => ({ costUsd: 0, run: async () => { throw err; } }),
+    });
+    const outcome = await handle.done;
+    assert.equal(outcome.status, "fail");
+    assert.ok(outcome.error!.includes(MARKER), outcome.error!);
+    const blob = JSON.stringify(outcome) + fs.readFileSync(path.join(handle.workdir, "history.json"), "utf8") + fs.readFileSync(path.join(handle.workdir, "events.jsonl"), "utf8");
+    assert.ok(!blob.includes(PASSWORD));
+  }
+});
+
+test("run_reads_accounts_from_the_given_folder", async () => {
+  const tmp = tmpDir();
+  fs.mkdirSync(path.join(tmp, "environments"));
+  const envPath = path.join(tmp, "environments", "dev.md");
+  fs.writeFileSync(envPath, "Base URL: https://app.test");
+  seedAccount(tmp);
+  const seen: AgentOptions[] = [];
+  // The process stays in another folder: the run's base is passed in, as the web and manager use it.
+  await startRun({ task: "t", taskFile: null, args: runArgs({ env: envPath, debug: false }) }, {
+    prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {}, cwd: tmp,
+    createAgent: (opts) => { seen.push(opts); return { costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }; },
+  }).done;
+  assert.equal(seen[0].accounts?.has("a"), true);
 });

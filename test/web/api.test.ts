@@ -5,6 +5,8 @@ import type { CandidateIndex } from "../../src/tui/candidates.ts";
 import type { Globals } from "../../src/runs/manager.ts";
 import { handleApi, parseOverrides, snapshotOf } from "../../src/web/api.ts";
 import type { ApiContext, ApiResponse } from "../../src/web/api.ts";
+import { createEnvironments } from "../../src/web/environments.ts";
+import { tmpDir } from "../helpers.ts";
 import { FakeManager, planSnapshot, snapshot } from "../tui/fake-manager.ts";
 
 const LOGGED = [{ taskId: 1, runId: "r1", events: [] }];
@@ -23,7 +25,7 @@ function setup(): { m: FakeManager; ctx: ApiContext; quits: number[] } {
   const quits: number[] = [];
   const ctx: ApiContext = {
     manager: m, maxParallel: 3, notices: ["note"], theme: "dark", quit: () => void quits.push(1), candidates: () => INDEX,
-    runs: () => LOGGED,
+    runs: () => LOGGED, environments: createEnvironments(tmpDir()),
   };
   return { m, ctx, quits };
 }

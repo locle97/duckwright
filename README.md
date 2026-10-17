@@ -49,6 +49,7 @@ History: runs/20261003-101500-brave-otter/history.json
 - **Plan mode**: `duckwright plan docs/qa-plan.md` has Claude split a written test plan into one task file per scenario, with the shared setup in its own file. The TUI lists them under the plan to review, reorder, edit, and then run in parallel up to `--max-parallel`. A plan task's run is saved in a folder of its own inside the plan folder (`tasks/<plan>/<task>/`, named like the task file), not under `runs/`; running the task again replaces the previous run.
 - **Web mode**: `duckwright --web` serves the same workspace as the TUI in a browser, in a shadcn-style UI: task list, plans, past runs, a live timeline of every step with its network calls, pause/step/stop, options, editing, and 2FA prompts. It listens on `127.0.0.1` only, behind a random per-launch token.
 - **Two-factor verification**: the agent can get past a 2FA prompt with a `twofa` action. TOTP codes are generated from a secret you supply in `DUCKWRIGHT_TOTP_SECRET`; without it, and for SMS and email codes and passkey approvals, the run pauses and asks you (you type the current authenticator code when asked), with `-p`, in the TUI and in the web UI. Codes and the secret never reach `history.json`, the prompts or an exported test.
+- **Environment accounts**: log-in accounts per environment, kept in a local SQLite file and managed on the web UI's Environments page. The agent logs in with `{{<id>.username}}` and `{{<id>.password}}` placeholders, so it never sees a password. Passwords are masked in the run's files and exported tests read them from `DW_*` environment variables. See [Accounts](#accounts).
 - **Minimal dependencies**: the core loop uses only Node's standard library; the TUI uses Ink; `@playwright/test` is a runtime dependency, used for spec replay; the web UI is built with React and Vite, which are development dependencies. TypeScript and the test tools are development dependencies.
 
 ## Getting started
@@ -386,7 +387,7 @@ When a login asks for a second factor, the agent uses a `twofa` action: the harn
 
 | Kind | Where the code comes from |
 |---|---|
-| `totp` | Generated from your authenticator secret. Set it as `DUCKWRIGHT_TOTP_SECRET` (a base32 secret, or an `otpauth://` URI). If it is unset, Duckwright asks you to type the current 6-digit code from your authenticator app, like an SMS or email code, each time a `totp` step needs one (the code rotates every 30 seconds). It never asks for the secret. |
+| `totp` | Generated from your authenticator secret. Set it as `DUCKWRIGHT_TOTP_SECRET` (a base32 secret, or an `otpauth://` URI). With an [account](#accounts), `twofa totp <ref> <id>` uses that account's own TOTP secret instead, and never asks a person. If it is unset, Duckwright asks you to type the current 6-digit code from your authenticator app, like an SMS or email code, each time a `totp` step needs one (the code rotates every 30 seconds). It never asks for the secret. |
 | `sms`, `email` | The run pauses and asks you for the code. |
 | `passkey` | The run pauses until you approve the prompt on your device and confirm. |
 
@@ -400,8 +401,9 @@ duckwright "Log in to the demo app as linh and open the dashboard"
 - **Waiting** is bounded by `--twofa-timeout` (default 300 seconds, at most 2147483; also a task-file key). Ctrl-C always stops the wait. A run may use at most 5 `twofa` actions.
 - **Nothing is recorded by Duckwright**: the secret and every code are scrubbed from `history.json`, `events.jsonl`, `network/`, `page/snapshot.yml`, the prompts and the step lines it prints. The recorded Playwright code shows `[2FA CODE]`. Two things are outside that: the code you type for a TOTP, SMS or email prompt is echoed in your own terminal (so it stays in your scrollback), and playwright-cli keeps its own page snapshots in `.playwright-cli/` in the working folder, which can contain a code (codes expire) and are not part of Duckwright's run folder.
 - **Short codes are masked everywhere**: a human code of only 4 digits is replaced wherever it appears, including in unrelated text such as a year.
+- **Account TOTP**: `twofa totp <ref> <id>` takes the code from the secret stored for account `<id>`. It fails at once if the account has no TOTP secret, and, like a password, it is typed only on an allowed origin (see [Accounts](#accounts)). The code is scrubbed like any other.
 - **An invalid `DUCKWRIGHT_TOTP_SECRET`** stops Duckwright before anything runs (exit `2`).
-- **Exported tests**: a `totp` step becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. Tests exported from a run where you typed the codes still need `DUCKWRIGHT_TOTP_SECRET` set in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
+- **Exported tests**: an account `totp` step becomes `totp(process.env.DW_<ENV>_<ID>_TOTP, 'DW_<ENV>_<ID>_TOTP')`, so CI needs that variable (see [Accounts](#accounts)). A `totp` step without an account becomes a `fill(totp())` that reads `DUCKWRIGHT_TOTP_SECRET` when the test runs, so the test works in CI. Tests exported from a run where you typed the codes still need `DUCKWRIGHT_TOTP_SECRET` set in CI. `sms`, `email` and `passkey` steps become `// MANUAL` steps with `await page.pause()`, and the export warns that the test cannot run unattended.
 
 ### Environment context
 
@@ -416,10 +418,48 @@ duckwright -p "Open the dashboard and report the plan name" --env staging
 - **Relative paths**: a path in a task file or the config resolves from that file's or the config's folder; a relative path given on the command line resolves from the current directory. A bare name always looks in `environments/` of the current directory.
 - **Limits**: the file must be UTF-8 text (a BOM is allowed), not empty after trimming, and at most 16384 bytes. On the command line, preflight fails (exit `2`, before anything runs) with `environment file not found: PATH`, `environment file cannot be read: PATH: REASON`, `environment file too large: PATH is N bytes (limit 16384)`, or `environment file is empty: PATH`. In a batch the message is prefixed with the task file. In the TUI and web the task errors instead (an error toast; the web start request returns 409). If the file disappears after preflight, the run fails with exit `1` on the command line, and in the TUI and web it ends as failed with that message.
 - **In the prompt**: the text is put in an `<environment>` section after `<task>` in every step's prompt, and the system prompt tells the agent to treat it as trusted background where the task wins on any disagreement.
+- **Accounts**: logins for an environment are stored apart from the file, in the local account database (see [Accounts](#accounts)).
 - **History**: `history.json` records `"env": {"name": ..., "path": ...}` after `task_file` (never the text). With no environment there is no `env` key.
 - **TUI and web**: in the TUI the `environment` field of the global Options pane (`O`) and of each task's `o` options form cycles through `none` and the files in `environments/` (`ctrl+r` goes back to inherited); the task detail shows an `environment` row. In the web UI the Options dialog has an `environment` select (inherit, `none`, each listed file), both globally (`O` or the options strip) and per task (`o` or the task's Options button), and the options strip shows an `env:` chip, marked ✱ when overridden; the effective environment is shown only on the global options strip, not per task. A global choice applies to every task's next run, a per-task one to that task, both above the command line.
 - **Plan mode**: `duckwright plan PLAN --env ENV` writes `env: ENV` into every task file it creates (a path is written relative to the planned folder).
-- **Never put raw secrets in it**: it goes into every prompt. Name where a credential comes from (an environment variable, or the `--state` file) instead of writing the value.
+- **Never put raw secrets in it**: it goes into every prompt. Keep logins as [accounts](#accounts) and refer to them by id, or name the `--state` file, instead of writing the value.
+
+### Accounts
+
+An environment can have log-in accounts. The agent logs in with them without ever seeing a password, and an exported test reads the passwords from environment variables.
+
+Accounts are managed on the **Environments** page of the web UI (`v`, or the header button). For each environment you set a base URL and optional extra login origins, then add accounts: an id, a label, a role, a username, a password, and optionally a TOTP secret. Passwords and TOTP secrets are write-only: the page and the API never send them back, and editing an account keeps the old value unless you type a new one.
+
+```bash
+duckwright -p "Log in as admin and open the dashboard" --env staging
+```
+
+```md
+---
+env: staging
+accounts: admin, member   # optional: offer only these
+---
+Log in as member and check the plan name.
+```
+
+- **Account id**: lowercase letters, digits and `-`, 1 to 40 characters, starting and ending with a letter or digit. It is unique within an environment.
+- **Where they are used**: an environment with accounts offers all of them to a run. The `accounts:` key in a task file's front matter narrows that to the ids you list. It needs an `env`. A run with an environment that has no accounts behaves as before.
+- **What the agent is told**: each account's id, label, role and username, and whether it has a TOTP secret. It logs in with `{{<id>.username}}` and `{{<id>.password}}` as `fill` or `type` arguments. A username placeholder may sit inside a longer argument. A password placeholder must be the whole argument, and a placeholder anywhere else (a `goto`, a `click`) is refused. Usernames are not secret.
+- **Origin guard**: a password, or an account's TOTP code, is typed only when the live top-level tab's origin equals the origin of the environment's base URL or one of its login origins. Duckwright re-reads the tab's origin right before typing, so a page that redirected during the step is caught. Usernames are not guarded.
+- **`fill` and `type` with `--submit`** count as page-changing, like a click: the actions after them in the same step are skipped.
+- **Masking**: a password is replaced by `[SECRET <id>.password]` in `history.json`, `events.jsonl`, `network/`, `page/snapshot.yml`, prompts and printed step lines, in its plain, JSON-escaped, quote-escaped (as Playwright prints code) and URL-encoded forms. TOTP secrets are masked as `[REDACTED]` and TOTP codes as `[2FA CODE]`. Every account of the environment is masked, including ones the task did not offer. At the end of a run Duckwright also masks the same values in `.playwright-cli/` and adds a `.gitignore` there.
+- **Checking**: a task whose `accounts:` names an id the environment does not have, or whose environment has accounts but no base URL, fails preflight with exit `2`. `duckwright check` reports the same; it warns instead when the file has no `env:` or there is no accounts database, because it cannot verify.
+- **Storage**: `.duckwright/local/duckwright.db`, in the folder you run `duckwright` from. The first write from the web UI creates it, with a `.gitignore` of `*` beside it so git ignores the folder. A run or `check` never creates it and never changes your accounts; opening an existing one may still switch it to WAL mode (adding `-wal` and `-shm` files beside it) and upgrade its schema to this version.
+- **Exported tests**: the password becomes `process.env.DW_<ENV>_<ID>_PASSWORD` and an account TOTP step becomes `totp(process.env.DW_<ENV>_<ID>_TOTP, 'DW_<ENV>_<ID>_TOTP')`. The name is `DW_`, the environment and the id upper-cased, every character outside `A-Z` and `0-9` turned into `_`, then `_PASSWORD` or `_TOTP`: account `admin-c` in `dev` gives `DW_DEV_ADMIN_C_PASSWORD`. Two accounts that would get the same name cannot both be saved. The username is written into the test as it is. The export prints a warning that lists the variables the test reads, and **CI must set them**. It refuses a run that used an account but recorded no environment, and a run where the password was typed as part of a longer string.
+- **Plan mode, TUI and `-p`** all use accounts the same way; only the web UI edits them.
+
+> [!CAUTION]
+> Limits of this feature:
+> - **Plaintext.** Passwords and TOTP secrets are stored unencrypted in `.duckwright/local/`. Treat that folder like `auth.json`: keep it out of git (its own `.gitignore` does that), out of backups you share, and use throwaway test accounts.
+> - **Top-level origin only.** The guard checks the top-level tab. A cross-origin iframe on an allowed page is not told apart, so a password typed there would go to the iframe.
+> - **Screenshots and video are not scrubbed.** A password typed into a visible field can appear in them. `.playwright-cli/` holds the raw values until the run ends.
+> - **Only account passwords are masked.** A password the agent types without a placeholder is not, and still lands in `history.json` and the spec.
+> - **Explore runs do not use accounts.** `duckwright explore` gets none yet; this is planned.
 
 ### Task files
 
@@ -459,6 +499,7 @@ and check the greeting says "Hello, Linh!".
 | `debug` | `true` or `false` |
 | `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
 | `env` | an environment name, `none`, or a path to its file (see [Environment context](#environment-context)) |
+| `accounts` | comma-separated account ids of the run's environment to offer the agent (needs `env`; absent means all of them) |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
 - Flags on the command line override the file, for example `--max-steps 5`.
@@ -639,6 +680,9 @@ A successful run already contains the steps of a Node.js `@playwright/test` test
 
 Only successful runs can be exported. `duckwright export` exits with `0` when the test was written, `1` when it refused (the run did not succeed, or it recorded no Playwright code), and `2` when the path or `history.json` cannot be used. When a run exports its test automatically, a failed export is reported on stderr but does not change the run's exit code.
 
+> [!NOTE]
+> A password typed from an [account](#accounts) is not written into the test. It becomes `process.env.DW_<ENV>_<ID>_PASSWORD`, and an account TOTP step reads `DW_<ENV>_<ID>_TOTP`. The export warns with the list, and CI must set those variables. Any other password the agent typed is still in the test.
+
 > [!IMPORTANT]
 > Some setup leaves no `code` behind. If the run used `--state FILE`, load the same state in the test with `test.use({ storageState: 'auth.json' })`. If it used `tab-new`, `tab-select` or `tab-close`, the export marks the spot with a `// TODO(duckwright)` line and prints a warning: edit that part by hand, because the test assumes a single `page`.
 
@@ -719,13 +763,15 @@ Planned work, in no particular order. Nothing here is scheduled yet.
 
 **Safety**
 
-- [ ] **Secret redaction**: mask passwords and other sensitive input in `history.json`, so it no longer has to be handled like `auth.json`.
+- [ ] **Secret redaction**: mask passwords and other sensitive input in `history.json`, so it no longer has to be handled like `auth.json`. Done for stored [account](#accounts) passwords and TOTP secrets, which are masked in the run's files and read from `DW_*` variables in exports. Not done: other typed passwords, screenshots and video.
 - [ ] **Domain allow-list**: restrict `goto` and navigation to approved hosts.
 - [ ] **Confirm risky actions**: `--confirm` pauses before clicks whose label matches words like delete, pay, submit order, or send, and waits for a y/n before running them.
 
 **Authentication**
 
 - [X] **Two-factor verification**: get past 2FA prompts during a run. TOTP codes are generated from a secret supplied by the user, or typed by the user when there is none (never recorded in `history.json`). SMS and email codes, and passkeys, pause the run and ask the user for the code or approval.
+
+- [x] **Environment accounts**: per-environment log-in accounts in a local database, placeholders the agent types without seeing the password, an origin guard, named masking, and `DW_*` variables in exported tests. Follow-up: accounts in explore runs.
 
 **Network and API testing**
 
