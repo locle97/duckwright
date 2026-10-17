@@ -7,14 +7,18 @@ export const SECRET_MASK = "[REDACTED]";
 /** A shorter value would mangle unrelated text. */
 const MIN_CODE_LENGTH = 4;
 
+/** The text a named secret is replaced with in recorded code. */
+export const secretMarker = (id: string): string => `[SECRET ${id}.password]`;
+
 const byLength = (values: Set<string>): string[] => [...values].sort((a, b) => b.length - a.length);
 
 export class Scrubber {
   #codes = new Set<string>();
   #secrets = new Set<string>();
+  #named = new Map<string, string>();
 
   get empty(): boolean {
-    return this.#codes.size === 0 && this.#secrets.size === 0;
+    return this.#codes.size === 0 && this.#secrets.size === 0 && this.#named.size === 0;
   }
 
   addCode(code: string): void {
@@ -38,10 +42,18 @@ export class Scrubber {
     }
   }
 
+  /** A value replaced with its own `marker` instead of the generic mask; any length. */
+  addNamedSecret(value: string, marker: string): void {
+    if (value !== "") this.#named.set(value, marker);
+  }
+
   scrub(text: string): string {
     if (this.empty) return text;
     let out = text;
-    for (const s of byLength(this.#secrets)) out = out.split(s).join(SECRET_MASK);
+    // Secrets and named secrets share one longest-first order, so a value that prefixes another cannot break it.
+    const masks = new Map<string, string>(this.#named);
+    for (const s of this.#secrets) if (!masks.has(s)) masks.set(s, SECRET_MASK);
+    for (const s of [...masks.keys()].sort((a, b) => b.length - a.length)) out = out.split(s).join(masks.get(s)!);
     for (const c of byLength(this.#codes)) out = out.split(c).join(CODE_MASK);
     return out;
   }

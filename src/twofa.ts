@@ -43,6 +43,8 @@ export interface TwoFactor {
   totp(): Promise<string>;
   code(kind: "totp" | "sms" | "email"): Promise<string>;
   approve(): Promise<void>;
+  /** The current code for an account's own TOTP secret; counts an attempt and scrubs the code. */
+  totpFor(secret: string): Promise<string>;
 }
 
 export interface TwoFactorOptions {
@@ -125,6 +127,12 @@ export function createTwoFactor(o: TwoFactorOptions): TwoFactor {
       return code;
     },
     code: typedCode,
+    async totpFor(secret) {
+      count();
+      const code = totpAt(parseSecret(secret), now());
+      scrubber.addCode(code);
+      return code;
+    },
     async approve() {
       count();
       await ask("passkey", (h, signal) => h.approve(signal));

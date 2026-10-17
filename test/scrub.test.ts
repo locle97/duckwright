@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { CODE_MASK, SECRET_MASK, Scrubber, scrubTree } from "../src/scrub.ts";
+import { CODE_MASK, SECRET_MASK, Scrubber, scrubTree, secretMarker } from "../src/scrub.ts";
 import { tmpDir } from "./helpers.ts";
 
 const SECRET = "gezd gnbv GY3TQOJQ";
@@ -75,4 +75,18 @@ test("scrub_tree_ignores_a_missing_folder", () => {
   const s = new Scrubber();
   s.addCode("493817");
   assert.doesNotThrow(() => scrubTree(path.join(tmpDir(), "nope"), s));
+});
+
+test("named_secret_scrubs_to_marker", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("hunter2", secretMarker("a"));
+  assert.equal(s.empty, false);
+  assert.equal(s.scrub("fill('hunter2')"), "fill('[SECRET a.password]')");
+});
+
+test("prefix_passwords_each_get_own_marker", () => {
+  const s = new Scrubber();
+  s.addNamedSecret("abc12345", secretMarker("a"));
+  s.addNamedSecret("abc123456", secretMarker("b"));
+  assert.equal(s.scrub("abc123456 abc12345"), "[SECRET b.password] [SECRET a.password]");
 });
