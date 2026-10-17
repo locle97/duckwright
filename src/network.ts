@@ -258,11 +258,31 @@ function originOf(u: string): string | null {
   }
 }
 
-/** The origin of the current tab in `tab-list` output, or null when it is not an http(s) page. */
+/**
+ * The origin of the current tab in `tab-list` output (`- <n>: (current) [<title>](<url>)`), or null
+ * when it is not an http(s) page or cannot be told apart from the page-controlled title.
+ *
+ * Only the link target counts. The title and the URL may both contain `](`, so every `](` that
+ * starts a whitespace-free run up to the closing `)` at the end of the line is a candidate; the
+ * real URL is always one, so when exactly one candidate parses as a URL it is the real one. More
+ * than one is ambiguous and refused, so page text can never pass for the origin.
+ */
 export function currentOrigin(tabs: string): string | null {
-  const cur = tabs.split(/\r?\n/).find((l) => /^- \d+: \(current\) /.test(l));
-  const found = cur?.match(/https?:\/\/\S+/g)?.at(-1)?.replace(/[)\]]+$/, "");
-  return found ? originOf(found) : null;
+  const cur = tabs.split(/\r?\n/).find((l) => /^- \d+: \(current\) \[/.test(l))?.trimEnd();
+  if (!cur?.endsWith(")")) return null;
+  const parsed: URL[] = [];
+  for (let i = cur.indexOf("]("); i >= 0; i = cur.indexOf("](", i + 1)) {
+    const target = cur.slice(i + 2, -1);
+    if (!target || /\s/.test(target)) continue;
+    try {
+      parsed.push(new URL(target));
+    } catch {
+      // not a URL: page text
+    }
+  }
+  if (parsed.length !== 1) return null;
+  const [u] = parsed;
+  return u.protocol === "http:" || u.protocol === "https:" ? u.origin : null;
 }
 
 /** Prompt text listing the last step's calls, or null when there were none. */

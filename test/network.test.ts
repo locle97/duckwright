@@ -529,3 +529,23 @@ test("current_origin_is_null_without_a_web_page", () => {
   assert.equal(currentOrigin(""), null);
   assert.equal(currentOrigin("- 0: [Home](https://shop.example.com/)"), null);
 });
+
+test("current_origin_ignores_urls_in_the_page_title", () => {
+  assert.equal(currentOrigin("- 0: (current) [x https://staging.test/ y](about:blank)"), null);
+  assert.equal(currentOrigin("- 0: (current) [https://staging.test/](about:blank)"), null);
+  assert.equal(currentOrigin("- 0: (current) [a](https://staging.test/)](about:blank)"), null);
+});
+
+test("current_origin_refuses_non_http_urls_carrying_an_http_url", () => {
+  assert.equal(currentOrigin("- 0: (current) [t](about:blank#https://staging.test/)"), null);
+  assert.equal(currentOrigin("- 0: (current) [t](data:text/html,https://staging.test/)"), null);
+  assert.equal(currentOrigin("- 0: (current) [t](about:blank#](https://staging.test/))"), null);
+  assert.equal(currentOrigin("- 0: (current) [t](javascript:'https://staging.test/')"), null);
+});
+
+test("current_origin_reads_the_link_target_with_brackets_in_the_title", () => {
+  assert.equal(currentOrigin("- 0: (current) [Cart (2) [new]](https://shop.example.com/cart)"), "https://shop.example.com");
+  assert.equal(currentOrigin("- 0: (current) [[a](b)](https://shop.example.com/x)"), "https://shop.example.com");
+  assert.equal(currentOrigin("- 0: (current) [Wiki](https://en.example.org/wiki/A_(b))"), "https://en.example.org");
+  assert.equal(currentOrigin("- 0: (current) [t](http://localhost:3000/login)  "), "http://localhost:3000");
+});
