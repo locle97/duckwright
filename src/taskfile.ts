@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { ID_RE } from "./accounts/store.ts";
 import { ENV_NONE, isEnvName, isEnvPath } from "./environment.ts";
 import { SNAPSHOT_MODES } from "./observe.ts";
 import type { SnapshotMode } from "./observe.ts";
@@ -30,11 +31,13 @@ export type TaskSettings = Partial<{
   snapshot: SnapshotMode;
   /** "none", an environment name, or an absolute resolved path to an environment file. */
   env: string;
+  /** Account ids of the run's environment to offer the agent; absent means all of them. */
+  accounts: string[];
   /** A shared setup file whose text is put before the task; resolved by loadTaskFile, never a run setting. */
   setup: string;
 }>;
 
-export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme" | "threshold" | "env";
+export type Kind = "int" | "count" | "str" | "bool" | "path" | "snapshot" | "theme" | "threshold" | "env" | "accounts";
 
 // Front-matter key -> (setting, kind). allow-file-access is deliberately absent:
 // a shared task file must not be able to grant the browser unrestricted file access.
@@ -54,6 +57,7 @@ export const KEYS: Readonly<Record<string, readonly [keyof TaskSettings, Kind]>>
   "jev-threshold": ["jevThreshold", "threshold"],
   snapshot: ["snapshot", "snapshot"],
   env: ["env", "env"],
+  accounts: ["accounts", "accounts"],
   setup: ["setup", "path"],
 };
 const FENCE = "---";
@@ -115,7 +119,15 @@ function expandUser(v: string): string {
   return os.homedir() + (slash === -1 ? "" : v.slice(slash));
 }
 
-function convert(key: string, kind: Kind, v: string, baseDir: string): string | number | boolean {
+function convert(key: string, kind: Kind, v: string, baseDir: string): string | number | boolean | string[] {
+  if (kind === "accounts") {
+    const ids = [...new Set(v.split(",").map((x) => x.trim()))];
+    const bad = ids.find((id) => !ID_RE.test(id));
+    if (bad !== undefined) {
+      throw new LineError(`accounts must be comma-separated account ids (lowercase letters, digits and "-"), got "${bad}"`);
+    }
+    return ids;
+  }
   if (kind === "int") {
     const n = /^[0-9]+$/.test(v) ? Number(v) : 0;
     if (!(n >= 1 && n <= Number.MAX_SAFE_INTEGER)) {
@@ -188,7 +200,7 @@ export function settingValue(
 ): string | number | boolean {
   try {
     if (!raw) throw new LineError(`"${key}" has no value`);
-    return convert(key, KEYS[key][1], raw, "");
+    return convert(key, KEYS[key][1], raw, "") as string | number | boolean;
   } catch (e) {
     if (e instanceof LineError) throw new TaskFileError(e.message);
     throw e;

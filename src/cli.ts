@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { RUN_USAGE, UsageError, parseCheckArgs, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
+import { accountsProblem } from "./accounts/runAccounts.ts";
 import { checkTasks } from "./check.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
@@ -177,6 +178,8 @@ const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : nul
 function preflightArgs(deps: CliDeps, args: RunArgs): string | null {
   const err = preflight(deps, args.skill, statePath(args), args.env);
   if (err) return err;
+  const accounts = accountsProblem(args, process.cwd());
+  if (accounts) return accounts;
   if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
   return null;
 }

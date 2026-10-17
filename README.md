@@ -459,6 +459,7 @@ and check the greeting says "Hello, Linh!".
 | `debug` | `true` or `false` |
 | `setup` | a path: a file whose text is put before the task, for setup shared by several tasks (see [Plan mode](#plan-mode)) |
 | `env` | an environment name, `none`, or a path to its file (see [Environment context](#environment-context)) |
+| `accounts` | comma-separated account ids of the run's environment to offer the agent (needs `env`; absent means all of them) |
 
 - Front matter starts with `---` on the first line and ends at the next `---` line. Each line inside is a flat `key: value`; lines starting with `#` and text after ` #` are comments. Quote a value to keep a `#` in it.
 - Flags on the command line override the file, for example `--max-steps 5`.

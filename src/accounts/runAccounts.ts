@@ -1,5 +1,7 @@
 // The accounts one run may use: a read-only copy of an environment's accounts, optionally narrowed to
 // the ids a task pinned. Secrets stay here; the agent only ever sees `promptText()`.
+import { envLabel } from "../environment.ts";
+import type { RunArgs } from "../args.ts";
 import { Scrubber, secretMarker } from "../scrub.ts";
 import type { Resolver } from "./placeholders.ts";
 import { AccountError, AccountStore } from "./store.ts";
@@ -85,4 +87,20 @@ export function loadRunAccounts(cwd: string, env: string, pinned: string[] | nul
   const visible = pinned === null ? all : all.filter((a) => pinned.includes(a.id));
   const origins = [new URL(settings.baseUrl).origin, ...settings.loginOrigins];
   return new RunAccounts(env, all, visible, [...new Set(origins)]);
+}
+
+/** Why a run's accounts cannot be used (for preflight), or null. Reads the database only when the run has an environment. */
+export function accountsProblem(args: RunArgs, cwd: string): string | null {
+  const pinned = args.accounts !== null && args.accounts.length > 0;
+  const env = envLabel(args.env);
+  if (env === null || args.env === "none") {
+    return pinned ? "accounts: needs an environment (set env: or --env)" : null;
+  }
+  try {
+    loadRunAccounts(cwd, env, args.accounts);
+  } catch (e) {
+    if (e instanceof AccountError) return e.message;
+    throw e;
+  }
+  return null;
 }

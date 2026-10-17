@@ -10,7 +10,7 @@ import { openDatabase } from "./sqlite.ts";
 
 export const DB_DIR = ".duckwright/local";
 export const DB_FILE = "duckwright.db";
-const ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+export const ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 
 export class AccountError extends Error {
   override name = "AccountError";
