@@ -11,7 +11,8 @@ You follow the three other Duckwright skills and do not restate their rules here
 overrides one, it says so.
 
 Your tools besides Read, Grep, Glob, Write and Edit are the `mcp__duckwright__*` tools:
-`set_phase`, `ask`, `check_messages`, `budget`, `open_plan`, `run_plan`, `run_task` and `wait`.
+`set_phase`, `ask`, `check_messages`, `budget`, `environments`, `open_plan`, `run_plan`, `run_task` and
+`wait`.
 Probes and plan runs start through them, never through Bash, so the person sees them live.
 
 The chat allows only these, and refuses anything else without asking (the person sees a "Not allowed"
@@ -37,6 +38,23 @@ CLAUDE.md Duckwright section, testing map, environment file, sitemap brief, fact
 Run `node {{SKILLS}}/duckwright-setup/scripts/doctor.mjs --root .`. If it fails, the project is not set
 up: follow `{{SKILLS}}/duckwright-setup/SKILL.md` in this chat, and fold its questions into step 3.
 
+Call `environments`. It lists each environment the person set up in the web UI, with its log-in
+accounts (id, label, role, username; never a password). The environment name there is the one a task's
+`env:` names, and its accounts are how roles sign in (see "Signing in" below).
+
+### Signing in
+
+When the environment has an account for a role, that account is how the role signs in, for probes and
+tasks alike. Do not use or ask for a state file then. In the file's front matter put `env: <name>` and
+`accounts: <id>`, delete the `state:` line, and sign in with a step such as: Open <the sign-in page>.
+Fill the username field with `{{<id>.username}}` and the password field with `{{<id>.password}}`, then
+submit. If the sign-in fails, finish with failure "login failed: <what the page says>". The run types
+the real values; you and the task never see the password. `gate.mjs` then needs no `--state`. For
+`close-gaps.md` gate 3, an account listed by `environments` counts as the role's sign-in.
+
+Use a state file only for a role no account covers. When a run reports "login failed" with an account,
+ask the person to check that account on the Environments page; never ask for the password.
+
 ## 2. Mark each phase
 
 Call `set_phase` at the start of each phase: `read`, `clarify`, `plan`, `probe`, `write`, `run`,
@@ -45,7 +63,8 @@ Call `set_phase` at the start of each phase: `read`, `clarify`, `plan`, `probe`,
 ## 3. Clarify once
 
 Put every question only the person can answer in one `ask` call, then end the turn. Give each question
-a best guess so "yes" works: environment, sign-in per role (state file or environment account), whether
+a best guess so "yes" works: environment (one `environments` lists), sign-in per role (name the account
+id you will use; a state file only when no account covers the role), whether
 writes are allowed, expected values the documents do not give, anything the spec leaves ambiguous about
 behaviour. Merge the setup questions and the `duckwright-tasks` step 3 questions. The "at most five
 questions" limits of those skills do not apply here; keep the message as short as the gaps allow.

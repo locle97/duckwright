@@ -17,7 +17,7 @@ test("prompt has no front matter", () => {
 
 test("prompt names every MCP tool", () => {
   const p = chatSystemPrompt("/pkg/skills");
-  for (const t of ["set_phase", "ask", "check_messages", "budget", "open_plan", "run_plan", "run_task", "wait"]) {
+  for (const t of ["set_phase", "ask", "check_messages", "budget", "environments", "open_plan", "run_plan", "run_task", "wait"]) {
     assert.ok(p.includes(`\`${t}\``), t);
   }
 });

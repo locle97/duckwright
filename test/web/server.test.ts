@@ -400,13 +400,13 @@ test("mcp with the browser token cookie but no bearer is 401", async () => {
   assert.equal(r.status, 401);
 });
 
-test("mcp tools/list with the chat token is 200 and lists 8 tools", async () => {
+test("mcp tools/list with the chat token is 200 and lists 9 tools", async () => {
   const { id, bearer } = await runningChat();
   const r = await request(server.port, "POST", `/mcp/${id}`, {
     headers: mcpHeaders({ authorization: bearer }), body: rpc("tools/list"),
   });
   assert.equal(r.status, 200);
-  assert.equal(JSON.parse(r.body).result.tools.length, 8);
+  assert.equal(JSON.parse(r.body).result.tools.length, 9);
   const n = await request(server.port, "POST", `/mcp/${id}`, {
     headers: mcpHeaders({ authorization: bearer }), body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
   });

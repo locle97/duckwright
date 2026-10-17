@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { handleMcp, MCP_TOOLS, WAIT_CAP_SEC } from "../../src/chat/mcp.ts";
-import type { JsonRpc, McpHost } from "../../src/chat/mcp.ts";
+import type { EnvAccounts, JsonRpc, McpHost } from "../../src/chat/mcp.ts";
 import { RunTracker } from "../../src/chat/tracker.ts";
 import type { Phase } from "../../src/chat/types.ts";
 import { FakeManager, planSnapshot, snapshot } from "../tui/fake-manager.ts";
 
-function setup(over: { spent?: number; ceiling?: number; messages?: string[]; tasks?: ReturnType<typeof snapshot>[] } = {}) {
+function setup(over: { spent?: number; ceiling?: number; messages?: string[]; tasks?: ReturnType<typeof snapshot>[]; envs?: EnvAccounts[] } = {}) {
   const manager = new FakeManager(over.tasks ?? []);
   const tracker = new RunTracker(manager);
   const queue = [...(over.messages ?? [])];
@@ -16,6 +16,7 @@ function setup(over: { spent?: number; ceiling?: number; messages?: string[]; ta
     manager, tracker, spentUsd: () => over.spent ?? 0, ceilingUsd: () => over.ceiling ?? 5,
     takeMessages: () => queue.splice(0), setPhase: (p: Phase) => calls.push(`phase:${p}`), ask: (q) => calls.push(`ask:${q.join("|")}`),
     activity: (t) => calls.push(`activity:${t}`), setPlanFolder: (f) => calls.push(`folder:${f}`),
+    environments: () => over.envs ?? [],
   };
   return { manager, tracker, host, calls };
 }
@@ -30,7 +31,7 @@ test("initialize and tools/list", async () => {
   assert.equal(init.result.serverInfo.name, "duckwright");
   const list: any = await handleMcp(host, { jsonrpc: "2.0", id: 2, method: "tools/list" });
   assert.deepEqual(list.result.tools.map((t: any) => t.name), [
-    "set_phase", "ask", "check_messages", "budget", "open_plan", "run_plan", "run_task", "wait",
+    "set_phase", "ask", "check_messages", "budget", "environments", "open_plan", "run_plan", "run_task", "wait",
   ]);
   assert.equal(list.result.tools, MCP_TOOLS);
 });
@@ -129,4 +130,19 @@ test("unknown method is -32601 and notification returns null", async () => {
 test("ping answers with an empty result", async () => {
   const { host } = setup();
   assert.deepEqual(await handleMcp(host, { jsonrpc: "2.0", id: 7, method: "ping" }), { jsonrpc: "2.0", id: 7, result: {} });
+});
+
+test("environments lists each environment's accounts without secrets", async () => {
+  const { host } = setup({
+    envs: [{ name: "localhost-9091", baseUrl: "http://localhost:9091", accounts: [
+      { id: "admin", label: "Admin", role: "admin", username: "changeme@example.com", hasTotp: false },
+    ] }],
+  });
+  const r = body(await handleMcp(host, call("environments")));
+  assert.deepEqual(r.environments, [{
+    name: "localhost-9091", base_url: "http://localhost:9091",
+    accounts: [{ id: "admin", label: "Admin", role: "admin", username: "changeme@example.com", has_totp: false }],
+  }]);
+  assert.deepEqual(r.pending_messages, []);
+  assert.doesNotMatch(JSON.stringify(r), /password/i);
 });

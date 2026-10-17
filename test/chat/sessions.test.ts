@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import type { ClaudeSpawner } from "../../src/chat/claude.ts";
-import type { JsonRpc } from "../../src/chat/mcp.ts";
+import type { EnvAccounts, JsonRpc } from "../../src/chat/mcp.ts";
 import { ChatSessions } from "../../src/chat/sessions.ts";
 import { Scrubber, secretMarker } from "../../src/scrub.ts";
 import { ChatStore } from "../../src/chat/store.ts";
@@ -36,14 +36,14 @@ function fakeSpawner() {
   return { procs, spawn };
 }
 
-function setup(tasks = [snapshot(1, "one", { name: "one", state: "running" })], scrubber?: () => Scrubber) {
+function setup(tasks = [snapshot(1, "one", { name: "one", state: "running" })], scrubber?: () => Scrubber, environments?: () => EnvAccounts[]) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dw-sessions-"));
   const manager = new FakeManager(tasks);
   const { procs, spawn } = fakeSpawner();
   let n = 0;
   const sessions = new ChatSessions({
     root, manager, store: new ChatStore(root), spawn, skillsDir: "/skills", systemPrompt: "sys",
-    mcpUrl: (id) => `http://127.0.0.1:1/mcp/${id}`, newToken: () => `tok${++n}`, scrubber,
+    mcpUrl: (id) => `http://127.0.0.1:1/mcp/${id}`, newToken: () => `tok${++n}`, scrubber, environments,
   });
   const events: ChatEvent[] = [];
   sessions.subscribe((e) => events.push(e));
@@ -428,4 +428,24 @@ test("a stale session reported in the result text is cleared too", async () => {
   procs[1].close(1);
   await tick();
   assert.equal(sessions.open(chat.id)!.chat.sessionId, null);
+});
+
+test("the environments tool shows the project's accounts to the agent", async () => {
+  const envs: EnvAccounts[] = [{ name: "localhost-9091", baseUrl: "http://localhost:9091", accounts: [
+    { id: "admin", label: "Admin", role: "admin", username: "changeme@example.com", hasTotp: false },
+  ] }];
+  const { sessions, procs } = setup(undefined, undefined, () => envs);
+  const chat = sessions.create();
+  sessions.send(chat.id, "test recipes", []);
+  const r = await sessions.mcp(chat.id, tokenOf(procs[0].argv), call("environments"));
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse((r.body as any).result.content[0].text).environments[0].accounts[0].id, "admin");
+});
+
+test("without an environments source the tool returns none", async () => {
+  const { sessions, procs } = setup();
+  const chat = sessions.create();
+  sessions.send(chat.id, "x", []);
+  const r = await sessions.mcp(chat.id, tokenOf(procs[0].argv), call("environments"));
+  assert.deepEqual(JSON.parse((r.body as any).result.content[0].text).environments, []);
 });

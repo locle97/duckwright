@@ -13,6 +13,12 @@ export interface McpHost {
   takeMessages(): string[]; // drains queued person messages
   setPhase(p: Phase): void; ask(questions: string[]): void;
   activity(text: string): void; setPlanFolder(folder: string): void;
+  environments(): EnvAccounts[];
+}
+/** An environment and its log-in accounts as the agent may see them: never a password or TOTP secret. */
+export interface EnvAccounts {
+  name: string; baseUrl: string | null;
+  accounts: Array<{ id: string; label: string; role: string; username: string; hasTotp: boolean }>;
 }
 export type JsonRpc = { jsonrpc: "2.0"; id?: number | string; method: string; params?: unknown };
 
@@ -25,6 +31,7 @@ export const MCP_TOOLS: { name: string; description: string; inputSchema: object
   { name: "ask", description: "Ask the person questions, then end your turn.", inputSchema: obj({ questions: { type: "array", items: { type: "string" } } }, ["questions"]) },
   { name: "check_messages", description: "Fetch messages the person sent while you were working.", inputSchema: obj({}) },
   { name: "budget", description: "Spend so far, the ceiling and what remains, in USD.", inputSchema: obj({}) },
+  { name: "environments", description: "The environments and their log-in accounts (id, label, role, username; never a password). Sign in with {{<id>.username}} and {{<id>.password}}.", inputSchema: obj({}) },
   { name: "open_plan", description: "Open a planned folder (or plan a plan file) in Duckwright.", inputSchema: obj({ folder: { type: "string" } }, ["folder"]) },
   { name: "run_plan", description: "Run an open plan's tasks.", inputSchema: obj({ plan_id: { type: "number" }, which: { type: "string", enum: ["all", "failed"] } }, ["plan_id"]) },
   { name: "run_task", description: "Run one task file.", inputSchema: obj({ file: { type: "string" }, env: { type: "string" } }, ["file"]) },
@@ -87,6 +94,13 @@ async function callTool(host: McpHost, name: string, a: Record<string, unknown>,
     }
     case "check_messages":
       return {};
+    case "environments":
+      return {
+        environments: host.environments().map((e) => ({
+          name: e.name, base_url: e.baseUrl,
+          accounts: e.accounts.map((x) => ({ id: x.id, label: x.label, role: x.role, username: x.username, has_totp: x.hasTotp })),
+        })),
+      };
     case "budget": {
       const spent = host.spentUsd();
       const ceiling = host.ceilingUsd();

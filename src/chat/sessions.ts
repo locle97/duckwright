@@ -11,7 +11,7 @@ import { newToken as defaultNewToken } from "../web/auth.ts";
 import { claudeArgv, mcpConfig, parseStreamLine } from "./claude.ts";
 import type { ClaudeProcess, ClaudeSpawner, StreamItem } from "./claude.ts";
 import { handleMcp } from "./mcp.ts";
-import type { JsonRpc, McpHost } from "./mcp.ts";
+import type { EnvAccounts, JsonRpc, McpHost } from "./mcp.ts";
 import { projectScrubber } from "./secrets.ts";
 import { ChatStore, isChatId, mapMessageText } from "./store.ts";
 import type { ChatEvent, ChatId, ChatMessage, ChatMeta, TurnState } from "./types.ts";
@@ -25,6 +25,7 @@ export interface ChatSessionsOptions {
   defaultCeilingUsd?: number;                    // 5
   newToken?: () => string;                       // per-chat MCP token; default auth.ts newToken
   scrubber?: () => Scrubber;                     // project secrets to mask; default projectScrubber(root)
+  environments?: () => EnvAccounts[];            // environments and accounts the agent may see; default none
 }
 
 type Ok = { ok: true } | { ok: false; error: string };
@@ -255,6 +256,7 @@ export class ChatSessions {
       ask: (questions) => { if (live()) this.#append(s, { kind: "questions", at: Date.now(), questions }); },
       activity: (text) => { if (live()) this.#append(s, { kind: "activity", at: Date.now(), text }); },
       setPlanFolder: (folder) => { if (live()) { s.meta.planFolder = folder; this.#saveMeta(s); } },
+      environments: () => this.#o.environments?.() ?? [],
     };
   }
 

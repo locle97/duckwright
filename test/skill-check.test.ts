@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -73,4 +75,18 @@ test("skill_runs_brief_lists_plan_runs_and_flags_failures", async () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("skill_linter_accepts_account_placeholders_and_still_flags_others", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-lint-"));
+  fs.mkdirSync(path.join(dir, "tasks/x"), { recursive: true });
+  const task = (body: string) => `---\nmax-steps: 12\n---\nSteps:\n${body}\n\nExpected results:\n- The heading "Recipes" is visible.\n`;
+  fs.writeFileSync(path.join(dir, "tasks/x/01-login.md"), task(
+    "1. Open http://localhost:9091/login.\n2. Fill \"Email\" with {{admin.username}} and \"Password\" with {{admin.password}}, then click \"Login\".",
+  ));
+  fs.writeFileSync(path.join(dir, "tasks/x/02-todo.md"), task("1. Open http://localhost:9091/{{page}}."));
+  const r = spawnSync(process.execPath, [lintPath, "--root", dir, path.join(dir, "tasks/x")], { encoding: "utf8" });
+  const placeholders = r.stdout.split("\n").filter((l) => l.includes("placeholder text"));
+  assert.equal(placeholders.length, 1, r.stdout);
+  assert.match(placeholders[0], /02-todo\.md/);
 });

@@ -75,9 +75,15 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
     resolveDone = r;
   });
   let port = 0; // known once the server listens; the chat's MCP URL reads it lazily
+  const environments = createEnvironments(cwd);
   const chats = o.chats ?? new ChatSessions({
     root: cwd, manager: o.manager, store: new ChatStore(cwd), spawn: spawnClaude, skillsDir: DEFAULT_SKILLS_DIR,
     systemPrompt: chatSystemPrompt(DEFAULT_SKILLS_DIR), mcpUrl: (id) => `http://127.0.0.1:${port}/mcp/${id}`,
+    // Account summaries only: environments.list() never returns a password or TOTP secret.
+    environments: () => environments.list().map((e) => ({
+      name: e.name, baseUrl: e.baseUrl,
+      accounts: e.accounts.map((a) => ({ id: a.id, label: a.label, role: a.role, username: a.username, hasTotp: a.hasTotp })),
+    })),
   });
   let quitting: Promise<void> | null = null;
   const quit = (): void => {
@@ -97,7 +103,7 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
   const ctx: ApiContext = {
     manager: o.manager, maxParallel: o.maxParallel, notices: o.notices ?? [], theme: o.theme ?? "auto",
     quit, runs: () => log.entries(), candidates: () => walk(nodeReadDir(cwd)),
-    environments: createEnvironments(cwd), chats,
+    environments, chats,
   };
   try {
     server = await startServer({ ctx, token, port: o.port, uiDir, runsDir: o.runsDir ?? path.resolve("runs") });
