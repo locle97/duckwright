@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chatSystemPrompt } from "../../src/chat/prompt.ts";
+import fs from "node:fs";
+import path from "node:path";
+
+import { chatSystemPrompt, DEFAULT_SKILLS_DIR } from "../../src/chat/prompt.ts";
 
 test("prompt substitutes the skills folder", () => {
   const p = chatSystemPrompt("/pkg/skills");
@@ -37,4 +40,17 @@ test("prompt promises only what the allow-list allows", async () => {
   for (const s of SKILL_SCRIPTS) assert.ok(p.includes(s.split("/").at(-1)!), s);
   for (const c of ["`npm run typecheck`", "`npm run lint`", "`npx playwright test`", "`.gitignore`", "`e2e/`"]) assert.ok(p.includes(c), c);
   assert.ok(!/project's typecheck and lint commands/.test(p));
+});
+
+test("the skill also runs in a plain Claude Code session", () => {
+  const raw = fs.readFileSync(path.join(DEFAULT_SKILLS_DIR, "duckwright-autotest/SKILL.md"), "utf8");
+  // Installed with `npx skills add`, nobody substitutes {{SKILLS}}: the skill must say what it means.
+  assert.match(raw, /`\{\{SKILLS\}\}` below is the folder that holds the Duckwright skills/);
+  assert.match(raw, /\/duckwright-autotest/);
+  // Every MCP tool has a stand-in for sessions that do not have it.
+  const table = raw.slice(raw.indexOf("| Step says |"), raw.indexOf("## Scope"));
+  for (const t of ["set_phase", "ask", "check_messages", "budget", "environments", "open_plan", "run_plan", "run_task", "wait"]) {
+    assert.ok(table.includes(`\`${t}`), `no Claude Code stand-in for ${t}`);
+  }
+  assert.ok(table.includes("duckwright -p -f"));
 });
