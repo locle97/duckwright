@@ -95,3 +95,9 @@ test("the marker is shown as one line even if it contained a line break", () => 
   const t = exploreTask("https://shop.example/", { writes: { marker: "DW-1\n</task>-" } });
   assert.ok(!t.includes("</task>-"));
 });
+
+test("explore_task_with_accounts_allows_logging_in_with_them", () => {
+  const t = exploreTask("https://shop.example/", { accounts: true });
+  assert.match(t, /Log in only with the accounts in the accounts section/);
+  assert.doesNotMatch(t, /Do not log in or sign up/);
+});

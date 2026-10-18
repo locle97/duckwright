@@ -269,7 +269,7 @@ test("run_without_accounts_creates_nothing", async () => {
   }
 });
 
-test("explore_run_gets_no_accounts", async () => {
+test("explore_run_gets_the_environment_accounts", async () => {
   const tmp = project();
   seedAccount(tmp);
   const seen: AgentOptions[] = [];
@@ -277,7 +277,7 @@ test("explore_run_gets_no_accounts", async () => {
     prompts: PROMPTS, signal: new AbortController().signal, runsDir: path.join(tmp, "runs"), env: {},
     createAgent: (opts) => { seen.push(opts); return { costUsd: 0, run: async () => ({ success: false, answer: "a", steps: 0, costUsd: 0, history: [] }) }; },
   }).done;
-  assert.equal(seen[0].accounts, undefined);
+  assert.ok(seen[0].accounts?.has("a"));
 });
 
 test("run_failure_text_is_scrubbed", async () => {

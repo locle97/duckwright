@@ -2188,13 +2188,22 @@ test("preflight_without_env_never_touches_the_database", async () => {
   assert.equal(fs.existsSync(path.join(e.tmp, ".duckwright")), false);
 });
 
-test("explore_is_not_blocked_by_accounts_without_base_url", async () => {
+test("explore_with_accounts_without_base_url_exit_2", async () => {
   const e = exploreEnv();
   envFile(e.tmp, "dev", "DEV");
   seedAccounts(e.tmp, null);
+  assert.equal(await main([...e.argv, "--env", "dev"], e.deps({ createAgent: exploreAgent(FLOWS, true, []) })), 2);
+  assert.deepEqual(e.err, ["environment 'dev' has accounts but no base URL"]);
+});
+
+test("explore_uses_the_environment_accounts", async () => {
+  const e = exploreEnv();
+  envFile(e.tmp, "dev", "DEV");
+  seedAccounts(e.tmp);
   const seen: AgentOptions[] = [];
   assert.equal(await main([...e.argv, "--env", "dev"], e.deps({ createAgent: exploreAgent(FLOWS, true, seen) })), 0, e.err.join("\n"));
-  assert.equal(seen[0].accounts, undefined);
+  assert.ok(seen[0].accounts?.has("admin"));
+  assert.match(seen[0].task, /Log in only with the accounts in the accounts section/);
 });
 
 function garbageDb(tmp: string): void {

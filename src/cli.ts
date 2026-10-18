@@ -2,12 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { RUN_USAGE, UsageError, parseCheckArgs, parseExploreArgs, parseExportArgs, parseRunArgs } from "./args.ts";
-import { accountsProblem } from "./accounts/runAccounts.ts";
+import { accountsProblem, loadRunAccounts } from "./accounts/runAccounts.ts";
 import { checkTasks } from "./check.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
-import { EnvError, isEnvPath, loadEnvironment } from "./environment.ts";
+import { EnvError, envLabel, isEnvPath, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun, loadHistory } from "./export.ts";
 import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
 import { buildExploreReport, renderExploreMarkdown, writeExploreReport } from "./explore/report.ts";
@@ -175,14 +175,20 @@ function preflight(deps: CliDeps, skill: string, state: string | null, env: stri
 
 const statePath = (args: RunArgs) => (args.state ? resolvePath(args.state) : null);
 
-/** `explore` runs get no accounts, so their accounts are not checked. */
-function preflightArgs(deps: CliDeps, args: RunArgs, { explore = false, cwd = process.cwd() } = {}): string | null {
+function preflightArgs(deps: CliDeps, args: RunArgs, { cwd = process.cwd() } = {}): string | null {
   const err = preflight(deps, args.skill, statePath(args), args.env);
   if (err) return err;
-  const accounts = explore ? null : accountsProblem(args, cwd);
+  const accounts = accountsProblem(args, cwd);
   if (accounts) return accounts;
   if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
   return null;
+}
+
+/** Whether the run's environment has accounts to sign in with (already validated by preflight). */
+function hasRunAccounts(args: RunArgs, cwd = process.cwd()): boolean {
+  const env = envLabel(args.env);
+  if (env === null || args.env === "none") return false;
+  return loadRunAccounts(cwd, env, args.accounts) !== null;
 }
 
 function exportSpec(deps: CliDeps, run: string, out: string | null = null, api = false): string {
@@ -540,7 +546,7 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
   const paths = memoryPaths(host);
   const autoEnv = run.env === null && !hasExplicitEnv(argv) && fs.existsSync(paths.md) ? paths.slug : null;
   const runArgs = autoEnv !== null ? { ...run, env: autoEnv } : run;
-  const problem = preflightArgs(deps, runArgs, { explore: true });
+  const problem = preflightArgs(deps, runArgs);
   if (problem) {
     deps.stderr(problem);
     return 2;
@@ -551,7 +557,7 @@ export async function exploreMain(deps: CliDeps, argv: string[]): Promise<number
   if (writes) deps.stdout(`Writes enabled. Marker: ${writes.marker}`);
   const handle = startRun(
     {
-      task: exploreTask(url, { brief: mem.brief, writes }), taskFile: null, args: runArgs, exportTest: false,
+      task: exploreTask(url, { brief: mem.brief, writes, accounts: hasRunAccounts(runArgs) }), taskFile: null, args: runArgs, exportTest: false,
       consoleErrors: true, explore: { host, ...(writes ? { writes } : {}) },
     },
     {
