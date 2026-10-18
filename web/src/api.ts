@@ -2,12 +2,12 @@
 // UI can show a failure as a toast.
 export type Reply = { ok: true; [k: string]: unknown } | { ok: false; error: string; [k: string]: unknown };
 
-async function call(method: string, path: string, body?: unknown): Promise<Reply> {
+async function call(method: string, path: string, body?: unknown, raw?: Blob): Promise<Reply> {
   try {
     const res = await fetch(path, {
       method,
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: raw !== undefined ? { "Content-Type": "application/octet-stream" } : body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body),
     });
     if (res.status === 401) return { ok: false, error: "unauthorized", unauthorized: true };
     const json = (await res.json()) as Reply;
@@ -22,4 +22,6 @@ export const api = {
   post: (path: string, body?: unknown) => call("POST", path, body ?? {}),
   put: (path: string, body: unknown) => call("PUT", path, body),
   del: (path: string) => call("DELETE", path),
+  /** POSTs a file as the raw request body (the chat uploads). */
+  upload: (path: string, file: Blob) => call("POST", path, undefined, file),
 };

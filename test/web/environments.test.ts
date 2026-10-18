@@ -8,6 +8,7 @@ import type { ApiContext, ApiResponse } from "../../src/web/api.ts";
 import { createEnvironments } from "../../src/web/environments.ts";
 import { RunManager } from "../../src/runs/manager.ts";
 import { tmpDir } from "../helpers.ts";
+import { fakeChats } from "./chats-helper.ts";
 import { FakeManager, snapshot } from "../tui/fake-manager.ts";
 
 function setup() {
@@ -15,7 +16,7 @@ function setup() {
   const m = new FakeManager([snapshot(1, "one")]);
   const ctx: ApiContext = {
     manager: m, maxParallel: 3, notices: [], theme: "dark", quit: () => {}, candidates: () => ({ items: [], truncated: false }),
-    runs: () => [], environments: createEnvironments(cwd),
+    runs: () => [], environments: createEnvironments(cwd), chats: fakeChats(m).chats,
   };
   return { cwd, ctx };
 }
@@ -124,7 +125,7 @@ test("globals_environments_lists_new_env", async () => {
     startRun: () => { throw new Error("not used"); },
   });
   const ctx = { manager, maxParallel: 1, notices: [], theme: "dark", quit: () => {}, candidates: () => ({ items: [], truncated: false }),
-    runs: () => [], environments: createEnvironments(cwd) } as ApiContext;
+    runs: () => [], environments: createEnvironments(cwd), chats: fakeChats(manager).chats } as ApiContext;
   assert.deepEqual(manager.globals().environments, []);
   await call(ctx, "POST", "/api/environments", { name: "dev", context: "" });
   assert.deepEqual(manager.globals().environments, ["dev"]);

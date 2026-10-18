@@ -5,9 +5,12 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
-import { handleApi, snapshotOf } from "./api.ts";
+import type { JsonRpc } from "../chat/mcp.ts";
+import { isChatId } from "../chat/store.ts";
+
+import { handleApi, MAX_UPLOAD, snapshotOf, UPLOAD_RE } from "./api.ts";
 import type { ApiContext } from "./api.ts";
-import { authorize } from "./auth.ts";
+import { authorize, hostOk } from "./auth.ts";
 import { matchEvidence, parseRange, resolveEvidence } from "./evidence.ts";
 
 export interface ServerOptions {
@@ -56,26 +59,30 @@ function send(res: http.ServerResponse, status: number, body: string, type: stri
 const sendJson = (res: http.ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void =>
   send(res, status, JSON.stringify(body), "application/json; charset=utf-8", { "Cache-Control": "no-store", ...extra });
 
-/** The request's JSON body, `undefined` when it is empty. Reads past the cap without keeping it, then says 413. */
-function readJson(req: http.IncomingMessage): Promise<unknown> {
+/** The request body as bytes. Reads past the cap without keeping it, then says 413. */
+function readRaw(req: http.IncomingMessage, cap: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (c: Buffer) => {
       size += c.length;
-      if (size <= MAX_BODY) chunks.push(c);
+      if (size <= cap) chunks.push(c);
     });
-    req.on("end", () => {
-      if (size > MAX_BODY) return reject(new HttpError(413, "the request is too large"));
-      const text = Buffer.concat(chunks).toString("utf8");
-      if (text.trim() === "") return resolve(undefined);
-      try {
-        resolve(JSON.parse(text));
-      } catch {
-        reject(new HttpError(400, "malformed JSON"));
-      }
-    });
+    req.on("end", () => (size > cap ? reject(new HttpError(413, "the request is too large")) : resolve(Buffer.concat(chunks))));
     req.on("error", reject);
+  });
+}
+
+/** The request's JSON body, `undefined` when it is empty. */
+function readJson(req: http.IncomingMessage): Promise<unknown> {
+  return readRaw(req, MAX_BODY).then((raw) => {
+    const text = raw.toString("utf8");
+    if (text.trim() === "") return undefined;
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new HttpError(400, "malformed JSON");
+    }
   });
 }
 
@@ -156,11 +163,13 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     // The snapshot and the subscription happen in the same tick, so no event falls between them.
     write({ type: "state", ...snapshotOf(o.ctx) });
     const off = o.ctx.manager.subscribe((e) => write(e));
+    const offChats = o.ctx.chats.subscribe((e) => write(e));
     const ping = setInterval(() => raw(": ping\n\n"), PING_MS);
     function cleanup(): void {
       if (done) return;
       done = true;
       off();
+      offChats();
       clearInterval(ping);
       streams.delete(res);
     }
@@ -208,10 +217,37 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     res.end(req.method === "HEAD" ? undefined : data);
   }
 
+  /** `/mcp/<chat id>`: the claude process calls its chat's tools here, with the chat's bearer instead of the browser cookie. */
+  async function serveMcp(req: http.IncomingMessage, res: http.ServerResponse, rawPath: string): Promise<void> {
+    const id = rawPath.slice("/mcp/".length);
+    if (!isChatId(id)) return sendJson(res, 404, { ok: false, error: "not found" });
+    if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "method not allowed" }, { Allow: "POST" });
+    // Same DNS-rebinding guard as authorize(); both checks run before the body is read.
+    if (!hostOk(req.headers.host, port)) return sendJson(res, 403, { ok: false, error: "forbidden" });
+    const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+    if (m === null) return sendJson(res, 401, { ok: false, error: "unauthorized" });
+    if (!/^application\/json\s*(;|$)/i.test(req.headers["content-type"] ?? "")) {
+      return sendJson(res, 415, { ok: false, error: "send application/json" });
+    }
+    const msg = await readJson(req);
+    if (typeof msg !== "object" || msg === null || Array.isArray(msg) || typeof (msg as JsonRpc).method !== "string") {
+      return sendJson(res, 400, { ok: false, error: "send one JSON-RPC message" });
+    }
+    const r = await o.ctx.chats.mcp(id, m[1], msg as JsonRpc);
+    if (r.body === null) {
+      res.writeHead(r.status, { "Content-Length": 0, "Cache-Control": "no-store", ...SECURITY });
+      return void res.end();
+    }
+    sendJson(res, r.status, r.body);
+  }
+
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const raw = req.url ?? "/";
     // Refuse targets that are not a plain absolute path (//host/x, /\\host/x) before parsing; a cheap sanity check, not the security boundary (authorize and the path checks are).
     if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return sendJson(res, 400, { ok: false, error: "bad request" });
+    // The MCP endpoint has its own bearer check and is reached by a process that sends no cookie or Origin.
+    const mcpPath = raw.split("?")[0];
+    if (mcpPath.startsWith("/mcp/")) return serveMcp(req, res, mcpPath);
     const auth = authorize({ method: req.method ?? "GET", url: raw, headers: req.headers }, { token: o.token, port });
     const url = new URL(raw, "http://localhost");
     const isApi = url.pathname.startsWith("/api/");
@@ -231,7 +267,9 @@ export async function startServer(o: ServerOptions): Promise<RunningServer> {
     if (rawPath.startsWith("/api/runs/")) return serveEvidence(req, res, rawPath);
     if (!isApi) return serveStatic(req, res, url.pathname);
     if (req.method === "GET" && url.pathname === "/api/events") return events(res);
-    const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readJson(req);
+    const body = req.method === "GET" || req.method === "HEAD" ? undefined
+      : req.method === "POST" && UPLOAD_RE.test(url.pathname) ? await readRaw(req, MAX_UPLOAD)
+      : await readJson(req);
     const r = await handleApi(o.ctx, { method: req.method ?? "GET", path: url.pathname, query: url.searchParams, body });
     sendJson(res, r.status, r.body);
   }

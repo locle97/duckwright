@@ -9,6 +9,7 @@ import { EditorDialog } from "./dialogs/EditorDialog.tsx";
 import { HelpDialog } from "./dialogs/HelpDialog.tsx";
 import { OptionsDialog } from "./dialogs/OptionsDialog.tsx";
 import { TwofaDialog } from "./dialogs/TwofaDialog.tsx";
+import { ChatPane, openChat } from "./ChatPane.tsx";
 import { Header } from "./Header.tsx";
 import { commandFor, shouldIgnore } from "./keys.ts";
 import type { Command, KeyInfo } from "./keys.ts";
@@ -47,6 +48,11 @@ export function App() {
     if (state.theme === "auto") delete root.dataset.theme;
     else root.dataset.theme = state.theme;
   }, [state.theme]);
+
+  // A new snapshot means the stream (re)connected: events of the open chat may have been missed, so load it again.
+  useEffect(() => {
+    if (state.snapshots > 1 && state.chat.openId !== null) void openChat(dispatch, state.chat.openId);
+  }, [state.snapshots]);
 
   const ref = useRef<WebState>(state);
   ref.current = state;
@@ -94,13 +100,20 @@ export function App() {
       {!state.connected ? <div className="banner" role="alert">Disconnected. Retrying…</div> : null}
       <Header state={state} onHelp={() => dispatch({ type: "dialog", value: { kind: "help" } })}
         onEnvironments={() => dispatch({ type: "dialog", value: { kind: "environments" } })}
+        onView={(view) => dispatch({ type: "view", view })}
         onQuit={() => { const c = commandFor("q", state); if (c) run(c); }}
         onDrawer={() => setDrawer((v) => !v)} />
-      <div className="body">
-        <Sidebar state={state} dispatch={dispatch} open={drawer} onPicked={() => setDrawer(false)} />
-        <MainPane state={state} dispatch={dispatch} />
-      </div>
-      <OptionsStrip state={state} dispatch={dispatch} />
+      {state.view === "chat" ? (
+        <div className="body"><ChatPane state={state} dispatch={dispatch} /></div>
+      ) : (
+        <>
+          <div className="body">
+            <Sidebar state={state} dispatch={dispatch} open={drawer} onPicked={() => setDrawer(false)} />
+            <MainPane state={state} dispatch={dispatch} />
+          </div>
+          <OptionsStrip state={state} dispatch={dispatch} />
+        </>
+      )}
       {d?.kind === "add" ? <AddDialog mode={d.mode} dispatch={dispatch} /> : null}
       {d?.kind === "edit" ? <EditorDialog draft={d.draft} dispatch={dispatch} /> : null}
       {d?.kind === "options" ? <OptionsDialog state={state} taskId={d.taskId} dispatch={dispatch} /> : null}

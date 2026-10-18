@@ -32,6 +32,8 @@ export function shouldIgnore(k: KeyInfo, s: WebState): boolean {
   if (k.ctrlKey || k.metaKey || k.altKey || k.defaultPrevented || k.inEditable) return true;
   if (s.dialog !== null || pendingTwofa(s) !== null) return true;
   if (s.ended || s.expired || !s.loaded) return true;
+  // The chat view has its own keys; the task shortcuts must not act on the hidden workspace.
+  if (s.view === "chat") return true;
   return k.inInteractive && (k.key === "Enter" || k.key === " ");
 }
 

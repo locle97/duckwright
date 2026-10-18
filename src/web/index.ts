@@ -4,6 +4,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { spawnClaude } from "../chat/claude.ts";
+import { chatSystemPrompt, DEFAULT_SKILLS_DIR } from "../chat/prompt.ts";
+import { ChatSessions } from "../chat/sessions.ts";
+import { ChatStore } from "../chat/store.ts";
 import type { ManagerLike } from "../runs/manager.ts";
 import { nodeReadDir, walk } from "../tui/candidates.ts";
 import type { ThemeName } from "../tui/theme.ts";
@@ -33,6 +37,8 @@ export interface StartWebOptions {
   cwd?: string;
   /** Where run folders live. Default: ./runs. */
   runsDir?: string;
+  /** The test chats. Default: real ones that run `claude`; tests pass ones with a fake spawner. */
+  chats?: ChatSessions;
   /** Default: the system's browser opener. */
   open?: (url: string) => void;
 }
@@ -68,10 +74,23 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
   const done = new Promise<void>((r) => {
     resolveDone = r;
   });
+  let port = 0; // known once the server listens; the chat's MCP URL reads it lazily
+  const environments = createEnvironments(cwd);
+  const chats = o.chats ?? new ChatSessions({
+    root: cwd, manager: o.manager, store: new ChatStore(cwd), spawn: spawnClaude, skillsDir: DEFAULT_SKILLS_DIR,
+    systemPrompt: chatSystemPrompt(DEFAULT_SKILLS_DIR), mcpUrl: (id) => `http://127.0.0.1:${port}/mcp/${id}`,
+    // Account summaries only: environments.list() never returns a password or TOTP secret.
+    environments: () => environments.list().map((e) => ({
+      name: e.name, baseUrl: e.baseUrl,
+      accounts: e.accounts.map((a) => ({ id: a.id, label: a.label, role: a.role, username: a.username, hasTotp: a.hasTotp })),
+    })),
+  });
   let quitting: Promise<void> | null = null;
   const quit = (): void => {
     quitting ??= (async () => {
       try {
+        // A chat that fails to stop must not keep the runs going.
+        await chats.stopAll().catch(() => {});
         await o.manager.stopAll();
       } finally {
         log.close();
@@ -84,7 +103,7 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
   const ctx: ApiContext = {
     manager: o.manager, maxParallel: o.maxParallel, notices: o.notices ?? [], theme: o.theme ?? "auto",
     quit, runs: () => log.entries(), candidates: () => walk(nodeReadDir(cwd)),
-    environments: createEnvironments(cwd),
+    environments, chats,
   };
   try {
     server = await startServer({ ctx, token, port: o.port, uiDir, runsDir: o.runsDir ?? path.resolve("runs") });
@@ -93,6 +112,7 @@ export async function startWeb(o: StartWebOptions): Promise<WebHandle> {
     if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") throw new Error(`port ${o.port} is already in use`);
     throw e;
   }
+  port = server.port;
   const url = `http://127.0.0.1:${server.port}/?t=${token}`;
   (o.open ?? openBrowser)(url);
   return { url, done, quit };
