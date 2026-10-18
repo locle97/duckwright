@@ -126,10 +126,8 @@ Use `templates/task.md`. Per task:
 
 - One scenario per file. A task never depends on another task having run: each one starts in a fresh
   browser, from the seeded state.
-- Front matter: `env:` (a bare name, resolved from the Duckwright root); for the role, `accounts: <id>`
-  when the environment has an account for it (sign in with `{{<id>.username}}` and `{{<id>.password}}`,
-  see `references/harness-constraints.md`), otherwise `state:` (path relative to the task file);
-  `setup: shared/setup.md` when several tasks start the same way,
+- Front matter: `env:` (a bare name, resolved from the Duckwright root), `state:` for the role (path
+  relative to the task file), `setup: shared/setup.md` when several tasks start the same way,
   `max-steps` (2 per numbered step + 3, clamped to 10..40). Never `session:` or `allow-file-access`.
 - Comments at the top of the front matter: `# duckwright-tasks: <feature>, scenario <ID> (written <date>; review before committing)`,
   `# sources: ...` (map rules, env sections, sitemap paths and explore run number, code files, `fact <id>`), and when they apply
@@ -144,8 +142,7 @@ Use `templates/task.md`. Per task:
   accessibility snapshot, and the export generates its own locators.
 - Name what the task creates with the map's `data-prefix` plus the task ID, and delete it at the end.
 - When a task signs in with a state file, add (or rely on the shared setup for): if the page shows the
-  sign-in form, finish with failure "state expired: ...". With an account: if the sign-in fails, finish
-  with failure "login failed: ...". Either turns a confusing failure into a clear one.
+  sign-in form, finish with failure "state expired: ...". It turns a confusing failure into a clear one.
 - Expected results: at least one, each checkable on the page (exact visible text, an input value,
   checked state, the URL) or in the page's API calls (method, path, status, optionally one JSON field).
   Quote messages exactly from a cited source. Never check generated values (ids, order numbers, dates)

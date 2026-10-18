@@ -45,8 +45,6 @@ const WARNINGS = [
   [/\b(alert|confirm|prompt) (dialog|box|popup)\b|\bnative dialog\b/i, "native browser dialogs: dialog-accept/dismiss are not allowed commands; check the map says how the app behaves"],
   [/\[data-(testid|test|cy|qa)|data-testid=|\bgetBy[A-Z]\w*\(|\bxpath\b|\bquerySelector|css selector|\/\/(div|span|button|input|a)\b/i, "selector in a step: the agent clicks refs from the accessibility snapshot; name the element by its visible label instead"],
 ];
-// {{<id>.username}} and {{<id>.password}}: README "Accounts"; the id rule matches src/accounts/store.ts ID_RE.
-const ACCOUNT_PLACEHOLDER = /\{\{[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?\.(username|password)\}\}/g;
 const SECRETS = [
   /\b(pass(word|wd)?|secret|token|api[-_ ]?key|otp|pin)\b\s*[:=]\s*\S+/i,
   /\bpass(word|wd)?\s+(is\s+)?["'`][^"'`]+["'`]/i,
@@ -198,13 +196,11 @@ function baseUrlOf(envText) {
 function lintBody(file, lines, start, ctx) {
   const text = lines.join("\n");
   if (!text.trim()) { report(file, start, "error", "no task text"); return; }
-  lines.forEach((raw, i) => {
+  lines.forEach((l, i) => {
     const n = start + i;
-    // Environment account placeholders are real values the run fills in, not unfinished text.
-    const l = raw.replace(ACCOUNT_PLACEHOLDER, "account value");
     for (const [re, msg] of ERRORS) if (re.test(l)) report(file, n, "error", msg);
     for (const [re, msg] of WARNINGS) if (re.test(l)) report(file, n, "warn", msg);
-    if (SECRETS.some((re) => re.test(l)) && !allowLiteral(l)) report(file, n, "error", "looks like a secret; sign in with {{<id>.password}} from an environment account or a state file, or list a seed-only value in the map's allow-literals");
+    if (SECRETS.some((re) => re.test(l)) && !allowLiteral(l)) report(file, n, "error", "looks like a secret; use a state file, or list a seed-only value in the map's allow-literals");
     for (const t of MAP.terms) if (l.toLowerCase().includes(t.toLowerCase())) report(file, n, "warn", `mentions off-limits "${t}": reword, or confirm with the user that the step only looks at it`);
     if (API_CHECK.test(l) && ctx.network === "false") report(file, n, "error", "API check with network: false; expect-request needs network capture");
     for (const m of l.matchAll(/https?:\/\/[^\s"'`)>]+/g)) {

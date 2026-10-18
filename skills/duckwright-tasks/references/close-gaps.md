@@ -33,11 +33,8 @@ It cannot know a production host nobody wrote down, so the consent message must 
    map: only `localhost`/`127.0.0.1` or a host the user confirms is a test instance.
 2. **Host.** The probe's URLs are on the env file's Base URL host. `facts.mjs ingest` refuses a run on
    another host.
-3. **Sign-in.** A role signs in through an environment account (set up by a person on the web UI's
-   Environments page; the probe names it in `accounts:` and signs in with `{{<id>.username}}` and
-   `{{<id>.password}}`), or else through the state file the map names for it. For a state file, check
-   it exists (do not open it). Neither: ask a person to add an account or make the state file; do not
-   probe that role.
+3. **Sign-in.** A role signs in only through the state file the map names for it. Check the file exists
+   (do not open it). Missing: ask a person to make it; do not probe that role.
 4. **Writes.** Read-only by default. A probe may change data only if the env is also in `write-envs`, the
    user said yes to writes for this probe, and the probe says exactly what it changes and how it undoes it.
 5. **Budget.** At most 5 probes per request, 15 steps each (20 with writes), at most one scoped explore
