@@ -227,8 +227,7 @@ async function execute(
       signal, events,
     });
     scrubber = twofa.scrubber;
-    // Explore runs get no accounts.
-    accounts = !spec.explore && env ? loadRunAccounts(deps.cwd ?? process.cwd(), env.name, args.accounts) : null;
+    accounts = env ? loadRunAccounts(deps.cwd ?? process.cwd(), env.name, args.accounts) : null;
     accounts?.seed(twofa.scrubber);
     const apiKey = ((deps.env ?? process.env).TYPESAFE_API_KEY ?? "").trim();
     let log: DebugLog | null = null;
