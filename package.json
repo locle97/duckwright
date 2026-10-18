@@ -1,6 +1,6 @@
 {
   "name": "duckwright",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Duckwright: a browser agent loop on playwright-cli + claude -p",
   "type": "module",
   "license": "MIT",
