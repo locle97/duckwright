@@ -4,8 +4,7 @@
 # derived: <value> = <arithmetic from documented data>          (delete when unused)
 # assumption: <what you inferred and could not confirm>          (delete when unused)
 env: <env name from the map's default-env or the user's choice>
-accounts: <account id>                                          (an environment account for the role; delete when unused)
-state: <path to the role's state file, relative to THIS file>   (only when no environment account covers the role; delete when unused)
+state: <path to the role's state file, relative to THIS file>   (delete when the task signs in itself or needs no account)
 setup: shared/setup.md                                           (delete when there is no shared setup)
 max-steps: <map default, or 2 per numbered step + 3>
 ---

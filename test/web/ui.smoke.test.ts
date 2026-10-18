@@ -68,7 +68,6 @@ test("add a task, watch a run, open a step, answer a 2FA prompt, quit", { skip, 
   await replay.waitFor({ state: "visible" });
   assert.equal(await replay.getAttribute("title"), "No spec yet: only a passed run writes duckwright.spec.ts");
   await page.getByRole("button", { name: "Start" }).click();
-  for (let i = 0; i < 50 && !manager.log.includes("start:1"); i++) await new Promise((r) => setTimeout(r, 100));
   assert.ok(manager.log.includes("start:1"));
   manager.update(1, { state: "running", runId: "r1", runCount: 1 });
   const d = decision("browse the storefront", [["goto", "https://shop.test"]]);

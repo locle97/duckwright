@@ -3,19 +3,13 @@
 # mode: read-only        (or: writes, agreed by the user on <date>; env is in the map's write-envs)
 # rerun: cd <root> && duckwright -p -f .duckwright/probes/<this file>
 env: <env name from investigate-envs>
-accounts: <account id>                                          (an environment account; or delete it and use state:)
-state: ../../.auth/<role>.json                                   (only when no account covers the role; delete when the area needs no sign-in)
+state: ../../.auth/<role>.json                                   (delete when the area needs no sign-in)
 max-steps: 15                                                    (at most 20 with writes)
 ---
 Investigation only. You are finding out how this app behaves today, not testing it. Nothing you see is a
 pass or a fail.
 
-<!-- with an account: -->
-Open <full URL of the sign-in page>. Fill the username field with {{<account id>.username}} and the
-password field with {{<account id>.password}}, then submit. If the sign-in fails, finish with done failure
-"login failed".
 Open <full URL of the area>.
-<!-- with a state file instead: -->
 If the page shows the sign-in form, finish with done failure "state expired".
 
 <!-- read-only probes keep this line; delete it for a writes probe -->

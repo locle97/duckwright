@@ -108,10 +108,10 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 
 ### Writing tasks with Claude Code
 
-Four skills, installed into your project:
+Three skills, installed into your project:
 
 ```bash
-npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks --skill duckwright-playwright --skill duckwright-autotest
+npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks --skill duckwright-playwright
 ```
 
 Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks. When the skill lacks context it can investigate the app with a read-only Duckwright run, map an area with `explore`, or compare designs with the `arena` skill, each only after you say yes:
@@ -121,8 +121,6 @@ Run `/duckwright-setup` once: it checks your tools, asks a few questions, and wr
 ```
 
 The skill reads your `CLAUDE.md` (a short `## Duckwright` section), a testing map at `.duckwright/testing-map.md`, your environment files and the explore sitemap, writes a task folder, and lints it with its bundled `scripts/check-tasks.mjs`. See `skills/duckwright-tasks/references/project-convention.md` for what your project provides, and `docs/design/task-authoring-skill/` for the design and a worked example.
-
-`duckwright-autotest` drives the other three end to end: `/duckwright-autotest test the recipes area, spec in docs/specs/recipes.md` reads the spec, asks its questions once, plans, probes, writes the tasks, runs them with `duckwright -p -f`, triages failures, reports and offers Playwright tests. It asks you for account ids (it never reads the accounts database) and adds up the `Cost:` of its runs against a ceiling you set; its own model spend is your Claude Code session's.
 
 Run `/duckwright-playwright tasks/<plan>/` (a plan folder, a folder of run tasks, or one run folder) to turn successful runs into Playwright tests written in your project's own style: it reads your `playwright.config`, existing specs, fixtures and page objects, asks when the convention or a run's intent is unclear, then writes, lints and lists the tests. It summarises history with its bundled `scripts/runs-brief.mjs`.
 
