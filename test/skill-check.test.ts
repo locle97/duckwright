@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -73,4 +75,32 @@ test("skill_runs_brief_lists_plan_runs_and_flags_failures", async () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("skill_linter_accepts_account_placeholders_and_still_flags_others", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-lint-"));
+  fs.mkdirSync(path.join(dir, "tasks/x"), { recursive: true });
+  const task = (body: string) => `---\nmax-steps: 12\n---\nSteps:\n${body}\n\nExpected results:\n- The heading "Recipes" is visible.\n`;
+  fs.writeFileSync(path.join(dir, "tasks/x/01-login.md"), task(
+    "1. Open http://localhost:9091/login.\n2. Fill \"Email\" with {{admin.username}} and \"Password\" with {{admin.password}}, then click \"Login\".",
+  ));
+  fs.writeFileSync(path.join(dir, "tasks/x/02-todo.md"), task("1. Open http://localhost:9091/{{page}}."));
+  const r = spawnSync(process.execPath, [lintPath, "--root", dir, path.join(dir, "tasks/x")], { encoding: "utf8" });
+  const placeholders = r.stdout.split("\n").filter((l) => l.includes("placeholder text"));
+  assert.equal(placeholders.length, 1, r.stdout);
+  assert.match(placeholders[0], /02-todo\.md/);
+});
+
+test("skill_autotest_names_only_bundled_scripts_and_phases", () => {
+  const raw = fs.readFileSync(path.join(root, "skills/duckwright-autotest/SKILL.md"), "utf8");
+  // Installed with `npx skills add`, nobody substitutes {{SKILLS}}: the skill must say what it means.
+  assert.match(raw, /`\{\{SKILLS\}\}` below is the folder that holds the Duckwright skills/);
+  for (const m of raw.matchAll(/\{\{SKILLS\}\}\/([\w-]+\/[\w./-]+\.(?:md|mjs))/g)) {
+    assert.ok(fs.existsSync(path.join(root, "skills", m[1])), `missing ${m[1]}`);
+  }
+  for (const s of ["doctor.mjs", "facts.mjs", "check-tasks.mjs", "sitemap-brief.mjs", "gate.mjs", "runs-brief.mjs"]) {
+    const found = fs.readdirSync(path.join(root, "skills"), { recursive: true }).some((f) => String(f).endsWith(`scripts/${s}`));
+    assert.ok(found, `no bundled ${s}`);
+  }
+  assert.doesNotMatch(raw, /mcp__|web chat/i);
 });

@@ -42,9 +42,11 @@ monorepo. Confirm the root with the user in step 3; do not create folders before
 One message, at most five questions, each with your best guess from the repo so the user can answer "yes":
 
 1. Base URL of each environment (local, staging), and which of them may receive writes (create, edit, delete).
-2. Roles and how each signs in. The agent cannot read environment variables, so real accounts sign in
-   through a **state file** (a saved browser login), one per role. Only public demo or seed-only credentials
-   may be written in a task.
+2. Roles and how each signs in. Prefer an **environment account** per role: a person adds it on the web
+   UI's Environments page (`duckwright --web`), and tasks sign in with `{{<id>.username}}` and
+   `{{<id>.password}}` without ever seeing the password. Otherwise a role signs in through a **state file**
+   (a saved browser login). The agent cannot read environment variables. Only public demo or seed-only
+   credentials may be written in a task.
 3. How test data is seeded or reset (a command, a script path, "the app starts empty").
 4. What is off-limits (billing, deleting accounts, sending real email, a production host).
 5. A data prefix for things tasks create (default `RT-`).
