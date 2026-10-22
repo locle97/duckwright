@@ -40,7 +40,7 @@ test("agent_skill_allow_list_is_a_subset_of_the_harness_allow_list", () => {
   const src = fs.readFileSync(stepPath, "utf8");
   const listed = /const ALLOWED = new Set\(\[([^\]]*)\]\)/.exec(src)?.[1].match(/"([^"]+)"/g)?.map((s) => s.slice(1, -1)) ?? [];
   assert.ok(listed.length > 0);
-  // snapshot is the one extra: the harness takes snapshots itself, the worker asks for one
+  // snapshot is the one extra: the harness takes snapshots itself, a step agent asks for one
   for (const cmd of listed.filter((c) => c !== "snapshot")) {
     assert.ok((ALLOWED_COMMANDS as readonly string[]).includes(cmd), `${cmd} is not a harness command`);
   }
@@ -98,8 +98,49 @@ test("agent_skill_step_limit_forces_a_finish", { skip: !posix }, () => {
   assert.match(fail.stdout, /Result: failure/);
 });
 
+test("agent_skill_runs_in_small_turns_with_reports_and_opens_headed", { skip: !posix }, () => {
+  const { dir, step, run } = setup();
+  const log = path.join(dir, "cli.log");
+  fs.writeFileSync(path.join(dir, "bin/playwright-cli"), `#!/usr/bin/env bash\necho "$@" >> ${log}\n${FAKE_CLI.split("\n").slice(1).join("\n")}`, { mode: 0o755 });
+  const init = step("init", "--run", "r1", "--task", "task.md", "--turn-budget", "2");
+  assert.equal(init.status, 0, init.stderr);
+  assert.match(init.stdout, /mode: headed {2}turn-budget: 2/);
+  assert.match(fs.readFileSync(log, "utf8"), /open about:blank --headed/);
+
+  assert.equal(run("goto", "https://x.test/").status, 0);
+  assert.equal(run("click", "e1").status, 0);
+  const over = run("snapshot");
+  assert.equal(over.status, 5);
+  assert.match(over.stderr, /turn budget reached/);
+
+  const noLabel = step("report", "--run", "r1", "done", "ok");
+  assert.notEqual(noLabel.status, 0);
+  const rep = step("report", "--run", "r1", "--label", "1. Open and click", "done", "Clicked Go; page shows the Go button.");
+  assert.equal(rep.status, 0, rep.stderr);
+  assert.match(rep.stdout, /^report 1 saved \(done\), steps 1-2/);
+  assert.match(fs.readFileSync(path.join(dir, "r1/reports/001.md"), "utf8"), /Clicked Go/);
+
+  // a new turn starts with a fresh budget, and status shows the earlier report
+  assert.equal(run("expect", "visible", "e1").status, 0);
+  const status = step("status", "--run", "r1");
+  assert.match(status.stdout, /this turn: 1\/2/);
+  assert.match(status.stdout, /\[done\] 1\. Open and click: Clicked Go/);
+  assert.match(status.stdout, /passing checks \(1\): expect visible e1/);
+});
+
+test("agent_skill_headless_flag_and_front_matter_turn_headed_off", { skip: !posix }, () => {
+  for (const [args, front, want] of [[["--headless"], "", false], [[], "headed: false\n", false], [["--headed"], "headed: false\n", true], [[], "", true]] as const) {
+    const { dir, step } = setup();
+    const log = path.join(dir, "cli.log");
+    fs.writeFileSync(path.join(dir, "bin/playwright-cli"), `#!/usr/bin/env bash\necho "$@" >> ${log}\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, "task.md"), `---\n${front}---\nDo it.\n`);
+    assert.equal(step("init", "--run", "r1", "--task", "task.md", ...args).status, 0);
+    assert.equal(/--headed/.test(fs.readFileSync(log, "utf8")), want, `${args} ${front}`);
+  }
+});
+
 test("agent_skill_bash_guard_allows_only_the_runner", () => {
-  const guard = (command: string, agent_type: string | null = "duckwright:duckwright-worker") =>
+  const guard = (command: string, agent_type: string | null = "duckwright:duckwright-step") =>
     spawnSync("node", [path.join(scripts, "bash-guard.mjs")], { input: JSON.stringify({ agent_type, tool_input: { command } }), encoding: "utf8" }).status;
   assert.equal(guard('node .claude/skills/duckwright-agent/scripts/pw-step.mjs act --run r -- goto "https://a.b/?x=1&y=2"'), 0);
   assert.equal(guard("node x/pw-step.mjs act --run r -- click e1; rm -rf /"), 2);
@@ -107,7 +148,11 @@ test("agent_skill_bash_guard_allows_only_the_runner", () => {
   assert.equal(guard("node x/pw-step.mjs act --run r -- click e1 | tee out"), 2);
   assert.equal(guard("cat ~/.ssh/id_rsa"), 2);
   assert.equal(guard("playwright-cli open"), 2);
-  assert.equal(guard("cat ~/.ssh/id_rsa", "duckwright-worker"), 2);
+  assert.equal(guard("node x/pw-step.mjs report --run r --label L done \"ok\""), 0);
+  assert.equal(guard("node x/pw-step.mjs status --run r"), 0);
+  assert.equal(guard("node x/pw-step.mjs init --run r --task t.md"), 2); // the coordinator opens and finishes runs
+  assert.equal(guard("node x/pw-step.mjs finish --run r success ok"), 2);
+  assert.equal(guard("cat ~/.ssh/id_rsa", "duckwright-step"), 2);
   // the hook is plugin-wide: every other agent and the main session are left alone
   assert.equal(guard("npm test", null), 0);
   assert.equal(guard("npm test", "general-purpose"), 0);
@@ -125,7 +170,7 @@ test("duckwright_plugin_manifest_is_consistent", () => {
   assert.equal(hooks.matcher, "Bash");
   const rel = /\$\{CLAUDE_PLUGIN_ROOT\}\/(.+?)"/.exec(hooks.hooks[0].command)?.[1] ?? "";
   assert.ok(fs.existsSync(path.join(root, rel)), `hook script ${rel} must exist`);
-  const agent = fs.readFileSync(path.join(root, "agents/duckwright-worker.md"), "utf8");
-  assert.match(agent, /^---\nname: duckwright-worker\n/);
+  const agent = fs.readFileSync(path.join(root, "agents/duckwright-step.md"), "utf8");
+  assert.match(agent, /^---\nname: duckwright-step\n/);
   assert.ok(!/^hooks:/m.test(agent), "plugin agents cannot carry hooks: they live in hooks/hooks.json");
 });

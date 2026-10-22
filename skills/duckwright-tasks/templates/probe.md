@@ -6,6 +6,7 @@ env: <env name from investigate-envs>
 accounts: <account id>                                          (an environment account; or delete it and use state:)
 state: ../../.auth/<role>.json                                   (only when no account covers the role; delete when the area needs no sign-in)
 max-steps: 15                                                    (at most 20 with writes)
+headed: true
 ---
 Investigation only. You are finding out how this app behaves today, not testing it. Nothing you see is a
 pass or a fail.

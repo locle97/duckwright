@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 // Guarded action runner for the duckwright-agent skill: stands in for Duckwright's harness when the
-// app itself cannot be used. A worker subagent never calls playwright-cli directly; every browser action
+// app itself cannot be used. A step subagent never calls playwright-cli directly; every browser action
 // goes through this script, which checks it against an allow-list, runs it, verifies `expect` checks on
 // the live page, and records a history.json that the duckwright-playwright skill can read.
 //
-//   node pw-step.mjs init   --run DIR --task FILE [--origin URL]... [--headed]
+//   node pw-step.mjs init   --run DIR --task FILE [--origin URL]... [--headless] [--turn-budget N]
 //   node pw-step.mjs act    --run DIR [--goal TEXT] -- <cmd> [args...]
+//   node pw-step.mjs report --run DIR --label TEXT done|partial|blocked "<summary>"
+//   node pw-step.mjs status --run DIR [--reports N]
 //   node pw-step.mjs finish --run DIR success|failure "<answer>"
 //
+// The browser opens headed unless --headless is given or the task's front matter says `headed: false`.
+// A run is driven in turns: a step subagent calls `status`, does a few `act`s, then `report`s; `act` stops
+// after --turn-budget actions without a report, so no one turn grows large. `finish` is the coordinator's.//
 // Zero dependencies. Needs `playwright-cli` on PATH.
 import fs from "node:fs";
 import path from "node:path";
@@ -83,6 +88,10 @@ function save(dir, hist) {
   fs.writeFileSync(path.join(dir, "history.json"), `${JSON.stringify(hist, null, 2)}\n`);
 }
 
+function saveMeta(dir, meta) {
+  fs.writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
+}
+
 // ---------- task file ----------
 
 function parseTaskFile(file) {
@@ -90,7 +99,7 @@ function parseTaskFile(file) {
   const fm = {};
   let body = text;
   if (text.startsWith("---\n")) {
-    const end = text.indexOf("\n---", 4);
+    const end = text.indexOf("\n---", 3);
     if (end === -1) die(`${file}: front matter is not closed with ---`);
     body = text.slice(text.indexOf("\n", end + 1) + 1);
     for (const [i, raw] of text.slice(4, end).split("\n").entries()) {
@@ -140,10 +149,17 @@ function cmdInit(opts) {
   const maxSteps = fm["max-steps"] ? Number(fm["max-steps"]) : 25;
   if (!Number.isInteger(maxSteps) || maxSteps < 1) die(`${taskFile}: max-steps must be a whole number of at least 1`);
 
+  if (fm.headed !== undefined && fm.headed !== "true" && fm.headed !== "false") die(`${taskFile}: headed must be true or false`);
+  // Headed by default, so a person can watch the run; a flag wins over the file.
+  const headed = opts.headless ? false : opts.headed ? true : fm.headed !== "false";
+  const turnBudget = opts["turn-budget"] ? Number(opts["turn-budget"]) : 10;
+  if (!Number.isInteger(turnBudget) || turnBudget < 1) die("init: --turn-budget must be a whole number of at least 1");
+
   fs.mkdirSync(path.join(dir, "snapshots"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "reports"), { recursive: true });
   const session = `dw-${path.basename(path.resolve(dir))}`.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 60);
-  const meta = { session, origins, state, maxSteps, taskFile, started: new Date().toISOString() };
-  fs.writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
+  const meta = { session, origins, state, maxSteps, headed, turnBudget, lastReportStep: 0, taskFile, started: new Date().toISOString() };
+  saveMeta(dir, meta);
   fs.writeFileSync(path.join(dir, "task.txt"), `${text}\n`);
   const hist = {
     task: text,
@@ -154,17 +170,18 @@ function cmdInit(opts) {
     answer: null,
     steps: 0,
     history: [],
+    reports: [],
   };
   save(dir, hist);
 
-  const open = pwRun(session, ["open", "about:blank", ...(opts.headed ? ["--headed"] : [])], 60000);
+  const open = pwRun(session, ["open", "about:blank", ...(headed ? ["--headed"] : [])], 60000);
   if (open.code !== 0) die(`could not open the browser: ${cliError(open)}`, 1);
   if (state) {
     const load = pwRun(session, ["state-load", state]);
     if (load.code !== 0) die(`could not load the state file: ${cliError(load)}`, 1);
   }
   process.stdout.write(
-    `run: ${dir}\nsession: ${session}\nmax-steps: ${maxSteps}\n`
+    `run: ${dir}\nsession: ${session}\nmax-steps: ${maxSteps}\nmode: ${headed ? "headed" : "headless"}  turn-budget: ${turnBudget}\n`
     + `allowed origins: ${origins.length ? origins.join(", ") : "(any: pass --origin to restrict goto)"}\n`
     + `--- task ---\n${text}\n`,
   );
@@ -317,6 +334,10 @@ function cmdAct(opts, rest) {
   if (hist.steps >= meta.maxSteps) {
     die(`step limit reached (${meta.maxSteps}): finish now with: finish --run ${dir} failure "<reason>"`, 4);
   }
+  const turnUsed = hist.steps - (meta.lastReportStep ?? 0);
+  if (turnUsed >= (meta.turnBudget ?? 10)) {
+    die(`turn budget reached (${turnUsed} actions since the last report): write your report now with: report --run ${dir} --label "<step>" done|partial|blocked "<summary>"`, 5);
+  }
   const refused = checkAction(meta, cmd, args);
   if (refused) die(`refused: ${refused}`, 2);
 
@@ -372,6 +393,54 @@ function cmdAct(opts, rest) {
   if (failed) process.exitCode = 1;
 }
 
+// ---------- report and status ----------
+
+const oneLine = (s, n) => String(s).replace(/\s+/g, " ").trim().slice(0, n);
+
+function cmdReport(opts, rest) {
+  const dir = opts.run ?? die("report: --run DIR is required");
+  const { meta, hist } = loadRun(dir);
+  if (hist.finished) die("this run is finished");
+  const [status, ...words] = rest;
+  if (!["done", "partial", "blocked"].includes(status)) die('report: the first argument must be "done", "partial" or "blocked"');
+  const summary = oneLine(words.join(" "), 700);
+  if (!summary) die("report: give a short summary after the status: what you did, what the page shows now, what is left");
+  const label = oneLine(opts.label ?? "", 120);
+  if (!label) die("report: --label is required (the step you were given)");
+  const from = (meta.lastReportStep ?? 0) + 1;
+  const last = hist.history[hist.history.length - 1];
+  const n = (hist.reports ??= []).length + 1;
+  const entry = { n, label, status, summary, steps: [from, hist.steps], page: last?.page?.url ?? null };
+  hist.reports.push(entry);
+  meta.lastReportStep = hist.steps;
+  save(dir, hist);
+  saveMeta(dir, meta);
+  fs.writeFileSync(
+    path.join(dir, "reports", `${String(n).padStart(3, "0")}.md`),
+    `# Report ${n}: ${label}\n\nstatus: ${status}\nsteps: ${from}-${hist.steps}\npage: ${entry.page ?? "unknown"}\n\n${summary}\n`,
+  );
+  process.stdout.write(`report ${n} saved (${status}), steps ${from}-${hist.steps}. Reply to the coordinator now with this one line:\n${status}: ${oneLine(summary, 300)}\n`);
+}
+
+// What a step subagent reads first: where the run is, what has been proven, what earlier turns reported.
+function cmdStatus(opts) {
+  const dir = opts.run ?? die("status: --run DIR is required");
+  const { meta, hist } = loadRun(dir);
+  const flat = hist.history.flatMap((s, si) => s.actions.map((a, i) => ({ a, r: s.results[i], n: si + 1, page: s.page })));
+  const lastPage = [...hist.history].reverse().find((s) => s.page?.url)?.page;
+  const passed = flat.filter((x) => x.a.cmd === "expect" && x.r === "ok");
+  const keep = Number(opts.reports ?? 5);
+  const reports = (hist.reports ?? []).slice(-keep);
+  let out = `run: ${dir}${hist.finished ? " (finished)" : ""}\n`
+    + `steps: ${hist.steps}/${meta.maxSteps}  this turn: ${hist.steps - (meta.lastReportStep ?? 0)}/${meta.turnBudget ?? 10}\n`
+    + `page: ${lastPage ? `${lastPage.url} | ${lastPage.title ?? ""}` : "(none yet)"}\n`
+    + `latest snapshot: ${hist.steps ? path.join(dir, "snapshots", `${String(hist.steps).padStart(3, "0")}.yml`) : "(none)"} (run \`act -- snapshot\` for a fresh one)\n`
+    + `passing checks (${passed.length}): ${passed.map((x) => `${x.a.cmd} ${x.a.args.join(" ")}`).join("; ") || "none"}\n`
+    + `reports so far: ${(hist.reports ?? []).length}${reports.length ? ` (last ${reports.length}; full text in ${path.join(dir, "reports")}/)` : ""}\n`;
+  for (const r of reports) out += `  ${r.n}. [${r.status}] ${r.label}: ${oneLine(r.summary, 300)}\n`;
+  process.stdout.write(out);
+}
+
 // ---------- finish ----------
 
 function cmdFinish(opts, rest) {
@@ -416,7 +485,7 @@ function parse(argv) {
   const opts = {};
   const rest = [];
   const multi = new Set(["origin"]);
-  const flagsWithValue = new Set(["run", "task", "origin", "goal"]);
+  const flagsWithValue = new Set(["run", "task", "origin", "goal", "label", "turn-budget", "reports"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--") {
@@ -424,6 +493,7 @@ function parse(argv) {
       break;
     }
     if (a === "--headed") opts.headed = true;
+    else if (a === "--headless") opts.headless = true;
     else if (a.startsWith("--") && flagsWithValue.has(a.slice(2))) {
       const k = a.slice(2);
       const v = argv[++i];
@@ -439,5 +509,7 @@ const [sub, ...argv] = process.argv.slice(2);
 const { opts, rest } = parse(argv);
 if (sub === "init") cmdInit(opts);
 else if (sub === "act") cmdAct(opts, rest);
+else if (sub === "report") cmdReport(opts, rest);
+else if (sub === "status") cmdStatus(opts);
 else if (sub === "finish") cmdFinish(opts, rest);
-else die("usage: pw-step.mjs init|act|finish (see the header of this file)");
+else die("usage: pw-step.mjs init|act|report|status|finish (see the header of this file)");

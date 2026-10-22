@@ -8,6 +8,7 @@ accounts: <account id>                                          (an environment 
 state: <path to the role's state file, relative to THIS file>   (only when no environment account covers the role; delete when unused)
 setup: shared/setup.md                                           (delete when there is no shared setup)
 max-steps: <map default, or 2 per numbered step + 3>
+headed: true                                                    (the default for runs a person may watch; false only for CI)
 ---
 # <ID>: <title: what it checks, in a few words>
 

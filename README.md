@@ -109,7 +109,7 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 
 ### Writing tasks with Claude Code
 
-The repository is a Claude Code plugin that bundles all the skills below, the `duckwright-worker` agent and its hook. Install it once:
+The repository is a Claude Code plugin that bundles all the skills below, the `duckwright-step` agent and its hook. Install it once:
 
 ```text
 /plugin marketplace add locle97/duckwright
@@ -130,7 +130,7 @@ A fourth skill, `duckwright-autotest`, drives these three end to end: `/duckwrig
 
 #### Without the Duckwright app
 
-Where the `duckwright` CLI cannot be installed (for example company policy), the `duckwright-agent` skill runs the same plans and task files with Claude Code and `playwright-cli` alone: `/duckwright-agent run tasks/checkout/`. The skill is the coordinator. It dispatches one fresh `duckwright-worker` subagent per task, and each worker drives the browser only through the bundled `scripts/pw-step.mjs`, which does the harness's checks in code: an allow-list of commands, `goto` limited to the environment's origin, `expect` checks verified on the live page, a step limit, and a `history.json` in Duckwright's format. Sign-in uses a saved state file only, so no credential reaches the model. The coordinator triages failures, writes `report.md`, and `scripts/export-spec.mjs` turns passing runs into a Playwright spec that `duckwright-playwright` can restyle. It comes with the plugin, with its agent and shell guard, so there is nothing to copy. It has no `request`, `twofa`, accounts or explore support, and no cost figures.
+Where the `duckwright` CLI cannot be installed (for example company policy), the `duckwright-agent` skill runs the same plans and task files with Claude Code and `playwright-cli` alone: `/duckwright-agent run tasks/checkout/`. The session running the skill is the coordinator: it splits each task into small steps and dispatches a fresh, short-lived `duckwright-step` subagent for each one, so no context grows large. A step subagent orients itself from the run folder, does a few browser actions, writes a short report to `reports/` and replies with one line. The browser opens headed by default (`headed: false` in a task, or `--headless`, turns that off). Browser actions go only through the bundled `scripts/pw-step.mjs`, which does the harness's checks in code: an allow-list of commands, `goto` limited to the environment's origin, `expect` checks verified on the live page, a step limit and a per-turn action budget, and a `history.json` in Duckwright's format. Sign-in uses a saved state file only, so no credential reaches the model. The coordinator triages failures, writes `report.md`, and `scripts/export-spec.mjs` turns passing runs into a Playwright spec that `duckwright-playwright` can restyle. It comes with the plugin, with its agent and shell guard, so there is nothing to copy. It has no `request`, `twofa`, accounts or explore support, and no cost figures.
 
 Run `/duckwright-playwright tasks/<plan>/` (a plan folder, a folder of run tasks, or one run folder) to turn successful runs into Playwright tests written in your project's own style: it reads your `playwright.config`, existing specs, fixtures and page objects, asks when the convention or a run's intent is unclear, then writes, lints and lists the tests. It summarises history with its bundled `scripts/runs-brief.mjs`.
 
