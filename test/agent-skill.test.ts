@@ -42,7 +42,7 @@ test("agent_skill_allow_list_is_a_subset_of_the_harness_allow_list", () => {
   assert.ok(listed.length > 0);
   // snapshot is the one extra: the harness takes snapshots itself, the worker asks for one
   for (const cmd of listed.filter((c) => c !== "snapshot")) {
-    assert.ok(ALLOWED_COMMANDS.includes(cmd), `${cmd} is not a harness command`);
+    assert.ok((ALLOWED_COMMANDS as readonly string[]).includes(cmd), `${cmd} is not a harness command`);
   }
   for (const banned of ["eval", "find", "open", "close", "run-code", "state-save", "cookie-list", "upload", "request", "twofa"]) {
     assert.ok(!listed.includes(banned), `${banned} must not be allowed`);
