@@ -1,0 +1,11 @@
+{
+  "name": "duckwright",
+  "owner": { "name": "Loc Le" },
+  "plugins": [
+    {
+      "name": "duckwright",
+      "description": "Duckwright skills and the duckwright-agent runner: write browser test tasks, run them with Claude Code and playwright-cli alone, and export Playwright specs.",
+      "source": "./"
+    }
+  ]
+}
