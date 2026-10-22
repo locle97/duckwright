@@ -99,12 +99,33 @@ test("agent_skill_step_limit_forces_a_finish", { skip: !posix }, () => {
 });
 
 test("agent_skill_bash_guard_allows_only_the_runner", () => {
-  const guard = (command: string) =>
-    spawnSync("node", [path.join(scripts, "bash-guard.mjs")], { input: JSON.stringify({ tool_input: { command } }), encoding: "utf8" }).status;
+  const guard = (command: string, agent_type: string | null = "duckwright:duckwright-worker") =>
+    spawnSync("node", [path.join(scripts, "bash-guard.mjs")], { input: JSON.stringify({ agent_type, tool_input: { command } }), encoding: "utf8" }).status;
   assert.equal(guard('node .claude/skills/duckwright-agent/scripts/pw-step.mjs act --run r -- goto "https://a.b/?x=1&y=2"'), 0);
   assert.equal(guard("node x/pw-step.mjs act --run r -- click e1; rm -rf /"), 2);
   assert.equal(guard("node x/pw-step.mjs act --run r -- fill e1 \"$(cat ~/.ssh/id_rsa)\""), 2);
   assert.equal(guard("node x/pw-step.mjs act --run r -- click e1 | tee out"), 2);
   assert.equal(guard("cat ~/.ssh/id_rsa"), 2);
   assert.equal(guard("playwright-cli open"), 2);
+  assert.equal(guard("cat ~/.ssh/id_rsa", "duckwright-worker"), 2);
+  // the hook is plugin-wide: every other agent and the main session are left alone
+  assert.equal(guard("npm test", null), 0);
+  assert.equal(guard("npm test", "general-purpose"), 0);
+});
+
+test("duckwright_plugin_manifest_is_consistent", () => {
+  const read = (f: string) => JSON.parse(fs.readFileSync(path.join(root, f), "utf8"));
+  const pkg = read("package.json");
+  const plugin = read(".claude-plugin/plugin.json");
+  assert.equal(plugin.name, "duckwright");
+  assert.equal(plugin.version, pkg.version, "plugin.json version must follow package.json");
+  const market = read(".claude-plugin/marketplace.json");
+  assert.deepEqual(market.plugins.map((p: { name: string; source: string }) => [p.name, p.source]), [["duckwright", "./"]]);
+  const hooks = read("hooks/hooks.json").hooks.PreToolUse[0];
+  assert.equal(hooks.matcher, "Bash");
+  const rel = /\$\{CLAUDE_PLUGIN_ROOT\}\/(.+?)"/.exec(hooks.hooks[0].command)?.[1] ?? "";
+  assert.ok(fs.existsSync(path.join(root, rel)), `hook script ${rel} must exist`);
+  const agent = fs.readFileSync(path.join(root, "agents/duckwright-worker.md"), "utf8");
+  assert.match(agent, /^---\nname: duckwright-worker\n/);
+  assert.ok(!/^hooks:/m.test(agent), "plugin agents cannot carry hooks: they live in hooks/hooks.json");
 });

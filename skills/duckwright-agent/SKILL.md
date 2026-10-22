@@ -18,7 +18,7 @@ browser only through `scripts/pw-step.mjs`, which does what Duckwright's harness
 | `done success` refused without a passing check | `pw-step.mjs finish success` refuses it |
 | `history.json` with the Playwright code per action | written by `pw-step.mjs` in the same format |
 | Max steps, browser always closed | `max-steps` from the task; `finish` closes the browser |
-| Claude has no shell | worker agent: Bash blocked except `pw-step.mjs` (hook `bash-guard.mjs`) |
+| Claude has no shell | worker agent: Bash blocked except `pw-step.mjs` (the plugin's `hooks/hooks.json` runs `bash-guard.mjs` for that agent only) |
 | Passwords never seen by the model | sign-in only through a saved **state file**; credentials are never typed |
 
 `{{SKILLS}}` below is the folder that holds this skill's siblings: the parent of this skill's folder.
@@ -31,11 +31,15 @@ Check once, from the project root:
 
 1. `playwright-cli --version` works (else `npm i -g @playwright/cli@latest`, or tell the person).
 2. `node --version` is 22 or later.
-3. The worker agent is installed: `.claude/agents/duckwright-worker.md`. If not, copy
-   `{{SKILLS}}/duckwright-agent/templates/duckwright-worker.md` there and fix the hook path inside it
-   (it points at this skill's `scripts/bash-guard.mjs`); a new agent file is picked up by the next Claude
-   Code session, so for this session fall back to a `general-purpose` subagent with the same prompt and say
-   in the report that the shell was limited by instruction only. `pw-step.mjs` still enforces the allow-list.
+3. The `duckwright` plugin is installed (that is how this skill got here), so the `duckwright-worker`
+   agent and the shell-guard hook come with it. The agent is `duckwright:duckwright-worker`. If the
+   `Agent` tool does not list it, the plugin was just installed: ask the person to restart the session
+   or run `/reload-plugins`. Only then fall back to a `general-purpose` subagent with the same prompt,
+   and say in the report that its shell was limited by instruction only (`pw-step.mjs` still enforces
+   the allow-list).
+
+The runner is `scripts/pw-step.mjs` in this skill's folder: use the absolute path from the base directory
+shown when this skill loaded.
 
 ## 1. Resolve the input
 
@@ -70,7 +74,7 @@ A single task runs in `runs/<YYYYMMDD-HHMMSS>-<label>/`. The folder is created b
 
 ## 4. Dispatch the workers
 
-For each task, launch one `Agent` call (`subagent_type: duckwright-worker`) with the prompt from
+For each task, launch one `Agent` call (`subagent_type: duckwright:duckwright-worker`) with the prompt from
 `references/worker-prompt.md`, filled in: the absolute path of `pw-step.mjs`, the run folder, the task
 file path, the allowed origin(s), and nothing else about the app. Do not paste the environment file or
 guess page details into the prompt: `init` prints the task and the worker reads the environment file

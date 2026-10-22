@@ -1,0 +1,10 @@
+{
+  "name": "duckwright",
+  "version": "0.8.3",
+  "description": "Browser tests from plain-English tasks. Skills to set up a project, write Duckwright tasks, turn runs into Playwright tests, and (duckwright-agent) run plans with Claude Code and playwright-cli alone, no Duckwright app needed.",
+  "author": { "name": "Loc Le" },
+  "homepage": "https://github.com/locle97/duckwright",
+  "repository": "https://github.com/locle97/duckwright",
+  "license": "MIT",
+  "keywords": ["playwright", "browser-testing", "agents", "qa", "e2e"]
+}

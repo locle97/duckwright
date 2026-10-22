@@ -109,11 +109,14 @@ Check the install with `duckwright --version`. To pick up a newer version, re-ru
 
 ### Writing tasks with Claude Code
 
-Three skills, installed into your project:
+The repository is a Claude Code plugin that bundles all the skills below, the `duckwright-worker` agent and its hook. Install it once:
 
-```bash
-npx skills add locle97/duckwright --skill duckwright-setup --skill duckwright-tasks --skill duckwright-playwright --skill duckwright-autotest
+```text
+/plugin marketplace add locle97/duckwright
+/plugin install duckwright@duckwright
 ```
+
+To have a team pick it up from the repository, add `extraKnownMarketplaces` and `enabledPlugins` for `duckwright@duckwright` to the project's `.claude/settings.json`. Skills can also be copied one at a time with `npx skills add locle97/duckwright --skill duckwright-setup` (and so on), but `duckwright-agent` needs the plugin for its agent and hook.
 
 Run `/duckwright-setup` once: it checks your tools, asks a few questions, and writes the testing map, a `CLAUDE.md` section and a starter environment file, then lists what only a person can do (such as saving a login state file). Run it again any time as a health check. Then ask for tasks. When the skill lacks context it can investigate the app with a read-only Duckwright run, map an area with `explore`, or compare designs with the `arena` skill, each only after you say yes:
 
@@ -127,7 +130,7 @@ A fourth skill, `duckwright-autotest`, drives these three end to end: `/duckwrig
 
 #### Without the Duckwright app
 
-Where the `duckwright` CLI cannot be installed (for example company policy), the `duckwright-agent` skill runs the same plans and task files with Claude Code and `playwright-cli` alone: `/duckwright-agent run tasks/checkout/`. The skill is the coordinator. It dispatches one fresh `duckwright-worker` subagent per task, and each worker drives the browser only through the bundled `scripts/pw-step.mjs`, which does the harness's checks in code: an allow-list of commands, `goto` limited to the environment's origin, `expect` checks verified on the live page, a step limit, and a `history.json` in Duckwright's format. Sign-in uses a saved state file only, so no credential reaches the model. The coordinator triages failures, writes `report.md`, and `scripts/export-spec.mjs` turns passing runs into a Playwright spec that `duckwright-playwright` can restyle. Install it with `--skill duckwright-agent`, then copy `skills/duckwright-agent/templates/duckwright-worker.md` to `.claude/agents/`. It has no `request`, `twofa`, accounts or explore support, and no cost figures.
+Where the `duckwright` CLI cannot be installed (for example company policy), the `duckwright-agent` skill runs the same plans and task files with Claude Code and `playwright-cli` alone: `/duckwright-agent run tasks/checkout/`. The skill is the coordinator. It dispatches one fresh `duckwright-worker` subagent per task, and each worker drives the browser only through the bundled `scripts/pw-step.mjs`, which does the harness's checks in code: an allow-list of commands, `goto` limited to the environment's origin, `expect` checks verified on the live page, a step limit, and a `history.json` in Duckwright's format. Sign-in uses a saved state file only, so no credential reaches the model. The coordinator triages failures, writes `report.md`, and `scripts/export-spec.mjs` turns passing runs into a Playwright spec that `duckwright-playwright` can restyle. It comes with the plugin, with its agent and shell guard, so there is nothing to copy. It has no `request`, `twofa`, accounts or explore support, and no cost figures.
 
 Run `/duckwright-playwright tasks/<plan>/` (a plan folder, a folder of run tasks, or one run folder) to turn successful runs into Playwright tests written in your project's own style: it reads your `playwright.config`, existing specs, fixtures and page objects, asks when the convention or a run's intent is unclear, then writes, lints and lists the tests. It summarises history with its bundled `scripts/runs-brief.mjs`.
 

@@ -1,7 +1,7 @@
 # Worker prompt
 
 The coordinator copies the block below into the `prompt` of one `Agent` call per task, replacing the
-`<...>` values. The same text is the body of `templates/duckwright-worker.md`, so a worker started
+`<...>` values. The same text is the body of `agents/duckwright-worker.md` (at the plugin root), so a worker started
 without the prompt still knows the rules. Keep it free of app details: the task and the environment file
 are the only sources.
 
