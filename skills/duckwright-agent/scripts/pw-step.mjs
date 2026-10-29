@@ -4,9 +4,14 @@
 // goes through this script, which checks it against an allow-list, runs it, verifies `expect` checks on
 // the live page, and records a history.json that the duckwright-playwright skill can read.
 //
-//   node pw-step.mjs init   --run DIR --task FILE [--origin URL]... [--headed]
+//   node pw-step.mjs init   --run DIR --task FILE [--origin URL]... [--headed] [--video] [--screenshot]
 //   node pw-step.mjs act    --run DIR [--goal TEXT] -- <cmd> [args...]
 //   node pw-step.mjs finish --run DIR success|failure "<answer>"
+//   node pw-step.mjs close  --run DIR "<reason>"     (coordinator only: a worker that never finished)
+//
+// Evidence, as Duckwright's app writes it: `--video` (or `video: true` in the task) records the whole run
+// to video.webm; `--screenshot` (or `screenshot: true`) saves screenshots/step-NNN.png after every step.
+// finish and close always save final.png. report.mjs turns run folders into the final report.
 //
 // Zero dependencies. Needs `playwright-cli` on PATH.
 import fs from "node:fs";
@@ -27,6 +32,9 @@ const KEY = /^[A-Za-z0-9+]+$/;
 const FRONT_KEYS = new Set(["max-steps", "state", "setup", "env", "accounts", "model", "headed", "network", "video", "screenshot"]);
 const SNAPSHOT_INLINE = 8000;
 const TIMEOUT_MS = 30000;
+const VIDEO_NAME = "video.webm";
+const SCREENSHOTS_DIR = "screenshots";
+const FINAL_PNG = "final.png";
 
 function die(msg, code = 2) {
   process.stderr.write(`${msg}\n`);
@@ -54,7 +62,8 @@ function pwRun(session, args, timeout = TIMEOUT_MS) {
 
 const RAN_CODE = /(?<![^\n])### Ran Playwright code\n```\w*\n((?:(?!```)[^\n]*\n)*?(?!```)[^\n]+)\n```/;
 const extractCode = (stdout) => stdout.match(RAN_CODE)?.[1]?.trim() ?? null;
-const cliError = (r) => `error: ${(r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`).slice(0, 600)}`;
+const errText = (r) => (r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`).slice(0, 600);
+const cliError = (r) => `error: ${errText(r)}`;
 
 function pageOf(stdout) {
   return {
@@ -77,6 +86,10 @@ function loadRun(dir) {
   const meta = readJson(metaFile);
   const hist = readJson(path.join(dir, "history.json"));
   return { meta, hist };
+}
+
+function saveMeta(dir, meta) {
+  fs.writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
 }
 
 function save(dir, hist) {
@@ -139,11 +152,18 @@ function cmdInit(opts) {
   }
   const maxSteps = fm["max-steps"] ? Number(fm["max-steps"]) : 25;
   if (!Number.isInteger(maxSteps) || maxSteps < 1) die(`${taskFile}: max-steps must be a whole number of at least 1`);
+  const flag = (key) => {
+    if (opts[key]) return true;
+    if (fm[key] === undefined) return false;
+    if (fm[key] !== "true" && fm[key] !== "false") die(`${taskFile}: ${key} must be true or false, got ${q(fm[key])}`);
+    return fm[key] === "true";
+  };
+  const video = flag("video");
+  const screenshot = flag("screenshot");
 
   fs.mkdirSync(path.join(dir, "snapshots"), { recursive: true });
   const session = `dw-${path.basename(path.resolve(dir))}`.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 60);
-  const meta = { session, origins, state, maxSteps, taskFile, started: new Date().toISOString() };
-  fs.writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
+  const meta = { session, origins, state, maxSteps, taskFile, video, screenshot, started: new Date().toISOString() };
   fs.writeFileSync(path.join(dir, "task.txt"), `${text}\n`);
   const hist = {
     task: text,
@@ -155,10 +175,21 @@ function cmdInit(opts) {
     steps: 0,
     history: [],
   };
-  save(dir, hist);
 
   const open = pwRun(session, ["open", "about:blank", ...(opts.headed ? ["--headed"] : [])], 60000);
-  if (open.code !== 0) die(`could not open the browser: ${cliError(open)}`, 1);
+  if (open.code !== 0) {
+    saveMeta(dir, meta);
+    save(dir, hist);
+    die(`could not open the browser: ${cliError(open)}`, 1);
+  }
+  // Started before the state is loaded, as the app does, so the recording covers the whole run.
+  if (video) {
+    const v = pwRun(session, ["video-start", path.resolve(dir, VIDEO_NAME)]);
+    if (v.code === 0) meta.videoStarted = true;
+    else (hist.warnings ??= []).push(`video failed to start: ${errText(v).slice(0, 200)}`);
+  }
+  saveMeta(dir, meta);
+  save(dir, hist);
   if (state) {
     const load = pwRun(session, ["state-load", state]);
     if (load.code !== 0) die(`could not load the state file: ${cliError(load)}`, 1);
@@ -166,6 +197,7 @@ function cmdInit(opts) {
   process.stdout.write(
     `run: ${dir}\nsession: ${session}\nmax-steps: ${maxSteps}\n`
     + `allowed origins: ${origins.length ? origins.join(", ") : "(any: pass --origin to restrict goto)"}\n`
+    + `evidence: video ${meta.videoStarted ? "recording" : video ? "failed to start" : "off"}, step screenshots ${screenshot ? "on" : "off"}\n`
     + `--- task ---\n${text}\n`,
   );
 }
@@ -351,12 +383,22 @@ function cmdAct(opts, rest) {
       } catch { /* leave page as it is */ }
     }
   }
+  let shot = null;
+  if (meta.screenshot) {
+    const rel = `${SCREENSHOTS_DIR}/step-${String(hist.steps + 1).padStart(3, "0")}.png`;
+    fs.mkdirSync(path.join(dir, SCREENSHOTS_DIR), { recursive: true });
+    const r = pwRun(meta.session, ["screenshot", `--filename=${path.resolve(dir, rel)}`]);
+    shot = r.code === 0 && fs.existsSync(path.join(dir, rel))
+      ? { screenshot: rel }
+      : { screenshot_error: r.code === 0 ? "no file was written" : errText(r).slice(0, 200) };
+  }
   hist.history.push({
     next_goal: opts.goal ?? "",
     memory: "",
     actions: [{ cmd, args, code }],
     results: [result],
     ...(page ? { page } : {}),
+    ...shot,
   });
   hist.steps = hist.history.length;
   save(dir, hist);
@@ -400,14 +442,63 @@ function cmdFinish(opts, rest) {
       return;
     }
   }
-  if (!success) pwRun(meta.session, ["screenshot", `--filename=${path.resolve(dir, "final.png")}`]);
-  pwRun(meta.session, ["close"]);
+  wrapUp(dir, meta, hist);
   hist.success = success;
   hist.answer = answer;
   hist.finished = new Date().toISOString();
   save(dir, hist);
-  process.stdout.write(`Result: ${verdict}\nAnswer: ${answer}\nSteps: ${hist.steps}\nHistory: ${path.join(dir, "history.json")}\n`);
+  process.stdout.write(`Result: ${verdict}\nAnswer: ${answer}\nSteps: ${hist.steps}\nHistory: ${path.join(dir, "history.json")}\n${evidenceLine(dir, hist)}`);
   if (!success) process.exitCode = 1;
+}
+
+// Save the last screenshot, finalize the video, close the browser. Never throws: evidence that could
+// not be saved becomes a warning in history.json.
+function wrapUp(dir, meta, hist) {
+  const final = pwRun(meta.session, ["screenshot", `--filename=${path.resolve(dir, FINAL_PNG)}`]);
+  if (final.code === 0 && fs.existsSync(path.join(dir, FINAL_PNG))) hist.final_screenshot = FINAL_PNG;
+  if (meta.videoStarted) {
+    const v = pwRun(meta.session, ["video-stop"], 60000);
+    let size = 0;
+    try {
+      size = fs.statSync(path.join(dir, VIDEO_NAME)).size;
+    } catch { /* missing */ }
+    if (v.code === 0 && size > 0) hist.video = VIDEO_NAME;
+    else {
+      (hist.warnings ??= []).push(v.code !== 0
+        ? `video failed to stop: ${errText(v).slice(0, 200)}`
+        : `video was not saved: ${VIDEO_NAME} is missing or empty`);
+    }
+  }
+  pwRun(meta.session, ["close"]);
+}
+
+function evidenceLine(dir, hist) {
+  const shots = hist.history.filter((s) => s.screenshot).length;
+  const parts = [
+    ...(hist.video ? [path.join(dir, hist.video)] : []),
+    ...(hist.final_screenshot ? [path.join(dir, hist.final_screenshot)] : []),
+    ...(shots ? [`${shots} step screenshots in ${path.join(dir, SCREENSHOTS_DIR)}`] : []),
+  ];
+  const warn = (hist.warnings ?? []).map((w) => `Warning: ${w}\n`).join("");
+  return `${parts.length ? `Evidence: ${parts.join(", ")}\n` : ""}${warn}`;
+}
+
+// ---------- close (coordinator) ----------
+
+// For a worker that returned without finish (out of context, stopped): keep the evidence, close the
+// browser and mark the run stopped. Never a success.
+function cmdClose(opts, rest) {
+  const dir = opts.run ?? die("close: --run DIR is required");
+  const reason = rest.join(" ").trim() || "the worker stopped without finishing";
+  const { meta, hist } = loadRun(dir);
+  if (hist.finished) die("this run is already finished");
+  wrapUp(dir, meta, hist);
+  hist.success = false;
+  hist.stopped = true;
+  hist.answer = `stopped: ${reason}`;
+  hist.finished = new Date().toISOString();
+  save(dir, hist);
+  process.stdout.write(`Result: stop\nAnswer: ${hist.answer}\nSteps: ${hist.steps}\nHistory: ${path.join(dir, "history.json")}\n${evidenceLine(dir, hist)}`);
 }
 
 // ---------- main ----------
@@ -423,7 +514,7 @@ function parse(argv) {
       rest.push(...argv.slice(i + 1));
       break;
     }
-    if (a === "--headed") opts.headed = true;
+    if (a === "--headed" || a === "--video" || a === "--screenshot") opts[a.slice(2)] = true;
     else if (a.startsWith("--") && flagsWithValue.has(a.slice(2))) {
       const k = a.slice(2);
       const v = argv[++i];
@@ -440,4 +531,5 @@ const { opts, rest } = parse(argv);
 if (sub === "init") cmdInit(opts);
 else if (sub === "act") cmdAct(opts, rest);
 else if (sub === "finish") cmdFinish(opts, rest);
-else die("usage: pw-step.mjs init|act|finish (see the header of this file)");
+else if (sub === "close") cmdClose(opts, rest);
+else die("usage: pw-step.mjs init|act|finish|close (see the header of this file)");

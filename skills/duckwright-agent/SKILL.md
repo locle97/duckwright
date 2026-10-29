@@ -1,6 +1,6 @@
 ---
 name: duckwright-agent
-description: Run Duckwright plans and task files without the Duckwright app, using only Claude Code and playwright-cli. A coordinator (this skill) dispatches one fresh worker subagent per task; each worker drives a real browser through a guarded runner (allow-listed commands, verified `expect` checks, a saved state file for sign-in), and the coordinator triages failures, writes a test report, and turns passing runs into Playwright spec files. Use when the user wants to run or test a plan, task file or feature in a browser where the Duckwright CLI or app cannot be installed or used (company policy, no third-party apps), or invokes /duckwright-agent.
+description: Run Duckwright plans and task files without the Duckwright app, using only Claude Code and playwright-cli. A coordinator (this skill) dispatches one fresh worker subagent per task; each worker drives a real browser through a guarded runner (allow-listed commands, verified `expect` checks, a saved state file for sign-in, optional video and per-step screenshots as evidence), and the coordinator triages failures, writes a final test report (Markdown, plus HTML that plays the videos), and turns passing runs into Playwright spec files. Use when the user wants to run or test a plan, task file or feature in a browser where the Duckwright CLI or app cannot be installed or used (company policy, no third-party apps), or invokes /duckwright-agent.
 ---
 
 # Running Duckwright tasks with Claude Code alone
@@ -20,6 +20,8 @@ browser only through `scripts/pw-step.mjs`, which does what Duckwright's harness
 | Max steps, browser always closed | `max-steps` from the task; `finish` closes the browser |
 | Claude has no shell | worker agent: Bash blocked except `pw-step.mjs` (the plugin's `hooks/hooks.json` runs `bash-guard.mjs` for that agent only) |
 | Passwords never seen by the model | sign-in only through a saved **state file**; credentials are never typed |
+| `--video`, `--screenshot` evidence | `init --video` → `video.webm`, `init --screenshot` → `screenshots/step-NNN.png`; `final.png` always |
+| The run report | `scripts/report.mjs` writes `report.md` and `report.html` from the run folders |
 
 `{{SKILLS}}` below is the folder that holds this skill's siblings: the parent of this skill's folder.
 The task files, `plan.json` and environment files are exactly the formats of `duckwright-tasks`; write
@@ -66,28 +68,41 @@ here: put it in `skipped` and say so, because the model must never see a credent
 - The environment is not production unless the person said so, and writes happen only where the testing
   map (`.duckwright/testing-map.md`) lists `write-envs`.
 - Say how many workers will run and the parallel limit (default 3). Ask only if something blocks.
+- Evidence: record video when the person asks for it ("record", "video", "evidence", "proof") or a task
+  sets `video: true`; per-step screenshots when they ask for them or a task sets `screenshot: true`.
+  Otherwise ask once whether to record video, defaulting to yes for a plan someone else will review.
+  A video can show whatever the app displays (names, emails, data): say so when it is shared.
 
 ## 3. Choose the run folders
 
 Plan task `NN-name.md` runs in `<plan folder>/NN-name/` (replacing its previous run, as Duckwright does).
 A single task runs in `runs/<YYYYMMDD-HHMMSS>-<label>/`. The folder is created by `pw-step.mjs init`.
 
+What a run folder holds, in Duckwright's layout: `history.json`, `meta.json`, `task.txt`,
+`snapshots/NNN.yml`, `final.png` (the page when the run ended), and with evidence on `video.webm` (the
+whole run, from the first page to `finish`) and `screenshots/step-NNN.png` (after every step). The
+video and screenshots are referenced from `history.json` (`video`, `history[].screenshot`), and evidence
+that could not be saved is listed in its `warnings[]`; that never fails the run.
+
 ## 4. Dispatch the workers
 
 For each task, launch one `Agent` call (`subagent_type: duckwright:duckwright-worker`) with the prompt from
 `references/worker-prompt.md`, filled in: the absolute path of `pw-step.mjs`, the run folder, the task
-file path, the allowed origin(s), and nothing else about the app. Do not paste the environment file or
+file path, the allowed origin(s), the evidence flags (`--video`, `--screenshot`, or nothing), and
+nothing else about the app. Do not paste the environment file or
 guess page details into the prompt: `init` prints the task and the worker reads the environment file
 itself, so there is one source of truth.
 
 - Launch up to the parallel limit in one turn (several `Agent` calls in a single message), then wait for
   them. Tasks are independent: each starts a fresh browser from its state file. A task that depends on
   another one having run is a task bug.
-- A worker returns the last lines of `finish` (Result, Answer, Steps, History) or says why it stopped.
+- A worker returns the last lines of `finish` (Result, Answer, Steps, History, Evidence) or says why it
+  stopped.
   Trust the `history.json` over its words: `Result` there is `success` only if a check passed.
-- A worker that returns without calling `finish` ran out of context or was stopped: read its
-  `history.json`, treat the run as `stop`, and close its browser:
-  `playwright-cli -s=<session from meta.json> close`.
+- A worker that returns without calling `finish` ran out of context or was stopped: close its run with
+  `node <runner> close --run <run folder> "<why>"`. That saves `final.png`, finalizes the video, closes
+  the browser and marks the run `stop` in `history.json` (never a success). Never leave a run open: an
+  unfinished video is not playable.
 
 ## 5. Triage
 
@@ -101,17 +116,32 @@ For each failed or stopped run read the brief, not the raw history:
   the check to make it pass. Report it with the run folder and failing step; ask when the spec does not
   say what is right.
 
-## 6. Report
+## 6. Final report
 
-Write `<plan folder>/report.md` (or `runs/<id>-report.md`) and show the same in your reply:
+When every task has finished (or been closed), always write the final report. Generate it, never
+hand-write the verdicts:
 
-- the table: task, verdict (`pass`, `fail`, `stop`, `skip`), steps, run folder
-- failures: classification, failing step, what the page showed, evidence (`snapshots/NNN.yml`,
-  `final.png`)
-- app bugs found; assumptions; skipped scenarios and why; notes for a person (state files to refresh)
-- `notes[]` from `plan.json` that apply
+1. Write your triage to a scratch Markdown file: for each failed or stopped task the classification
+   (task bug, environment problem, possible app bug) and what the page showed; app bugs found;
+   assumptions; re-runs you did; what a person must do (state files to refresh, seed data); the spec
+   files from step 7, once written.
+2. Run:
+   ```
+   node {{SKILLS}}/duckwright-agent/scripts/report.mjs <plan folder> --notes <triage file> --html
+   ```
+   For a single task or loose run folders: `report.mjs <run folder>... -o runs/<id>-report.md`. It reads
+   each `history.json` and writes `report.md` plus `report.html` beside it: the summary line (pass, fail,
+   stop, not run, skipped), the table (task, verdict, steps, time, evidence, run folder), each failure
+   with its failing step and last page, the verified `expect` checks of each pass, links to `video.webm`,
+   `final.png` and the screenshots, evidence warnings, your triage and `plan.json`'s `notes[]`.
+   `report.html` plays each video and shows the screenshots; it links to the run folders, so keep it next
+   to them (share the plan folder, not the HTML file alone).
+3. Re-run it after step 7 so the triage lists the spec files.
+4. In your reply: the summary line, the table, the failures and app bugs, and the paths of `report.md`,
+   `report.html` and the videos. A task listed as `not run` means a worker was never dispatched for it:
+   say why.
 
-No cost line: Claude Code does not expose per-subagent spend; say so.
+No cost line: Claude Code does not expose per-subagent spend; the report says so.
 
 ## 7. Playwright specs
 
@@ -132,7 +162,8 @@ the spec files in the report, and say that CI needs the state files or its own a
 
 - Run `playwright-cli` yourself against the app for a task: only a worker, through `pw-step.mjs`, so every
   action is allow-listed and recorded.
-- Edit `history.json` or a run folder by hand, or hand-write a verdict.
+- Edit `history.json`, a run folder or a generated report's verdicts by hand, or hand-write a verdict.
+- Delete or trim a video or screenshot to hide a failure; evidence goes in the report as it was recorded.
 - Read, print or copy a state file, a password, a token or a cookie; put one in a task, prompt or report.
 - Loosen an `expect` to turn a failure into a pass; skip, disable or quarantine a test.
 - Run against production, or write data on an environment the map does not list in `write-envs`.
