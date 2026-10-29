@@ -20,6 +20,9 @@ cmd=$1; shift
 case "$cmd" in
   snapshot) for a in "$@"; do case $a in --filename=*) printf -- '- button "Go" [ref=e1]\\n' > "\${a#--filename=}";; esac; done;;
   generate-locator) echo "getByRole('button', { name: 'Go' })";;
+  video-start) echo "$1" > .video-path;;
+  video-stop) printf webm > "$(cat .video-path)"; rm .video-path;;
+  screenshot) for a in "$@"; do case $a in --filename=*) printf 'png' > "\${a#--filename=}";; esac; done;;
   run-code) case "$1" in *isVisible*) echo true;; *textContent*) echo '"Go"';; *title*) echo '{"url":"https://x.test/","title":"X"}';; *) echo '"https://x.test/"';; esac;;
   click) printf '### Page\\n- Page URL: https://x.test/\\n- Page Title: X\\n### Ran Playwright code\\n\`\`\`js\\nawait page.getByRole('"'"'button'"'"', { name: '"'"'Go'"'"' }).click();\\n\`\`\`\\n';;
   goto) printf '### Page\\n- Page URL: %s\\n- Page Title: X\\n### Ran Playwright code\\n\`\`\`js\\nawait page.goto('"'"'%s'"'"');\\n\`\`\`\\n' "$1" "$1";;
@@ -128,4 +131,65 @@ test("duckwright_plugin_manifest_is_consistent", () => {
   const agent = fs.readFileSync(path.join(root, "agents/duckwright-worker.md"), "utf8");
   assert.match(agent, /^---\nname: duckwright-worker\n/);
   assert.ok(!/^hooks:/m.test(agent), "plugin agents cannot carry hooks: they live in hooks/hooks.json");
+});
+
+test("agent_skill_records_video_and_screenshots_as_evidence", { skip: !posix }, () => {
+  const { dir, step, run } = setup();
+  fs.writeFileSync(path.join(dir, "vtask.md"), "---\nvideo: true\n---\nClick Go.\n");
+  const init = step("init", "--run", "r1", "--task", "vtask.md", "--screenshot");
+  assert.equal(init.status, 0, init.stderr);
+  assert.match(init.stdout, /evidence: video recording, step screenshots on/);
+  assert.equal(run("click", "e1").status, 0);
+  assert.equal(run("expect", "visible", "e1").status, 0);
+  const done = step("finish", "--run", "r1", "success", "clicked");
+  assert.equal(done.status, 0, done.stdout + done.stderr);
+  assert.match(done.stdout, /Evidence: .*video\.webm, .*final\.png, 2 step screenshots/);
+
+  const hist = JSON.parse(fs.readFileSync(path.join(dir, "r1/history.json"), "utf8"));
+  assert.equal(hist.video, "video.webm");
+  assert.equal(hist.final_screenshot, "final.png");
+  assert.equal(hist.history[0].screenshot, "screenshots/step-001.png");
+  assert.ok(fs.existsSync(path.join(dir, "r1/screenshots/step-002.png")));
+
+  const bad = path.join(dir, "bad.md");
+  fs.writeFileSync(bad, "---\nvideo: maybe\n---\nx\n");
+  const refused = step("init", "--run", "r2", "--task", "bad.md");
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /video must be true or false/);
+});
+
+test("agent_skill_close_stops_an_unfinished_run_and_report_lists_it", { skip: !posix }, () => {
+  const { dir, step } = setup();
+  const plan = path.join(dir, "tasks/p");
+  fs.mkdirSync(plan, { recursive: true });
+  fs.writeFileSync(path.join(plan, "01-go.md"), "---\nvideo: true\n---\nClick Go.\n");
+  fs.writeFileSync(path.join(plan, "02-later.md"), "Later.\n");
+  fs.writeFileSync(path.join(plan, "plan.json"), JSON.stringify({
+    version: 1, name: "p", notes: ["seed the db"],
+    skipped: [{ id: "S1", title: "Two users", reason: "needs two browsers" }],
+    tasks: [{ file: "01-go.md", id: "T1", title: "Go" }, { file: "02-later.md", id: "T2", title: "Later" }],
+  }));
+  assert.equal(step("init", "--run", "tasks/p/01-go", "--task", "tasks/p/01-go.md").status, 0);
+  assert.equal(step("act", "--run", "tasks/p/01-go", "--", "click", "e1").status, 0);
+  const closed = step("close", "--run", "tasks/p/01-go", "worker ran out of context");
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.match(closed.stdout, /Result: stop/);
+  const hist = JSON.parse(fs.readFileSync(path.join(plan, "01-go/history.json"), "utf8"));
+  assert.equal(hist.success, false);
+  assert.equal(hist.stopped, true);
+  assert.equal(hist.video, "video.webm");
+
+  fs.writeFileSync(path.join(dir, "triage.md"), "T1: environment problem.\n");
+  const rep = spawnSync("node", [path.join(scripts, "report.mjs"), "tasks/p", "--notes", "triage.md", "--html"], { cwd: dir, encoding: "utf8" });
+  assert.equal(rep.status, 0, rep.stderr);
+  const md = fs.readFileSync(path.join(plan, "report.md"), "utf8");
+  assert.match(md, /2 tasks · 0 pass · 0 fail · 1 stop · 1 not run · 1 skipped/);
+  assert.match(md, /\| T1 Go \| \*\*stop\*\* \| 1\/25 \|.*\[video\]\(01-go\/video\.webm\)/);
+  assert.match(md, /\| T2 Later \| \*\*not run\*\*/);
+  assert.match(md, /\| S1 Two users \| \*\*skip\*\* \|.*needs two browsers/);
+  assert.match(md, /Answer: stopped: worker ran out of context/);
+  assert.match(md, /## Triage\n\nT1: environment problem\./);
+  assert.match(md, /- seed the db/);
+  const html = fs.readFileSync(path.join(plan, "report.html"), "utf8");
+  assert.match(html, /<video controls preload="metadata" src="01-go\/video\.webm"><\/video>/);
 });
