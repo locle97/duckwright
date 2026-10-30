@@ -47,6 +47,8 @@ const WARNINGS = [
 ];
 // {{<id>.username}} and {{<id>.password}}: README "Accounts"; the id rule matches src/accounts/store.ts ID_RE.
 const ACCOUNT_PLACEHOLDER = /\{\{[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?\.(username|password)\}\}/g;
+// {{BASE_URL}}: the run fills in its environment's base URL (src/baseUrl.ts), so a task runs on any environment.
+const BASE_URL = "{{BASE_URL}}";
 const SECRETS = [
   /\b(pass(word|wd)?|secret|token|api[-_ ]?key|otp|pin)\b\s*[:=]\s*\S+/i,
   /\bpass(word|wd)?\s+(is\s+)?["'`][^"'`]+["'`]/i,
@@ -200,13 +202,20 @@ function lintBody(file, lines, start, ctx) {
   if (!text.trim()) { report(file, start, "error", "no task text"); return; }
   lines.forEach((raw, i) => {
     const n = start + i;
-    // Environment account placeholders are real values the run fills in, not unfinished text.
-    const l = raw.replace(ACCOUNT_PLACEHOLDER, "account value");
+    // Environment account and base URL placeholders are real values the run fills in, not unfinished text.
+    const l = raw.replace(ACCOUNT_PLACEHOLDER, "account value")
+      .replaceAll(BASE_URL, ctx.base ? ctx.base.href.replace(/\/+$/, "") : "the base URL");
+    if (raw.includes(BASE_URL) && !ctx.base) report(file, n, "warn", `${BASE_URL} needs an env: with a base URL (the environment file's Base URL, or the Environments page); duckwright check verifies it`);
     for (const [re, msg] of ERRORS) if (re.test(l)) report(file, n, "error", msg);
     for (const [re, msg] of WARNINGS) if (re.test(l)) report(file, n, "warn", msg);
     if (SECRETS.some((re) => re.test(l)) && !allowLiteral(l)) report(file, n, "error", "looks like a secret; sign in with {{<id>.password}} from an environment account or a state file, or list a seed-only value in the map's allow-literals");
     for (const t of MAP.terms) if (l.toLowerCase().includes(t.toLowerCase())) report(file, n, "warn", `mentions off-limits "${t}": reword, or confirm with the user that the step only looks at it`);
     if (API_CHECK.test(l) && ctx.network === "false") report(file, n, "error", "API check with network: false; expect-request needs network capture");
+    for (const m of raw.matchAll(/https?:\/\/[^\s"'`)>]+/g)) {
+      let u;
+      try { u = new URL(m[0].replace(/[.,;:]+$/, "")); } catch { continue; }
+      if (ctx.base && u.host === ctx.base.host) report(file, n, "warn", `write ${BASE_URL} instead of the environment's base URL ${u.origin}, so the task runs on any environment`);
+    }
     for (const m of l.matchAll(/https?:\/\/[^\s"'`)>]+/g)) {
       let u;
       try { u = new URL(m[0].replace(/[.,;:]+$/, "")); } catch { continue; }

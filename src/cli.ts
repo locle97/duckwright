@@ -7,6 +7,7 @@ import { checkTasks } from "./check.ts";
 import type { RunArgs } from "./args.ts";
 import { initConfig, loadConfig, runSettings } from "./config.ts";
 import type { GlobalConfig } from "./config.ts";
+import { baseUrlProblem } from "./baseUrl.ts";
 import { EnvError, envLabel, isEnvPath, loadEnvironment } from "./environment.ts";
 import { ExportError, exportRun, loadHistory } from "./export.ts";
 import { EXPLORE_MAX_STEPS, exploreTask } from "./explore/task.ts";
@@ -180,6 +181,8 @@ function preflightArgs(deps: CliDeps, args: RunArgs, { cwd = process.cwd() } = {
   if (err) return err;
   const accounts = accountsProblem(args, cwd);
   if (accounts) return accounts;
+  const base = baseUrlProblem(args.task ?? "", args.env === null || args.env === "none" ? null : args.env, cwd);
+  if (base) return base;
   if (args.jev && !deps.env.TYPESAFE_API_KEY?.trim()) return "TYPESAFE_API_KEY is not set (needed by --jev)";
   return null;
 }

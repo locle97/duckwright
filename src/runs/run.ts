@@ -12,6 +12,7 @@ import { Brain } from "../brain.ts";
 import { RunControl } from "../control.ts";
 import { RunEvents } from "../events.ts";
 import type { ExportOutcome, RunOutcome } from "../events.ts";
+import { envBaseUrl, fillBaseUrl, usesBaseUrl } from "../baseUrl.ts";
 import { EnvError, loadEnvironment } from "../environment.ts";
 import { HybridBrain, JevAuthError, JevClient, fetchTransport } from "../jev.ts";
 import type { JevTransport } from "../jev.ts";
@@ -205,7 +206,8 @@ export function startRun(spec: RunSpec, deps: RunDeps): RunHandle {
 async function execute(
   spec: RunSpec, deps: RunDeps, workdir: string, events: RunEvents, control: RunControl, signal: AbortSignal,
 ): Promise<RunOutcome> {
-  const { task, taskFile, args } = spec;
+  const { taskFile, args } = spec;
+  let task = spec.task;
   const historyPath = path.join(workdir, "history.json");
   const collected: StepRecord[] = [];
   let agent: AgentLike | null = null;
@@ -218,6 +220,7 @@ async function execute(
   try {
     const env = args.env ? loadEnvironment(args.env) : null;
     if (env) envRecord = { name: env.name, path: env.path };
+    task = fillBaseUrl(task, env?.path ?? null, env && usesBaseUrl(task) ? envBaseUrl(env.name, deps.cwd ?? process.cwd(), env.text) : null);
     events.subscribe((e) => { if (e.type === "step:end") collected.push(e.record); });
     const modeMd = { full: deps.prompts.snapshotFull, grep: deps.prompts.snapshotGrep, hybrid: deps.prompts.snapshotHybrid }[args.snapshot];
     const twofa = createTwoFactor({

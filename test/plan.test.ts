@@ -164,3 +164,23 @@ test("write_plan_env_path_relative_to_folder", () => {
     process.chdir(prev);
   }
 });
+
+test("write_plan_writes_urls_under_the_env_base_url_as_the_placeholder", () => {
+  const tmp = tmpDir();
+  const prev = process.cwd();
+  process.chdir(tmp);
+  try {
+    fs.mkdirSync("environments");
+    fs.writeFileSync("environments/local.md", "## Base URL\n\nhttp://localhost:8765\n");
+    const doc = { ...DOC, tasks: [{ ...DOC.tasks[0]!, steps: ["Open http://localhost:8765/login", "Open https://sso.example.com/"] }] };
+    const plan = writePlan(doc, "qa.md", "tasks", "local");
+    assert.equal(fs.readFileSync(plan.setupPath!, "utf8"), "Open {{BASE_URL}} and log in as qa / secret.\n");
+    const text = fs.readFileSync(plan.tasks[0]!.path, "utf8");
+    assert.ok(text.includes("1. Open {{BASE_URL}}/login\n2. Open https://sso.example.com/\n"), text);
+    // Without an environment the URLs are kept as written.
+    const plain = writePlan(doc, "qa.md", "tasks");
+    assert.ok(fs.readFileSync(plain.tasks[0]!.path, "utf8").includes("1. Open http://localhost:8765/login\n"));
+  } finally {
+    process.chdir(prev);
+  }
+});

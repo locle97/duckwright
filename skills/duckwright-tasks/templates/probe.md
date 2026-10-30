@@ -11,10 +11,10 @@ Investigation only. You are finding out how this app behaves today, not testing 
 pass or a fail.
 
 <!-- with an account: -->
-Open <full URL of the sign-in page>. Fill the username field with {{<account id>.username}} and the
+Open {{BASE_URL}}/<sign-in path>. Fill the username field with {{<account id>.username}} and the
 password field with {{<account id>.password}}, then submit. If the sign-in fails, finish with done failure
 "login failed".
-Open <full URL of the area>.
+Open {{BASE_URL}}/<area path>.
 <!-- with a state file instead: -->
 If the page shows the sign-in form, finish with done failure "state expired".
 

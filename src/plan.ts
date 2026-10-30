@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { envBaseUrl, toBaseUrl } from "./baseUrl.ts";
 import { isEnvName, resolveEnv } from "./environment.ts";
 import { resolvePath } from "./paths.ts";
 import { runProcess } from "./proc.ts";
@@ -220,15 +221,18 @@ export function writePlan(doc: PlanDoc, planFile: string, root = "tasks", env: s
       envValue = !rel.includes("/") && !rel.includes(path.sep) && !/\.md$/i.test(rel) ? `./${rel}` : rel;
     }
   }
+  // URLs under the environment's base URL become {{BASE_URL}}, so the plan runs on any environment.
+  const base = env !== null ? envBaseUrl(env) : null;
+  const portable = (text: string): string => (base !== null ? toBaseUrl(text, base) : text);
   if (setup !== null) {
     fs.mkdirSync(path.join(folder, path.dirname(setup)), { recursive: true });
-    fs.writeFileSync(path.join(folder, setup), doc.setup + "\n");
+    fs.writeFileSync(path.join(folder, setup), portable(doc.setup) + "\n");
   }
   const width = Math.max(2, String(doc.tasks.length).length);
   const tasks: PlanEntry[] = doc.tasks.map((s, i) => {
     // The number keeps names unique and the folder's order the plan's order.
     const file = `${String(i + 1).padStart(width, "0")}-${slugify(s.title) || "scenario"}.md`;
-    fs.writeFileSync(path.join(folder, file), taskFileText(s, planFile, setup, envValue));
+    fs.writeFileSync(path.join(folder, file), portable(taskFileText(s, planFile, setup, envValue)));
     return { file, id: s.id, title: s.title };
   });
   const manifest: Manifest = { version: 1, name, source: planFile, setup, notes: doc.notes, skipped: doc.skipped, tasks };

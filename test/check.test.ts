@@ -29,6 +29,20 @@ test("check_ok_file_with_env", () => {
   assert.deepEqual(r.findings, []);
 });
 
+test("check_base_url_placeholder_needs_an_env_with_a_base_url", () => {
+  project({
+    "environments/local.md": ENV,
+    "environments/bare.md": "# Bare\n",
+    "a.md": "---\nenv: local\n---\nOpen {{BASE_URL}}/cart.\n",
+    "b.md": "---\nenv: bare\n---\nOpen {{BASE_URL}}/cart.\n",
+    "c.md": "Open {{BASE_URL}}/cart.\n",
+  });
+  const r = checkTasks(["a.md", "b.md", "c.md"]);
+  assert.deepEqual(r.ok, ["a.md"]);
+  assert.match(r.findings[0].message, /^b\.md: the task uses \{\{BASE_URL\}\} but environment 'bare' has no base URL/);
+  assert.match(r.findings[1].message, /^c\.md: the task uses \{\{BASE_URL\}\} but has no environment/);
+});
+
 test("check_reports_front_matter_errors_with_line", () => {
   project({ "t.md": "---\nbogus: 1\n---\nx\n" });
   const r = checkTasks(["t.md"]);

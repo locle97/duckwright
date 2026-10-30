@@ -56,8 +56,9 @@ tasks. Resolve it:
 
 Environment: the task's `env:` (a bare name is `environments/<name>.md` under the Duckwright root; run
 `pw-step.mjs` from that root). Read the environment file whole. Its **Base URL** is the one allowed origin
-for `goto`. A task may sign in only with `state:`; a task that needs a password typed is not runnable
-here: put it in `skipped` and say so, because the model must never see a credential.
+for `goto`, and `init` fills `{{BASE_URL}}` in the task with it, as Duckwright does. A task may sign in
+only with `state:`; a task that needs a password typed is not runnable here: put it in `skipped` and say
+so, because the model must never see a credential.
 
 ## 2. Preflight (no browser yet)
 
