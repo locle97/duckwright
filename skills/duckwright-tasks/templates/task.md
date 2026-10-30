@@ -15,7 +15,7 @@ Preconditions:
 - <who is signed in and how; what data must exist; what the shared setup guarantees>
 
 Steps:
-1. Open <full URL on the env's host>.
+1. Open {{BASE_URL}}/<path>.
 2. <one intent per step; elements named by their visible label in quotes>
 3. <values the user or a cited source gave, never invented ones>
 

@@ -682,3 +682,28 @@ test("start_run_passes_console_errors", async () => {
   assert.equal(seen[0], true);
   assert.notEqual(seen[1], true);
 });
+
+test("run_fills_base_url_from_the_environment", async () => {
+  await inEnvDir(async (dir) => {
+    fs.writeFileSync(path.join(dir, "environments", "local.md"), "## Base URL\n\nhttp://localhost:3000\n");
+    const seen: string[] = [];
+    const s = setup(agentWith(async (opts) => { seen.push(opts.task); return result(true, [rec()]); }), { env: "local" });
+    s.spec.task = "Open {{BASE_URL}}/cart.";
+    const h = startRun(s.spec, s.deps);
+    await h.done;
+    assert.deepEqual(seen, ["Open http://localhost:3000/cart."]);
+    assert.equal(readHistory(h.workdir).task, "Open http://localhost:3000/cart.");
+  });
+});
+
+test("run_with_base_url_and_no_base_url_fails", async () => {
+  await inEnvDir(async () => {
+    let started = false;
+    const s = setup(agentWith(async () => { started = true; return result(true); }), { env: "staging" });
+    s.spec.task = "Open {{BASE_URL}}/cart.";
+    const o = await startRun(s.spec, s.deps).done;
+    assert.equal(started, false);
+    assert.equal(o.status, "fail");
+    assert.match(o.error!, /environment 'staging' has no base URL/);
+  });
+});

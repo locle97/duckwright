@@ -68,7 +68,7 @@ with its log-in accounts (id, label, role, username; never a password). The envi
 
 When the environment has an account for a role, that account is how the role signs in, for probes and
 tasks alike. Do not use or ask for a state file then. In the file's front matter put `env: <name>` and
-`accounts: <id>`, delete the `state:` line, and sign in with a step such as: Open <the sign-in page>.
+`accounts: <id>`, delete the `state:` line, and sign in with a step such as: Open `{{BASE_URL}}/<sign-in path>`.
 Fill the username field with `{{<id>.username}}` and the password field with `{{<id>.password}}`, then
 submit. If the sign-in fails, finish with failure "login failed: <what the page says>". The run types
 the real values; you and the task never see the password. `gate.mjs` then needs no `--state`. For
@@ -97,12 +97,16 @@ Never ask for a password, token or cookie.
 
 ## 4. Plan
 
-Write `tasks/<feature>/test-plan.md` under the Duckwright root: black-box scenarios from the spec
+Write `tasks/<feature>/test-plan.md` under the Duckwright root, with app URLs as `{{BASE_URL}}/<path>`: black-box scenarios from the spec
 (behaviour, contracts, edge cases, errors), plus the pages, routes, endpoints and roles the
 implementation plan says the change touches. Post one line per scenario in the chat. Do not wait for
 approval; the person can reply at any time and you fold it in (step 11).
 
 ## 5. Probe
+
+A probe runs on the environment the person picked in step 3, and its run folder shows that environment's
+URLs. Those are where this run happened, not part of the test: the plan, probes, setup and tasks write
+every URL on the app as `{{BASE_URL}}/<path>` (see `duckwright-tasks` step 4), and a run fills it in.
 
 Close gaps as `{{SKILLS}}/duckwright-tasks/SKILL.md` step 3b says (memory first, ask for intent,
 investigate current behaviour, assume only what fails loudly). Overrides:

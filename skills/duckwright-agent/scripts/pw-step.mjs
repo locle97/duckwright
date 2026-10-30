@@ -150,6 +150,13 @@ function cmdInit(opts) {
       die(`init: --origin '${o}' is not a URL`);
     }
   }
+  // {{BASE_URL}}: the environment file's Base URL (else the first --origin), as Duckwright's run fills it.
+  if (text.includes("{{BASE_URL}}")) {
+    const m = envPath && /base url[^\n]*\n*\s*(?:[-*]\s*)?<?(https?:\/\/[^\s)>]+)/i.exec(fs.readFileSync(envPath, "utf8"));
+    const base = m ? m[1] : (opts.origin ?? [])[0];
+    if (!base) die(`${taskFile}: the task uses {{BASE_URL}} but has no environment with a Base URL (or --origin)`);
+    text = text.split("{{BASE_URL}}").join(base.replace(/\/+$/, ""));
+  }
   const maxSteps = fm["max-steps"] ? Number(fm["max-steps"]) : 25;
   if (!Number.isInteger(maxSteps) || maxSteps < 1) die(`${taskFile}: max-steps must be a whole number of at least 1`);
   const flag = (key) => {

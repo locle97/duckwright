@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+import { baseUrlProblem } from "./baseUrl.ts";
 import { ENV_MAX_BYTES, ENV_NONE, EnvError, envLabel, loadEnvironment } from "./environment.ts";
 import { loadRunAccounts } from "./accounts/runAccounts.ts";
 import { AccountError, AccountStore } from "./accounts/store.ts";
@@ -18,7 +19,8 @@ export interface CheckResult {
 
 /**
  * Check task files the way a run would load them, without a browser, Claude or any CLI on the PATH:
- * front matter, task text, the `setup:` file, and the `env:` file (read from `cwd`, as a run does).
+ * front matter, task text, the `setup:` file, the `env:` file (read from `cwd`, as a run does), and a
+ * base URL for `{{BASE_URL}}`.
  * Each folder is expanded like `-f`. A missing `state:` file is a warning: people often git-ignore it,
  * but a run fails its preflight without it.
  */
@@ -30,7 +32,7 @@ export function checkTasks(paths: string[], cwd = process.cwd()): CheckResult {
       add("error", p.message);
       continue;
     }
-    let before = result.findings.length;
+    const before = result.findings.length;
     try {
       const tf = loadTaskFile(p);
       if (tf.settings.state && !isFile(tf.settings.state)) {
@@ -47,6 +49,11 @@ export function checkTasks(paths: string[], cwd = process.cwd()): CheckResult {
           if (!(e instanceof EnvError)) throw e;
           add("error", `${p}: ${e.message}`);
         }
+      }
+      const env = tf.settings.env && tf.settings.env !== ENV_NONE ? tf.settings.env : null;
+      if (!result.findings.slice(before).some((f) => f.level === "error")) {
+        const base = baseUrlProblem(tf.task, env, cwd);
+        if (base) add("error", `${p}: ${base}`);
       }
       const pinned = tf.settings.accounts;
       if (pinned && pinned.length > 0) {

@@ -90,3 +90,22 @@ test("skill_linter_accepts_account_placeholders_and_still_flags_others", () => {
   assert.equal(placeholders.length, 1, r.stdout);
   assert.match(placeholders[0], /02-todo\.md/);
 });
+
+test("skill_linter_accepts_base_url_and_flags_a_written_base_url", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dw-lint-"));
+  try {
+    fs.mkdirSync(path.join(dir, "tasks/x"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "environments"));
+    fs.writeFileSync(path.join(dir, "environments/local.md"), "## Base URL\n\nhttp://localhost:9091\n");
+    const task = (body: string) => `---\nenv: local\nmax-steps: 12\n---\nSteps:\n${body}\n\nExpected results:\n- The heading "Recipes" is visible.\n`;
+    fs.writeFileSync(path.join(dir, "tasks/x/01-placeholder.md"), task("1. Open {{BASE_URL}}/recipes."));
+    fs.writeFileSync(path.join(dir, "tasks/x/02-written.md"), task("1. Open http://localhost:9091/recipes."));
+    const r = spawnSync(process.execPath, [lintPath, "--root", dir, path.join(dir, "tasks/x")], { encoding: "utf8" });
+    assert.ok(!r.stdout.includes("01-placeholder.md"), r.stdout);
+    const written = r.stdout.split("\n").filter((l) => l.includes("write {{BASE_URL}}"));
+    assert.equal(written.length, 1, r.stdout);
+    assert.match(written[0], /02-written\.md/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -14,7 +14,7 @@ command and key lists).
   check, uncheck, dblclick, hover, drag, tab-new, tab-select, tab-close, go-back, screenshot, expect,
   expect-request, request, twofa, note (explore only), done.
   Not available: `upload` (no file uploads), `dialog-accept` / `dialog-dismiss` (native confirm/alert),
-  `reload` (write "Open <url> again"), `eval`, `find`, any wait command.
+  `reload` (write "Open {{BASE_URL}}/<path> again"), `eval`, `find`, any wait command.
 - Picks elements by ref from an **accessibility snapshot** (`prompts/system.md`, Element refs). Name
   elements by visible label or role. CSS selectors and test ids in steps do not help it.
 - Gets the env file's text in every step's prompt and treats it as trusted background; **the task wins**
