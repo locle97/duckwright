@@ -1,7 +1,8 @@
 name: Release
 
 # Publishing a GitHub release tagged vX.Y.Z sets package.json to X.Y.Z, publishes it to npm,
-# then commits the version bump to the default branch.
+# then commits the version bump to the default branch. `npm version` also syncs
+# .claude-plugin/plugin.json through the "version" script in package.json.
 on:
   release:
     types: [published]

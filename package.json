@@ -25,7 +25,8 @@
     "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "test": "npm run typecheck && node --test --test-timeout=60000 \"test/**/*.test.ts\"",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "version": "node scripts/sync_plugin_version.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
